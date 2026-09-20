@@ -872,8 +872,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
     quoteValue: Boolean = true,
   ): String {
     val lines = text.replace("\r\n", "\n").split("\n").toMutableList()
-    val emptyMap = Regex("""^(\s*)${Regex.escape(section)}\s*:\s*\{\s*}\s*(?:#.*)?$""")
-    val emptyMapIndex = lines.indexOfFirst { emptyMap.matches(it) }
+    // Do not use a dynamically-built regex for the "{}" YAML form here.
+    // This runs during engine startup; one malformed regex would prevent DSH
+    // from booting at all. Section names are internal constants, so a simple
+    // comment-stripped scalar comparison is both safer and clearer.
+    val emptyMapIndex = lines.indexOfFirst { line ->
+      line.substringBefore('#').trim() == "$section: {}"
+    }
     if (emptyMapIndex >= 0) {
       val indent = lines[emptyMapIndex].takeWhile { it.isWhitespace() }
       lines[emptyMapIndex] = indent + section + ":"
