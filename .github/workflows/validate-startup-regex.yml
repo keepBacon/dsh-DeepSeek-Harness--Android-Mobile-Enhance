@@ -29,3 +29,5 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:compileDebugKotlin --no-daemon
+
+# rerun: assertion-fix
