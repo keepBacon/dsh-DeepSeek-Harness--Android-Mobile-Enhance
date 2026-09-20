@@ -480,7 +480,16 @@ class SkillManager(
     val temp = File(file.parentFile, ".${file.name}.name-${UUID.randomUUID()}.tmp")
     try {
       temp.writeText(updated)
-      move(temp.toPath(), file.toPath())
+      try {
+        Files.move(
+          temp.toPath(),
+          file.toPath(),
+          StandardCopyOption.ATOMIC_MOVE,
+          StandardCopyOption.REPLACE_EXISTING,
+        )
+      } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+        Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+      }
     } finally {
       try { Files.deleteIfExists(temp.toPath()) } catch (_: Throwable) {}
     }
