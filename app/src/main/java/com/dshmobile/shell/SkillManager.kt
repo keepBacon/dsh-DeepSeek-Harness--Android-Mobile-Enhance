@@ -42,6 +42,7 @@ class SkillManager(
 
   private data class Metadata(
     val name: String,
+    val originalName: String,
     val description: String,
     val userInvocable: Boolean,
     val modelInvocable: Boolean,
@@ -56,6 +57,7 @@ class SkillManager(
   private data class Discovery(
     val candidates: List<Candidate>,
     val duplicatesSkipped: Int,
+    val namesNormalized: Int = 0,
   )
 
   private data class ReconcileResult(
@@ -69,6 +71,7 @@ class SkillManager(
   fun listJson(): String {
     return try {
       val root = ensureRoot()
+      val repairedNames = repairLegacySkillNames(root)
       val reconciled = reconcileExistingDuplicates(root)
       val rows = JSONArray()
       root.listFiles()
@@ -108,6 +111,7 @@ class SkillManager(
         .put("skills", rows)
         .put("duplicatesQuarantined", reconciled.moved)
         .put("duplicateBackupDir", reconciled.backupDir?.absolutePath)
+        .put("namesNormalized", repairedNames)
         .toString()
     } catch (t: Throwable) {
       errorJson(t)
@@ -162,7 +166,11 @@ class SkillManager(
           source.outputStream().use { output -> copyWithLimit(input, output, MAX_FLAT_SKILL_BYTES) }
         } ?: throw IOException("无法读取所选 Skill 文件")
         val metadata = parseMetadata(source)
-        Discovery(listOf(Candidate(metadata, source, false)), 0)
+        Discovery(
+          listOf(Candidate(metadata, source, false)),
+          duplicatesSkipped = 0,
+          namesNormalized = if (metadata.originalName != metadata.name) 1 else 0,
+        )
       }
 
       if (discovery.candidates.isEmpty()) throw IOException("没有找到有效的 Skill")
@@ -173,12 +181,14 @@ class SkillManager(
         .put("ok", true)
         .put("imported", JSONArray(installed))
         .put("duplicatesSkipped", discovery.duplicatesSkipped)
+        .put("namesNormalized", discovery.namesNormalized)
         .put("duplicatesQuarantined", reconciled.moved)
         .put("duplicateBackupDir", reconciled.backupDir?.absolutePath)
         .put(
           "message",
           buildString {
             append("已安装 ${installed.size} 个 Skill")
+            if (discovery.namesNormalized > 0) append("，已规范化 ${discovery.namesNormalized} 个旧式 Skill 名")
             if (discovery.duplicatesSkipped > 0) append("，已自动合并 ${discovery.duplicatesSkipped} 个重复 Skill 名")
             if (reconciled.moved > 0) append("，并备份隔离 ${reconciled.moved} 个旧重复项")
           },
@@ -220,11 +230,14 @@ class SkillManager(
       if (candidate.directoryBundle) {
         val incoming = File(root, ".incoming-$name-${UUID.randomUUID()}")
         copyTreeNoFollow(candidate.source.toPath(), incoming.toPath())
-        parseMetadata(File(incoming, "SKILL.md"))
+        val incomingSkill = File(incoming, "SKILL.md")
+        rewriteSkillName(incomingSkill, name)
+        parseMetadata(incomingSkill)
         replaceTarget(root, directoryTarget, fileTarget, incoming)
       } else {
         val incoming = File(root, ".incoming-$name-${UUID.randomUUID()}.md")
         candidate.source.copyTo(incoming, overwrite = true)
+        rewriteSkillName(incoming, name)
         parseMetadata(incoming)
         replaceTarget(root, fileTarget, directoryTarget, incoming)
       }
@@ -313,6 +326,7 @@ class SkillManager(
     return Discovery(
       candidates = selected,
       duplicatesSkipped = (raw.size - selected.size).coerceAtLeast(0),
+      namesNormalized = raw.count { it.metadata.originalName != it.metadata.name },
     )
   }
 
@@ -398,6 +412,80 @@ class SkillManager(
     return ReconcileResult(moved = moved, backupDir = backupRoot.takeIf { moved > 0 })
   }
 
+  /**
+   * Repair legacy frontmatter names such as read_data -> read-data in place.
+   * Storage entries are not deleted or replaced; only the name field is
+   * canonicalized, then normal duplicate reconciliation handles collisions.
+   */
+  private fun repairLegacySkillNames(root: File): Int {
+    var repaired = 0
+    root.listFiles()
+      ?.filter { !it.name.startsWith(".") }
+      ?.forEach { entry ->
+        try {
+          val skillFile = when {
+            entry.isDirectory -> File(entry, "SKILL.md").takeIf { it.isFile }
+            entry.isFile && entry.extension.equals("md", ignoreCase = true) -> entry
+            else -> null
+          } ?: return@forEach
+          val metadata = parseMetadata(skillFile)
+          if (metadata.originalName != metadata.name) {
+            rewriteSkillName(skillFile, metadata.name)
+            repaired++
+          }
+        } catch (_: Throwable) {
+          // Truly invalid/non-ASCII names remain visible as invalid instead of
+          // being guessed into a potentially wrong identity.
+        }
+      }
+    return repaired
+  }
+
+  /**
+   * Convert common legacy Skill identifiers to the DSH kebab-case contract.
+   * Underscores, spaces, dots and other ASCII punctuation collapse to '-'.
+   * Non-ASCII identifiers are not transliterated because doing so can silently
+   * merge unrelated Skills.
+   */
+  private fun normalizeSkillName(raw: String): String {
+    val trimmed = raw.trim().lowercase(java.util.Locale.ROOT)
+    if (validName(trimmed)) return trimmed
+    val normalized = trimmed
+      .replace(Regex("""[^a-z0-9]+"""), "-")
+      .trim('-')
+      .replace(Regex("""-+"""), "-")
+    if (normalized.length <= 80) return normalized
+    return normalized.take(80).trimEnd('-')
+  }
+
+  /** Rewrite only the YAML frontmatter name field using an atomic replace. */
+  private fun rewriteSkillName(file: File, canonicalName: String) {
+    if (!file.isFile) throw IOException("缺少 SKILL.md")
+    val text = file.readText()
+    if (!text.startsWith("---")) throw IOException("${file.name} 缺少 YAML frontmatter")
+    val end = text.indexOf("\n---", startIndex = 3)
+    if (end < 0) throw IOException("${file.name} frontmatter 未闭合")
+
+    val header = text.substring(0, end)
+    val pattern = Regex("""(?m)^(\s*name\s*:\s*).*$""")
+    val match = pattern.find(header) ?: throw IOException("Skill 缺少 name")
+    val current = unquote(match.value.substringAfter(':').substringBefore(" #").trim())
+    if (current == canonicalName) return
+
+    val updatedHeader = pattern.replaceFirst(header) { result ->
+      result.groupValues[1] + canonicalName
+    }
+    val updated = updatedHeader + text.substring(end)
+
+    val temp = File(file.parentFile, ".${file.name}.name-${UUID.randomUUID()}.tmp")
+    try {
+      temp.writeText(updated)
+      move(temp.toPath(), file.toPath())
+    } finally {
+      try { Files.deleteIfExists(temp.toPath()) } catch (_: Throwable) {}
+    }
+  }
+
   private fun parseMetadata(file: File): Metadata {
     if (!file.isFile) throw IOException("缺少 SKILL.md")
     val text = file.inputStream().buffered().use { input ->
@@ -423,13 +511,17 @@ class SkillManager(
       }
     }
 
-    val name = field("name") ?: throw IOException("Skill 缺少 name")
-    if (!validName(name)) throw IOException("Skill name 必须使用 kebab-case：$name")
+    val originalName = field("name") ?: throw IOException("Skill 缺少 name")
+    val name = normalizeSkillName(originalName)
+    if (!validName(name)) {
+      throw IOException("Skill name 无法安全转换为 kebab-case：$originalName")
+    }
     val description = field("description")?.takeIf { it.isNotBlank() }
       ?: throw IOException("Skill 缺少 description")
 
     return Metadata(
       name = name,
+      originalName = originalName,
       description = description,
       userInvocable = boolField("user-invocable", true),
       modelInvocable = !boolField("disable-model-invocation", false),
