@@ -1,4 +1,4 @@
-- 修复插件安装/启用后可能导致 DSH 永久无法启动：识别 plugin-tree/permission-preset 启动故障后自动安全恢复；permission 冲突使用独立末级覆盖层，其他 bundle 故障仅停用非核心层并备份 manifest，绝不删除聊天记录、模型 Key、settings、sessions、attachments 或已安装插件文件。\n- README 的“使用的开源项目”清单仅保留 `thness/dsh-mobile` 与 `deepseek-ai/deepseek-harness`。
+- 插件启动保护调整为完全非破坏式：不再自动停用/删除/改写任何插件 bundle；Android 运行时为 permission-presets 注入一个“跟随插件组合默认值”的内部 preset，使插件自定义 sandbox/approval 组合可正常启动，同时保持插件功能与组合语义。\n- README 的“使用的开源项目”清单仅保留 `thness/dsh-mobile` 与 `deepseek-ai/deepseek-harness`。
 # V0.1 — Version Reset & GitHub Entry
 
 - Runtime extraction/startup performance pass: 256 KiB streaming buffer, verified-directory cache, batched Android exec-xattr stamping, single-syscall chmod, lower-frequency progress UI updates, fast XZ preset 0 for newly rebuilt snapshots, adaptive 100/250/500 ms engine probing, 80 ms immediate-exit guard, child-liveness early failure detection, and persistent Node compile cache.
