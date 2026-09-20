@@ -1057,6 +1057,26 @@ class MainActivity : ComponentActivity() {
               overflow: auto !important;
             }
 
+            [data-dsh-mobile-settings-host-ancestor] {
+              transform: none !important;
+              translate: none !important;
+              scale: none !important;
+              rotate: none !important;
+              filter: none !important;
+              backdrop-filter: none !important;
+              perspective: none !important;
+              contain: none !important;
+              container-type: normal !important;
+              content-visibility: visible !important;
+              will-change: auto !important;
+              overflow: visible !important;
+              overflow-x: visible !important;
+              overflow-y: visible !important;
+              clip: auto !important;
+              clip-path: none !important;
+              mask: none !important;
+            }
+
             [data-dsh-mobile-settings-overlay] {
               position: fixed !important;
               inset: 0 !important;
@@ -1085,9 +1105,9 @@ class MainActivity : ComponentActivity() {
               transform: none !important;
               display: flex !important;
               flex-direction: column !important;
-              width: min(980px, calc(100vw - 20px)) !important;
+              width: min(980px, calc(100dvw - 20px)) !important;
               height: min(920px, calc(100dvh - 20px)) !important;
-              max-width: calc(100vw - 20px) !important;
+              max-width: calc(100dvw - 20px) !important;
               max-height: calc(100dvh - 20px) !important;
               margin: 0 auto !important;
               border-radius: 18px !important;
@@ -1598,7 +1618,15 @@ class MainActivity : ComponentActivity() {
           if (!parts) return null;
           const { modal, nav, navButtons, navList, content } = parts;
           modal.setAttribute('data-dsh-mobile-settings-dialog', '');
-          if (modal.parentElement) modal.parentElement.setAttribute('data-dsh-mobile-settings-overlay', '');
+          const overlay = modal.parentElement;
+          if (overlay) {
+            overlay.setAttribute('data-dsh-mobile-settings-overlay', '');
+            let ancestor = overlay.parentElement;
+            while (ancestor && ancestor !== document.body && ancestor !== document.documentElement) {
+              ancestor.setAttribute('data-dsh-mobile-settings-host-ancestor', '');
+              ancestor = ancestor.parentElement;
+            }
+          }
           nav.setAttribute('data-dsh-mobile-settings-nav', '');
 
           const navTitle = nav.firstElementChild;
