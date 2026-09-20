@@ -50,8 +50,8 @@ object SnapshotExtractor {
     input: InputStream,
     totalBytes: Long,
     dest: File,
-    onProgress: (Long, Long) -> Unit,
     preservedRoots: Set<File> = emptySet(),
+    onProgress: (Long, Long) -> Unit,
   ) {
     val root = dest.canonicalFile.toPath().normalize()
     Files.createDirectories(root)
