@@ -265,7 +265,7 @@ class SkillManager(
    * Discover Skill roots and collapse duplicate frontmatter names.
    *
    * Large community collections often vendor the same Skill through several
-   * mirrors (for example top-level skills/, repos/*/skills/, contrib/, embed/).
+   * mirrors (for example top-level skills/, repository copies, contrib/, embed/).
    * DSH identifies Skills by frontmatter name, so installing every physical
    * copy would create an ambiguous duplicate-name set. Prefer the canonical
    * source deterministically and keep exactly one active Skill per name.
