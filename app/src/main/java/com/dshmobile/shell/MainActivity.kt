@@ -752,6 +752,8 @@ class MainActivity : ComponentActivity() {
         const STYLE_ID = 'dsh-android-mobile-style';
         const BAR_ID = 'dsh-android-mobile-bar';
         const SCRIM_ID = 'dsh-android-mobile-scrim';
+        const SKILL_NAV_ID = 'dsh-android-skill-settings-nav';
+        const SKILL_PANEL_ID = 'dsh-android-skill-settings-panel';
 
         ROOT.setAttribute('data-dsh-android', UI_MODE);
 
@@ -1180,6 +1182,118 @@ class MainActivity : ComponentActivity() {
               overflow-x: auto !important;
             }
 
+            #dsh-android-skill-settings-panel {
+              flex: 1 1 auto;
+              min-width: 0;
+              min-height: 0;
+              overflow: auto;
+              padding: 18px 20px 28px;
+              color: var(--dsw-alias-text-primary, currentColor);
+              background: var(--dsw-alias-bg-base, transparent);
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-head {
+              display: flex;
+              align-items: flex-start;
+              justify-content: space-between;
+              gap: 16px;
+              margin-bottom: 18px;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-title {
+              margin: 0 0 5px;
+              font-size: 20px;
+              line-height: 1.25;
+              font-weight: 650;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-subtitle,
+            #dsh-android-skill-settings-panel .dsh-skill-empty,
+            #dsh-android-skill-settings-panel .dsh-skill-error {
+              margin: 0;
+              color: var(--dsw-alias-text-secondary, #737373);
+              font-size: 13px;
+              line-height: 1.55;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-actions {
+              display: flex;
+              gap: 8px;
+              flex: 0 0 auto;
+            }
+
+            #dsh-android-skill-settings-panel button {
+              min-height: 36px;
+              padding: 0 13px;
+              border-radius: 9px;
+              border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25));
+              background: var(--dsw-alias-bg-elevated, transparent);
+              color: inherit;
+              font: inherit;
+              cursor: pointer;
+            }
+
+            #dsh-android-skill-settings-panel button[data-primary="1"] {
+              border-color: transparent;
+              background: var(--dsw-alias-brand-primary, #4f7cff);
+              color: #fff;
+            }
+
+            #dsh-android-skill-settings-panel button[data-danger="1"] {
+              color: var(--dsw-alias-danger-primary, #d14343);
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-list {
+              display: grid;
+              gap: 10px;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-card {
+              display: grid;
+              grid-template-columns: minmax(0, 1fr) auto;
+              gap: 10px 14px;
+              padding: 14px;
+              border: 1px solid var(--dsw-alias-border-l3, rgba(127,127,127,.18));
+              border-radius: 12px;
+              background: var(--dsw-alias-bg-elevated, rgba(127,127,127,.035));
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-name {
+              font-size: 14px;
+              font-weight: 650;
+              overflow-wrap: anywhere;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-description {
+              margin-top: 4px;
+              color: var(--dsw-alias-text-secondary, #737373);
+              font-size: 13px;
+              line-height: 1.45;
+              overflow-wrap: anywhere;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-badges {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 6px;
+              margin-top: 9px;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-badge {
+              display: inline-flex;
+              align-items: center;
+              min-height: 22px;
+              padding: 0 8px;
+              border-radius: 999px;
+              background: color-mix(in srgb, currentColor 7%, transparent);
+              font-size: 11px;
+              color: var(--dsw-alias-text-secondary, #737373);
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-card[data-invalid="1"] {
+              border-color: var(--dsw-alias-danger-primary, #d14343);
+            }
+
             @media (max-width: 560px) {
               :root[data-dsh-android="mobile"] {
                 --dsh-mobile-gutter: 10px;
@@ -1416,41 +1530,267 @@ class MainActivity : ComponentActivity() {
           return null;
         };
 
-        const tagSettings = () => {
-          let modal = null;
-          let nav = null;
-          let navButtons = [];
-          for (const candidate of document.querySelectorAll('[role="dialog"][aria-modal="true"], [aria-modal="true"][role="dialog"]')) {
-            const candidateNav = candidate.querySelector('nav');
-            if (!candidateNav) continue;
-            const buttons = Array.from(candidateNav.querySelectorAll('button')).filter((button) => {
+        const findSettingsParts = () => {
+          for (const modal of document.querySelectorAll('[role="dialog"][aria-modal="true"], [aria-modal="true"][role="dialog"]')) {
+            const nav = modal.querySelector('nav');
+            if (!nav) continue;
+            const navButtons = Array.from(nav.querySelectorAll('button')).filter((button) => {
+              if (button.id === SKILL_NAV_ID) return false;
               const value = ((button.textContent || '') + ' ' + (button.getAttribute('aria-label') || '')).trim();
               return ['通用设置', '模型', '插件', 'Agent 预设', '已归档会话',
                 'General', 'Models', 'Plugins', 'Agent presets', 'Archived sessions'].some((name) =>
                   value === name || value.startsWith(name + ' '));
             });
-            if (buttons.length >= 2) { modal = candidate; nav = candidateNav; navButtons = buttons; break; }
+            if (navButtons.length < 2) continue;
+            const navList = commonAncestor(navButtons, nav);
+            const content = Array.from(modal.children).find((child) =>
+              child !== nav && child.id !== SKILL_PANEL_ID);
+            if (!navList || !content) continue;
+            return { modal, nav, navButtons, navList, content };
           }
-          if (!modal || !nav || navButtons.length < 2) return;
+          return null;
+        };
 
+        const tagSettings = () => {
+          const parts = findSettingsParts();
+          if (!parts) return null;
+          const { modal, nav, navButtons, navList, content } = parts;
           modal.setAttribute('data-dsh-mobile-settings-dialog', '');
           if (modal.parentElement) modal.parentElement.setAttribute('data-dsh-mobile-settings-overlay', '');
           nav.setAttribute('data-dsh-mobile-settings-nav', '');
 
           const navTitle = nav.firstElementChild;
           if (navTitle) navTitle.setAttribute('data-dsh-mobile-settings-nav-title', '');
-
-          const navList = commonAncestor(navButtons, nav);
-          if (navList) navList.setAttribute('data-dsh-mobile-settings-nav-list', '');
-
-          const content = Array.from(modal.children).find((child) => child !== nav);
-          if (!content) return;
+          navList.setAttribute('data-dsh-mobile-settings-nav-list', '');
           content.setAttribute('data-dsh-mobile-settings-content', '');
 
           const header = content.firstElementChild;
           const options = content.lastElementChild;
           if (header) header.setAttribute('data-dsh-mobile-settings-header', '');
           if (options && options !== header) options.setAttribute('data-dsh-mobile-settings-options', '');
+          return parts;
+        };
+
+        let skillSettingsActive = false;
+
+        const readSkills = () => {
+          try {
+            const raw = window.androidBridge && window.androidBridge.listSkills(BRIDGE_CAP);
+            return JSON.parse(raw || '{"ok":false,"error":"Android bridge unavailable"}');
+          } catch (error) {
+            return { ok: false, error: String(error) };
+          }
+        };
+
+        const renderSkillSettings = (panel) => {
+          if (!panel) return;
+          const zh = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh');
+          const result = readSkills();
+          panel.replaceChildren();
+
+          const head = document.createElement('div');
+          head.className = 'dsh-skill-head';
+          const copy = document.createElement('div');
+          const title = document.createElement('h2');
+          title.className = 'dsh-skill-title';
+          title.textContent = zh ? 'Skill 管理' : 'Skills';
+          const subtitle = document.createElement('p');
+          subtitle.className = 'dsh-skill-subtitle';
+          subtitle.textContent = zh
+            ? '管理 DSH_HOME/skills。导入不会修改插件、聊天记录、模型 Key 或其他设置。'
+            : 'Manage DSH_HOME/skills without changing plugins, conversations, credentials, or other settings.';
+          copy.append(title, subtitle);
+
+          const actions = document.createElement('div');
+          actions.className = 'dsh-skill-actions';
+          const refresh = document.createElement('button');
+          refresh.type = 'button';
+          refresh.textContent = zh ? '刷新' : 'Refresh';
+          refresh.addEventListener('click', () => renderSkillSettings(panel));
+          const install = document.createElement('button');
+          install.type = 'button';
+          install.dataset.primary = '1';
+          install.textContent = zh ? '导入 Skill' : 'Import Skill';
+          install.addEventListener('click', () => {
+            try { window.androidBridge && window.androidBridge.openSkillImporter(BRIDGE_CAP); } catch (_) {}
+          });
+          actions.append(refresh, install);
+          head.append(copy, actions);
+          panel.appendChild(head);
+
+          if (!result || !result.ok) {
+            const error = document.createElement('p');
+            error.className = 'dsh-skill-error';
+            error.textContent = (zh ? '读取 Skill 失败：' : 'Failed to read Skills: ') + ((result && result.error) || 'unknown error');
+            panel.appendChild(error);
+            return;
+          }
+
+          const rows = Array.isArray(result.skills) ? result.skills : [];
+          if (!rows.length) {
+            const empty = document.createElement('p');
+            empty.className = 'dsh-skill-empty';
+            empty.textContent = zh ? '尚未安装用户 Skill。' : 'No user Skills installed.';
+            panel.appendChild(empty);
+            return;
+          }
+
+          const list = document.createElement('div');
+          list.className = 'dsh-skill-list';
+          rows.forEach((skill) => {
+            const card = document.createElement('div');
+            card.className = 'dsh-skill-card';
+            if (skill.invalid) card.dataset.invalid = '1';
+
+            const body = document.createElement('div');
+            const name = document.createElement('div');
+            name.className = 'dsh-skill-name';
+            name.textContent = skill.name || '(unnamed)';
+            const description = document.createElement('div');
+            description.className = 'dsh-skill-description';
+            description.textContent = skill.invalid
+              ? ((zh ? '无效 Skill：' : 'Invalid Skill: ') + (skill.error || 'unknown error'))
+              : (skill.description || '');
+            body.append(name, description);
+
+            if (!skill.invalid) {
+              const badges = document.createElement('div');
+              badges.className = 'dsh-skill-badges';
+              const labels = [
+                skill.format === 'bundle' ? (zh ? '目录包' : 'Bundle') : (zh ? '单文件' : 'Flat file'),
+                skill.userInvocable === false ? (zh ? '用户不可调用' : 'No user invocation') : (zh ? '用户可调用' : 'User invocable'),
+                skill.modelInvocable === false ? (zh ? '模型不可调用' : 'No model invocation') : (zh ? '模型可调用' : 'Model invocable')
+              ];
+              labels.forEach((label) => {
+                const badge = document.createElement('span');
+                badge.className = 'dsh-skill-badge';
+                badge.textContent = label;
+                badges.appendChild(badge);
+              });
+              body.appendChild(badges);
+            }
+
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.dataset.danger = '1';
+            remove.textContent = zh ? '删除' : 'Delete';
+            remove.addEventListener('click', () => {
+              const skillName = String(skill.name || '');
+              if (!skillName) return;
+              const ok = window.confirm(zh ? ('确定删除 Skill “' + skillName + '”？') : ('Delete Skill "' + skillName + '"?'));
+              if (!ok) return;
+              try {
+                const raw = window.androidBridge && window.androidBridge.deleteSkill(BRIDGE_CAP, skillName);
+                const deleted = JSON.parse(raw || '{"ok":false}');
+                if (!deleted.ok) window.alert((zh ? '删除失败：' : 'Delete failed: ') + (deleted.error || 'unknown error'));
+              } catch (error) {
+                window.alert((zh ? '删除失败：' : 'Delete failed: ') + String(error));
+              }
+              renderSkillSettings(panel);
+            });
+
+            card.append(body, remove);
+            list.appendChild(card);
+          });
+          panel.appendChild(list);
+        };
+
+        const deactivateSkillSettings = (parts) => {
+          if (!skillSettingsActive && !document.getElementById(SKILL_PANEL_ID)) return;
+          skillSettingsActive = false;
+          const panel = document.getElementById(SKILL_PANEL_ID);
+          if (panel) panel.remove();
+          if (parts && parts.content) {
+            parts.content.style.display = parts.content.dataset.dshSkillPrevDisplay || '';
+            delete parts.content.dataset.dshSkillPrevDisplay;
+          }
+          const skillButton = document.getElementById(SKILL_NAV_ID);
+          if (skillButton) {
+            skillButton.setAttribute('aria-selected', 'false');
+            skillButton.removeAttribute('aria-current');
+            if (skillButton.getAttribute('data-state') === 'active') skillButton.setAttribute('data-state', 'inactive');
+          }
+        };
+
+        const activateSkillSettings = (parts) => {
+          if (!parts) return;
+          skillSettingsActive = true;
+          if (!parts.content.dataset.dshSkillPrevDisplay) {
+            parts.content.dataset.dshSkillPrevDisplay = parts.content.style.display || '__empty__';
+          }
+          parts.content.style.display = 'none';
+
+          let panel = document.getElementById(SKILL_PANEL_ID);
+          if (!panel) {
+            panel = document.createElement('section');
+            panel.id = SKILL_PANEL_ID;
+            panel.setAttribute('aria-label', 'Skill management');
+            parts.modal.appendChild(panel);
+          }
+          panel.style.display = 'block';
+
+          parts.navButtons.forEach((button) => {
+            button.removeAttribute('aria-current');
+            if (button.hasAttribute('aria-selected')) button.setAttribute('aria-selected', 'false');
+            if (button.hasAttribute('data-state')) button.setAttribute('data-state', 'inactive');
+          });
+          const skillButton = document.getElementById(SKILL_NAV_ID);
+          if (skillButton) {
+            skillButton.setAttribute('aria-selected', 'true');
+            skillButton.setAttribute('aria-current', 'page');
+            if (skillButton.hasAttribute('data-state')) skillButton.setAttribute('data-state', 'active');
+          }
+          renderSkillSettings(panel);
+        };
+
+        const installSkillSettings = () => {
+          const parts = findSettingsParts();
+          if (!parts) {
+            skillSettingsActive = false;
+            return;
+          }
+
+          let button = document.getElementById(SKILL_NAV_ID);
+          if (!button) {
+            const template = parts.navButtons.find((item) =>
+              item.getAttribute('aria-selected') !== 'true' && !item.hasAttribute('aria-current')) || parts.navButtons[0];
+            button = template.cloneNode(false);
+            button.id = SKILL_NAV_ID;
+            button.type = 'button';
+            button.removeAttribute('aria-current');
+            button.setAttribute('aria-selected', 'false');
+            if (button.hasAttribute('data-state')) button.setAttribute('data-state', 'inactive');
+            const zh = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh');
+            button.textContent = 'Skills';
+            button.setAttribute('aria-label', zh ? 'Skill 管理' : 'Skills');
+            button.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const current = findSettingsParts();
+              if (current) activateSkillSettings(current);
+            }, true);
+            parts.navList.appendChild(button);
+          }
+
+          parts.navButtons.forEach((nativeButton) => {
+            if (nativeButton.dataset.dshSkillExitWired === '1') return;
+            nativeButton.dataset.dshSkillExitWired = '1';
+            nativeButton.addEventListener('click', () => {
+              const current = findSettingsParts();
+              deactivateSkillSettings(current || parts);
+            }, true);
+          });
+
+          if (skillSettingsActive) {
+            parts.content.style.display = 'none';
+            let panel = document.getElementById(SKILL_PANEL_ID);
+            if (!panel) {
+              panel = document.createElement('section');
+              panel.id = SKILL_PANEL_ID;
+              parts.modal.appendChild(panel);
+              renderSkillSettings(panel);
+            }
+          }
         };
 
         const sync = () => {
@@ -1463,6 +1803,7 @@ class MainActivity : ComponentActivity() {
           } else {
             ROOT.removeAttribute('data-dsh-mobile-sidebar-open');
           }
+          installSkillSettings();
           wireComposerImport();
           const anchor = wireConfig();
           let manager = document.getElementById(MANAGER_ID);
@@ -1507,6 +1848,11 @@ class MainActivity : ComponentActivity() {
             return node.matches(relevantSelector) || !!node.querySelector(relevantSelector);
           });
         };
+        window.addEventListener('dsh-android-skills-changed', () => {
+          const panel = document.getElementById(SKILL_PANEL_ID);
+          if (panel && skillSettingsActive) renderSkillSettings(panel);
+        });
+
         const observer = new MutationObserver((mutations) => {
           if (mutations.some(mutationRelevant)) schedule();
         });
