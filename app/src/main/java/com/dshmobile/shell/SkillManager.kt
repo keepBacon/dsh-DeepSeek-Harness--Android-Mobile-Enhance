@@ -20,8 +20,9 @@ import org.json.JSONObject
 /**
  * Android-side manager for the user DSH skill root.
  *
- * The manager only owns `$DSH_HOME/skills`. It never touches sessions,
- * credentials, settings, plugins or profile composition.
+ * The manager owns `$DSH_HOME/skills` plus collection metadata under
+ * `$DSH_HOME/skill-collections`. It never touches sessions, credentials,
+ * settings, plugins or profile composition.
  */
 class SkillManager(
   private val context: Context,
@@ -251,21 +252,14 @@ class SkillManager(
     if (!dir.exists() && !dir.mkdirs()) throw IOException("无法创建 Skill 集合：$collectionId")
     if (!dir.isDirectory || Files.isSymbolicLink(dir.toPath())) throw IOException("Skill 集合目录非法：$collectionId")
 
-    val previous = readCollectionManifest(dir)
-    val previousMembers = previous.optJSONArray("members")
-    val merged = LinkedHashSet<String>()
-    if (previousMembers != null) {
-      for (i in 0 until previousMembers.length()) {
-        previousMembers.optString(i).takeIf { validStorageKey(it) }?.let { merged += it }
-      }
-    }
-    members.filter { validStorageKey(it) }.forEach { merged += it }
+    val currentMembers = LinkedHashSet<String>()
+    members.filter { validStorageKey(it) }.forEach { currentMembers += it }
 
     val json = JSONObject()
       .put("id", collectionId)
       .put("displayName", displayName)
       .put("updatedAt", System.currentTimeMillis())
-      .put("members", JSONArray(merged.toList()))
+      .put("members", JSONArray(currentMembers.toList()))
     val file = collectionManifestFile(dir)
     val temp = File(dir, ".collection-" + UUID.randomUUID() + ".tmp")
     try {
