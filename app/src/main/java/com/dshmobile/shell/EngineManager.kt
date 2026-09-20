@@ -810,6 +810,35 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   private fun pluginWorkspaceFile(profile: String = "web"): File = File(profileDir(profile), "pnpm-workspace.yaml")
 
+  /**
+   * Older preserved profiles may predate the current pnpm workspace policy.
+   * Without autoInstallPeers=false, pnpm tries to download DSH prerelease peers
+   * declared by community plugins and can fail with NO_MATCHING_VERSION even
+   * though the plugin should consume the runtime's shared DSH modules.
+   */
+  private fun ensurePluginWorkspaceCompat(profile: String = "web") {
+    val file = pluginWorkspaceFile(profile)
+    file.parentFile?.mkdirs()
+    var workspace = if (file.isFile) file.readText() else "packages:\n  - .\n"
+
+    fun setScalar(key: String, value: String) {
+      val regex = Regex("""(?m)^\s*${Regex.escape(key)}\s*:\s*.*$""")
+      workspace = if (regex.containsMatchIn(workspace)) {
+        regex.replace(workspace, "$key: $value")
+      } else {
+        buildString {
+          append(workspace)
+          if (workspace.isNotEmpty() && !workspace.endsWith("\n")) append('\n')
+          append(key).append(": ").append(value).append('\n')
+        }
+      }
+    }
+
+    setScalar("nodeLinker", "hoisted")
+    setScalar("autoInstallPeers", "false")
+    writeTextAtomic(file, workspace)
+  }
+
   /** Read exact package names pnpm 11 left undecided under allowBuilds. */
   fun pendingPluginBuilds(profile: String = "web"): List<String> {
     val file = pluginWorkspaceFile(profile)
@@ -920,6 +949,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       return PluginCommandResult(false, -1, "缺少 termux-exec 运行库")
     }
     return try {
+      ensurePluginWorkspaceCompat(profile)
       pluginLogFile.parentFile?.mkdirs()
       pluginLogFile.writeText("")
       val args = mutableListOf(
