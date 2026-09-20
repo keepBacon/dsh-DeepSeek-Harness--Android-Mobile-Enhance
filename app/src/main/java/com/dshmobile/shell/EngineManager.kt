@@ -71,6 +71,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private val dshPackageFile = File(usrDir, "lib/node_modules/@deepseek-ai/dsh/package.json")
   private val compatManifestFile = File(usrDir, "etc/dsh-android-compat.json")
   private val runtimeIdMarker = File(context.filesDir, "runtime-version.txt")
+  private val userHomeInitializedMarker = File(context.filesDir, "user-home-initialized")
   private val gitBin = File(usrDir, "bin/git")
   private val sshBin = File(usrDir, "bin/ssh")
   private val npmBin = File(usrDir, "bin/npm")
@@ -285,19 +286,45 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * @param onProgress bytesDone, bytesTotal.
    * @returns true on success.
    */
+  /**
+   * Runtime archives can contain a bootstrap home/. That tree is install-time
+   * seed data, not an upgrade payload. Once a prior runtime/user profile exists,
+   * HOME is authoritative and must survive APK replacement and runtime repair.
+   */
+  private fun shouldPreserveUserHome(): Boolean {
+    if (userHomeInitializedMarker.isFile || runtimeIdMarker.isFile) return true
+    if (File(dshDataDir, ".migrated-from").isFile) return true
+    val dsh = File(homeDir, ".dsh")
+    return File(dsh, ".credentials.yaml").isFile ||
+      File(dsh, "sessions").exists() ||
+      File(dsh, "storages").exists() ||
+      File(dsh, "attachments").exists() ||
+      File(dsh, "skills").exists()
+  }
+
   fun extractSnapshot(onProgress: (Long, Long) -> Unit): Boolean {
     return try {
       // A previous interrupted extraction may have left usr/bin/node behind
       // while the preload or DSH files are missing. Rebuild only /usr so a
       // half-extracted runtime can never make engineReady report a false positive.
+      val preserveHome = shouldPreserveUserHome()
       if (usrDir.exists() && !runtimeHealth().ok) usrDir.deleteRecursively()
       val fd = context.assets.openFd("snapshot.tar.xz")
-      SnapshotExtractor.extract(context.assets.open("snapshot.tar.xz"), fd.length, usrDir.parentFile, onProgress)
+      SnapshotExtractor.extract(
+        context.assets.open("snapshot.tar.xz"),
+        fd.length,
+        usrDir.parentFile,
+        onProgress,
+        preservedRoots = if (preserveHome) setOf(homeDir) else emptySet(),
+      )
       homeDir.mkdirs()
       // Commit the runtime identity only after extraction. This makes APK
       // upgrades replace the old embedded engine while keeping HOME / DSH_HOME
       // and every user workspace/profile untouched.
       runtimeIdMarker.writeText(bundledRuntimeId())
+      // Written only after a complete extraction; future runtime repairs can
+      // distinguish a real user HOME from an interrupted first-install seed.
+      userHomeInitializedMarker.writeText("1\n")
       val health = runtimeHealth()
       if (!health.ok) {
         runtimeIdMarker.delete()
