@@ -1343,6 +1343,49 @@ class MainActivity : ComponentActivity() {
               border-color: var(--dsw-alias-danger-primary, #d14343);
             }
 
+            #dsh-android-skill-settings-panel .dsh-skill-collection {
+              border: 1px solid var(--dsw-alias-border-l3, rgba(127,127,127,.18));
+              border-radius: 12px;
+              overflow: hidden;
+              background: var(--dsw-alias-bg-elevated, rgba(127,127,127,.035));
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-collection-head {
+              display: grid;
+              grid-template-columns: auto minmax(0, 1fr) auto;
+              align-items: center;
+              gap: 10px;
+              padding: 12px 14px;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-collection-toggle {
+              width: 36px;
+              padding: 0;
+              font-size: 18px;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-collection-title {
+              font-size: 14px;
+              font-weight: 650;
+              overflow-wrap: anywhere;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-collection-meta {
+              margin-top: 2px;
+              color: var(--dsw-alias-text-secondary, #737373);
+              font-size: 12px;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-collection-body {
+              display: grid;
+              gap: 8px;
+              padding: 0 10px 10px;
+            }
+
+            #dsh-android-skill-settings-panel .dsh-skill-collection-body[hidden] {
+              display: none !important;
+            }
+
             @media (max-width: 560px) {
               :root[data-dsh-android="mobile"] {
                 --dsh-mobile-gutter: 10px;
@@ -1705,7 +1748,8 @@ class MainActivity : ComponentActivity() {
           }
 
           const rows = Array.isArray(result.skills) ? result.skills : [];
-          if (!rows.length) {
+          const collections = Array.isArray(result.collections) ? result.collections : [];
+          if (!rows.length && !collections.length) {
             const empty = document.createElement('p');
             empty.className = 'dsh-skill-empty';
             empty.textContent = zh ? '尚未安装用户 Skill。' : 'No user Skills installed.';
@@ -1713,9 +1757,12 @@ class MainActivity : ComponentActivity() {
             return;
           }
 
+          const byStorageKey = new Map(rows.map((skill) => [String(skill.storageKey || ''), skill]));
+          const groupedKeys = new Set();
           const list = document.createElement('div');
           list.className = 'dsh-skill-list';
-          rows.forEach((skill) => {
+
+          const createSkillCard = (skill) => {
             const card = document.createElement('div');
             card.className = 'dsh-skill-card';
             if (skill.invalid) card.dataset.invalid = '1';
@@ -1767,10 +1814,83 @@ class MainActivity : ComponentActivity() {
               }
               renderSkillSettings(panel);
             });
-
             card.append(body, remove);
-            list.appendChild(card);
+            return card;
+          };
+
+          collections.forEach((collection) => {
+            const memberKeys = Array.isArray(collection.members) ? collection.members.map(String) : [];
+            memberKeys.forEach((key) => groupedKeys.add(key));
+
+            const folder = document.createElement('section');
+            folder.className = 'dsh-skill-collection';
+
+            const folderHead = document.createElement('div');
+            folderHead.className = 'dsh-skill-collection-head';
+
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'dsh-skill-collection-toggle';
+            toggle.textContent = '›';
+            toggle.setAttribute('aria-expanded', 'false');
+
+            const info = document.createElement('div');
+            const folderTitle = document.createElement('div');
+            folderTitle.className = 'dsh-skill-collection-title';
+            folderTitle.textContent = '📁 ' + String(collection.displayName || collection.id || 'Skill Pack');
+            const folderMeta = document.createElement('div');
+            folderMeta.className = 'dsh-skill-collection-meta';
+            folderMeta.textContent = (zh ? '压缩包集合 · ' : 'ZIP collection · ') + memberKeys.length + (zh ? ' 个 Skill' : ' Skills');
+            info.append(folderTitle, folderMeta);
+
+            const removeFolder = document.createElement('button');
+            removeFolder.type = 'button';
+            removeFolder.dataset.danger = '1';
+            removeFolder.textContent = zh ? '删除文件夹' : 'Delete folder';
+            removeFolder.addEventListener('click', () => {
+              const id = String(collection.id || '');
+              if (!id) return;
+              const ok = window.confirm(
+                zh
+                  ? ('确定删除 Skill 文件夹“' + String(collection.displayName || id) + '”及其中的 Skill？')
+                  : ('Delete Skill folder "' + String(collection.displayName || id) + '" and its Skills?')
+              );
+              if (!ok) return;
+              try {
+                const raw = window.androidBridge && window.androidBridge.deleteSkillCollection(BRIDGE_CAP, id);
+                const deleted = JSON.parse(raw || '{"ok":false}');
+                if (!deleted.ok) window.alert((zh ? '删除失败：' : 'Delete failed: ') + (deleted.error || 'unknown error'));
+              } catch (error) {
+                window.alert((zh ? '删除失败：' : 'Delete failed: ') + String(error));
+              }
+              renderSkillSettings(panel);
+            });
+
+            const folderBody = document.createElement('div');
+            folderBody.className = 'dsh-skill-collection-body';
+            folderBody.hidden = true;
+            memberKeys.forEach((key) => {
+              const skill = byStorageKey.get(key);
+              if (skill) folderBody.appendChild(createSkillCard(skill));
+            });
+
+            toggle.addEventListener('click', () => {
+              const open = folderBody.hidden;
+              folderBody.hidden = !open;
+              toggle.textContent = open ? '⌄' : '›';
+              toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+
+            folderHead.append(toggle, info, removeFolder);
+            folder.append(folderHead, folderBody);
+            list.appendChild(folder);
           });
+
+          rows.forEach((skill) => {
+            const key = String(skill.storageKey || '');
+            if (!groupedKeys.has(key)) list.appendChild(createSkillCard(skill));
+          });
+
           panel.appendChild(list);
         };
 
