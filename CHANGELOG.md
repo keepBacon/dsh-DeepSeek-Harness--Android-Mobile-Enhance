@@ -1,3 +1,6 @@
+- 根因修复移动端设置裁剪：DSH 设置弹窗位于带 transform/contain/overflow 的侧栏祖先中，导致 position:fixed 仍被侧栏建立的 containing block 裁剪；现打开设置时解除整条宿主祖先链的 transform/filter/contain/overflow 裁剪，关闭后恢复。
+- 根因修复插件市场与 Git 插件安装：Web Host 启动前即修复 web profile 的 pnpm workspace 策略，并把 autoInstallPeers=false/nodeLinker=hoisted 传给 Host 子进程；Git 依赖的 ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED 会提取 pnpm 输出中的完整 URL allowBuilds 键，显示授权并可正确写回后重试。
+- Skill 导入兼容性增强：允许社区 SKILL.md 缺少完整 frontmatter，按目录名/H1 推导 name、从正文推导 description，并在安装时原子写回标准 frontmatter；单个无法修复条目继续跳过而不终止整包。
 - 移动端 Web 设置改为独立的视口级居中弹窗：不再按侧边栏几何布局，分页导航横向滚动，内容区独立滚动，并适配竖屏、横屏与安全区。
 - 修复社区插件安装兼容：每次插件操作前自动修复旧 profile 的 pnpm-workspace 配置（nodeLinker=hoisted、autoInstallPeers=false），避免社区插件把 DSH 预发布 peer 误当成需要从 npm 安装的依赖而触发 NO_MATCHING_VERSION。
 - 修复 Git/GitHub 插件安装 runtime：构建时递归收集 ELF NEEDED 依赖闭包，解决内置 Git 缺失 libpcre2-8.so 等传递依赖导致 git ls-remote 无法启动。
