@@ -58,6 +58,7 @@ class SkillManager(
     val candidates: List<Candidate>,
     val duplicatesSkipped: Int,
     val namesNormalized: Int = 0,
+    val invalidSkipped: Int = 0,
   )
 
   private data class ReconcileResult(
@@ -170,6 +171,7 @@ class SkillManager(
           listOf(Candidate(metadata, source, false)),
           duplicatesSkipped = 0,
           namesNormalized = if (metadata.originalName != metadata.name) 1 else 0,
+          invalidSkipped = 0,
         )
       }
 
@@ -182,6 +184,7 @@ class SkillManager(
         .put("imported", JSONArray(installed))
         .put("duplicatesSkipped", discovery.duplicatesSkipped)
         .put("namesNormalized", discovery.namesNormalized)
+        .put("invalidSkipped", discovery.invalidSkipped)
         .put("duplicatesQuarantined", reconciled.moved)
         .put("duplicateBackupDir", reconciled.backupDir?.absolutePath)
         .put(
@@ -190,6 +193,7 @@ class SkillManager(
             append("已安装 ${installed.size} 个 Skill")
             if (discovery.namesNormalized > 0) append("，已规范化 ${discovery.namesNormalized} 个旧式 Skill 名")
             if (discovery.duplicatesSkipped > 0) append("，已自动合并 ${discovery.duplicatesSkipped} 个重复 Skill 名")
+            if (discovery.invalidSkipped > 0) append("，已跳过 ${discovery.invalidSkipped} 个无法安全修复的无效条目")
             if (reconciled.moved > 0) append("，并备份隔离 ${reconciled.moved} 个旧重复项")
           },
         )
@@ -306,9 +310,15 @@ class SkillManager(
         }
       }
 
-    val raw = roots.map { dir ->
-      val metadata = parseMetadata(File(dir, "SKILL.md"))
-      Candidate(metadata, dir, true)
+    var invalidSkipped = 0
+    val raw = roots.mapNotNull { dir ->
+      try {
+        val metadata = parseMetadata(File(dir, "SKILL.md"))
+        Candidate(metadata, dir, true)
+      } catch (_: Throwable) {
+        invalidSkipped++
+        null
+      }
     }
 
     val selected = raw
@@ -327,6 +337,7 @@ class SkillManager(
       candidates = selected,
       duplicatesSkipped = (raw.size - selected.size).coerceAtLeast(0),
       namesNormalized = raw.count { it.metadata.originalName != it.metadata.name },
+      invalidSkipped = invalidSkipped,
     )
   }
 
