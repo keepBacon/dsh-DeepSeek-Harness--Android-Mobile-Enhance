@@ -79,6 +79,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private val gitConfigFile = File(usrDir, "etc/gitconfig")
   private val sshConfigFile = File(usrDir, "etc/ssh/ssh_config")
   private val caBundleFile = File(usrDir, "etc/tls/cert.pem")
+  private val nodeCacheDir = File(homeDir, ".cache").apply { mkdirs() }
+  private val nodeCompileCacheDir = File(nodeCacheDir, "node-compile").apply { mkdirs() }
 
   private fun bundledRuntimeId(): String = try {
     context.assets.open("runtime-version.txt").bufferedReader().use { it.readText().trim() }
@@ -535,12 +537,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   /** Start the dsh web engine from the embedded snapshot. */
-  fun startEngine(port: Int = 3080): Boolean {
-    val health = runtimeHealth()
-    if (!health.ok) {
-      LAST_START_ERROR = health.describe()
-      Log.e(TAG, "engine start failed: " + health.describe())
-      return false
+  fun startEngine(port: Int = 3080, runtimeAlreadyChecked: Boolean = false): Boolean {
+    if (!runtimeAlreadyChecked) {
+      val health = runtimeHealth()
+      if (!health.ok) {
+        LAST_START_ERROR = health.describe()
+        Log.e(TAG, "engine start failed: " + health.describe())
+        return false
+      }
     }
     val preload = preloadBin
     // If a child is genuinely alive, both Activity and Service should reuse it
@@ -569,9 +573,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
       engineProcess = startWithArgs(args, env)
       ACTIVE_PROCESS.set(engineProcess)
 
-      // Catch immediate linker/loader failures instead of reporting a generic
-      // 30-second timeout. Healthy Node startup never exits in this window.
-      val early = engineProcess?.waitFor(450, TimeUnit.MILLISECONDS) == true
+      // Catch only truly immediate linker/loader failures here. The Activity
+      // polls both the HTTP endpoint and child liveness at high frequency, so
+      // a long fixed wait just adds cold-start latency.
+      val early = engineProcess?.waitFor(80, TimeUnit.MILLISECONDS) == true
       if (early) {
         val code = try { engineProcess?.exitValue() ?: -1 } catch (_: Throwable) { -1 }
         ACTIVE_PROCESS.compareAndSet(engineProcess, null)
@@ -591,6 +596,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
     } finally {
       STARTING.set(false)
     }
+  }
+
+  /** True while the engine child started in this app process is still alive. */
+  fun isEngineProcessAlive(): Boolean {
+    val process = ACTIVE_PROCESS.get() ?: engineProcess ?: return false
+    return try { process.isAlive } catch (_: Throwable) { false }
   }
 
   private fun preferredSshKeyFile(): File? = listOf("id_dsh", "id_ed25519", "id_rsa", "id_ecdsa")
@@ -628,6 +639,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "HOME" to homeDir.absolutePath,
       "DSH_HOME" to ensureDshDataHome().absolutePath,
       "TMPDIR" to File(homeDir, "tmp").apply { mkdirs() }.absolutePath,
+      "XDG_CACHE_HOME" to nodeCacheDir.absolutePath,
+      // Node 22+ persists V8 module compile artifacts here. Older Node
+      // versions ignore this variable, so the optimization is backwards-safe.
+      "NODE_COMPILE_CACHE" to nodeCompileCacheDir.absolutePath,
       "LD_PRELOAD" to preload.absolutePath,
       "TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE" to "force",
       "TERMUX_EXEC__EXECVE_CALL__INTERCEPT" to "1",

@@ -2232,15 +2232,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val started = engineManager.startEngine()
-        if (started) {
-          for (i in 0..60) {
-            if (EngineProbe.check().optBoolean("running", false)) {
-              running = true
-              break
-            }
-            Thread.sleep(1000)
-          }
-        }
+        if (started) running = waitForEngineReady()
         if (running) {
           startEngineService()
           applyShizukuKeepAlive()
@@ -2789,7 +2781,7 @@ class MainActivity : ComponentActivity() {
     runOnUiThread { showStartingState("正在连接 DeepSeek Harness…") }
     Thread {
       try {
-        if (EngineProbe.check().optBoolean("running", false)) {
+        if (EngineProbe.check(250).optBoolean("running", false)) {
           // Re-arm foreground ownership even when the Host survived an
           // Activity recreation or was already listening before this launch.
           startEngineService()
@@ -2818,26 +2810,51 @@ class MainActivity : ComponentActivity() {
         }
 
         runOnUiThread { showStartingState("正在启动 DSH 引擎…", "首次启动或插件较多时可能需要一些时间。") }
-        if (!engineManager.startEngine()) {
+        if (!engineManager.startEngine(runtimeAlreadyChecked = true)) {
           runOnUiThread { showEngineFailure("引擎启动失败") }
           return@Thread
         }
 
-        // Cold plugin-tree boot on phones can take tens of seconds.
-        for (i in 0..60) {
-          if (EngineProbe.check().optBoolean("running", false)) {
-            startEngineService()
-            applyShizukuKeepAlive()
-            runOnUiThread { showWeb() }
-            return@Thread
-          }
-          Thread.sleep(1000)
+        // Poll aggressively during the first few seconds. A 1 s fixed polling
+        // interval added ~500 ms average latency after the HTTP listener was
+        // already ready. Also stop immediately if the child process dies.
+        if (waitForEngineReady()) {
+          startEngineService()
+          applyShizukuKeepAlive()
+          runOnUiThread { showWeb() }
+          return@Thread
         }
-        runOnUiThread { showEngineFailure("引擎启动超时") }
+        runOnUiThread {
+          showEngineFailure(if (engineManager.isEngineProcessAlive()) "引擎启动超时" else "引擎启动后退出")
+        }
       } finally {
         engineFlowRunning.set(false)
       }
     }.start()
+  }
+
+  /**
+   * Wait for the verified DSH HTTP listener with low perceived latency.
+   *
+   * Local connection-refused probes return immediately, so 100 ms polling is
+   * cheap during the hot part of startup. The interval backs off afterwards
+   * to avoid wasting CPU on unusually slow plugin trees.
+   */
+  private fun waitForEngineReady(timeoutMs: Long = 60_000L): Boolean {
+    val startedAt = android.os.SystemClock.elapsedRealtime()
+    while (android.os.SystemClock.elapsedRealtime() - startedAt < timeoutMs) {
+      if (EngineProbe.check(250).optBoolean("running", false)) return true
+      if (!engineManager.isEngineProcessAlive()) return false
+
+      val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
+      val delay = when {
+        elapsed < 3_000L -> 100L
+        elapsed < 10_000L -> 250L
+        else -> 500L
+      }
+      Thread.sleep(delay)
+    }
+    return false
   }
 
   /** Force-reinstall only the embedded /usr runtime; user data under HOME stays intact. */

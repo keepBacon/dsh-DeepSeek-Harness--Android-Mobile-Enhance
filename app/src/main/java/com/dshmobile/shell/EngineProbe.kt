@@ -9,7 +9,7 @@ object EngineProbe {
 
   const val ENGINE_URL = "http://127.0.0.1:3080"
   private const val AUTH_CHALLENGE = "dsh web authentication required;"
-  private const val MAX_PROBE_BODY = 64 * 1024
+  private const val MAX_PROBE_BODY = 16 * 1024
 
   /**
    * One-shot DSH identity + reachability probe. Safe on any background thread.

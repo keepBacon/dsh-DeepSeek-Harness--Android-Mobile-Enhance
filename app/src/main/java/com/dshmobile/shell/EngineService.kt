@@ -55,8 +55,8 @@ class EngineService : Service() {
   /** Start the engine if it is not listening yet. */
   private fun ensureEngine() {
     if (EngineManager.isMaintenanceMode()) return
-    if (EngineProbe.check().optBoolean("running", false)) return
-    if (engineManager.engineReady) engineManager.startEngine()
+    if (EngineProbe.check(350).optBoolean("running", false)) return
+    if (engineManager.engineReady) engineManager.startEngine(runtimeAlreadyChecked = true)
   }
 
   /**
@@ -70,8 +70,8 @@ class EngineService : Service() {
       exec.scheduleWithFixedDelay({
         try {
           if (!EngineManager.isMaintenanceMode() &&
-            !EngineProbe.check().optBoolean("running", false) && engineManager.engineReady) {
-            engineManager.startEngine()
+            !EngineProbe.check(500).optBoolean("running", false) && engineManager.engineReady) {
+            engineManager.startEngine(runtimeAlreadyChecked = true)
           }
         } catch (_: Throwable) {
         }

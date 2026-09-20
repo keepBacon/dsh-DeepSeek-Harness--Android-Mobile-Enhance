@@ -10,6 +10,9 @@ BG="$ROOT/app/build.gradle.kts"
 BT="$ROOT/build-termux.sh"
 BP="$ROOT/build-termux-desktop-parity.sh"
 SHI="$ROOT/app/src/main/java/com/dshmobile/shell/ShizukuSupport.kt"
+SE="$ROOT/app/src/main/java/com/dshmobile/shell/SnapshotExtractor.kt"
+EP="$ROOT/app/src/main/java/com/dshmobile/shell/EngineProbe.kt"
+ES="$ROOT/app/src/main/java/com/dshmobile/shell/EngineService.kt"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 must() { grep -Fq "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
@@ -87,6 +90,22 @@ must "$MA" 'GITHUB_REPOSITORY_URL = "https://github.com/keepBacon/dsh-DeepSeek-H
 must "$MA" 'text = "版本  V0.1"'
 must "$MA" 'text = "GitHub 仓库\n$GITHUB_REPOSITORY_URL"'
 must "$MA" 'setOnClickListener { openExternalUrl(GITHUB_REPOSITORY_URL) }'
+
+# V0.1 runtime extraction / engine-start performance.
+must "$SE" 'COPY_BUFFER_SIZE = 256 * 1024'
+must "$SE" 'PROGRESS_STEP_BYTES = 4L * 1024L * 1024L'
+must "$SE" 'safeDirectories = HashSet<Path>(4096)'
+must "$SE" 'ProcessBuilder(base + batch)'
+must "$SE" 'Os.chmod(file.absolutePath, if (executable) 448 else 384)'
+must "$EM" '"NODE_COMPILE_CACHE" to nodeCompileCacheDir.absolutePath'
+must "$EM" 'waitFor(80, TimeUnit.MILLISECONDS)'
+must "$EM" 'fun isEngineProcessAlive(): Boolean'
+must "$MA" 'private fun waitForEngineReady(timeoutMs: Long = 60_000L): Boolean'
+must "$MA" 'EngineProbe.check(250)'
+must "$ES" 'EngineProbe.check(350)'
+must "$EP" 'MAX_PROBE_BODY = 16 * 1024'
+must "$BT" 'DSH_XZ_PRESET="${DSH_XZ_PRESET:-0}"'
+must "$BT" 'XZ_OPT="-$DSH_XZ_PRESET" tar -cJf'
 
 # Syntax/regression checks.
 for f in "$ROOT"/build*.sh "$ROOT"/scripts/*.sh; do bash -n "$f"; done

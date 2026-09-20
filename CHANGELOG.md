@@ -1,6 +1,7 @@
 - README 的“使用的开源项目”清单仅保留 `thness/dsh-mobile` 与 `deepseek-ai/deepseek-harness`。
 # V0.1 — Version Reset & GitHub Entry
 
+- Runtime extraction/startup performance pass: 256 KiB streaming buffer, verified-directory cache, batched Android exec-xattr stamping, single-syscall chmod, lower-frequency progress UI updates, fast XZ preset 0 for newly rebuilt snapshots, adaptive 100/250/500 ms engine probing, 80 ms immediate-exit guard, child-liveness early failure detection, and persistent Node compile cache.
 - Update the in-app GitHub repository entry and README project link to `keepBacon/dsh-DeepSeek-Harness--Android-Mobile-Enhance`.
 - 应用版本重置为 `V0.1`（`versionName=0.1`, `versionCode=35`（保持可覆盖升级既有测试版））。
 - “应用设置”新增版本信息和 GitHub 仓库入口。

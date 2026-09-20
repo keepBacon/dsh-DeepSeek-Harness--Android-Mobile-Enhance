@@ -21,6 +21,8 @@ DSH_REFRESH_RUNTIME="${DSH_REFRESH_RUNTIME:-1}"
 DSH_NATIVE_COMPAT="${DSH_NATIVE_COMPAT:-1}"
 DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
 DSH_ALLOW_DEGRADED="${DSH_ALLOW_DEGRADED:-0}"
+# Favor faster first-launch extraction over maximum APK compression.
+DSH_XZ_PRESET="${DSH_XZ_PRESET:-0}"
 PNPM_TGZ="$CACHE_DIR/pnpm-$PNPM_VERSION.tgz"
 PNPM_URL="https://registry.npmjs.org/pnpm/-/pnpm-$PNPM_VERSION.tgz"
 
@@ -107,7 +109,10 @@ repack_snapshot_stage() {
     entries+=("${item#./}")
   done < <(cd "$stage" && find . -mindepth 1 -maxdepth 1 -print0)
   [ "${#entries[@]}" -gt 0 ] || { echo '[DSH] staging snapshot is empty.'; exit 4; }
-  (cd "$stage" && tar -cJf "$out" "${entries[@]}")
+  # xz preset 0 uses a much smaller dictionary than the default preset 6,
+  # reducing Android-side decompression CPU/memory at the cost of a larger APK.
+  # Override DSH_XZ_PRESET if distribution size matters more than first launch.
+  (cd "$stage" && XZ_OPT="-$DSH_XZ_PRESET" tar -cJf "$out" "${entries[@]}")
 }
 
 # Older dsh-mobile snapshots were built for the Web Host and may omit pnpm.
