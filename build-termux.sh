@@ -332,18 +332,61 @@ PY2
 copy_link_deps() {
   local file="$1" dest="$2" host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   [ -f "$file" ] || return 0
-  command -v ldd >/dev/null 2>&1 || return 0
-  local listing
-  listing="$(ldd "$file" 2>/dev/null || true)"
-  printf '%s\n' "$listing" | awk '
-    /=> \/data\// { print $3 }
-    /^\/data\// { print $1 }
-  ' | while IFS= read -r lib; do
-    [ -f "$lib" ] || continue
-    case "$lib" in
-      "$host_prefix"/lib/*) cp -Lf "$lib" "$dest/" || true ;;
-    esac
-  done
+  mkdir -p "$dest"
+
+  # Resolve the complete ELF NEEDED closure instead of trusting ldd's printed
+  # paths. Termux binaries may carry a RUNPATH back to the build host; a staging
+  # smoke test can therefore succeed while the APK is missing a transitive
+  # library (for example Git -> libpcre2-8.so) on the real device.
+  local readelf_bin=''
+  if command -v readelf >/dev/null 2>&1; then
+    readelf_bin="$(command -v readelf)"
+  elif command -v llvm-readelf >/dev/null 2>&1; then
+    readelf_bin="$(command -v llvm-readelf)"
+  fi
+
+  if [ -n "$readelf_bin" ]; then
+    local queue="$CACHE_DIR/.elfdeps-$-$RANDOM.queue"
+    local seen="$CACHE_DIR/.elfdeps-$-$RANDOM.seen"
+    : > "$queue"; : > "$seen"
+    printf '%s\n' "$file" >> "$queue"
+    while IFS= read -r current; do
+      [ -f "$current" ] || continue
+      grep -Fxq "$current" "$seen" 2>/dev/null && continue
+      printf '%s\n' "$current" >> "$seen"
+      "$readelf_bin" -d "$current" 2>/dev/null         | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p'         | while IFS= read -r soname; do
+            [ -n "$soname" ] || continue
+            case "$soname" in
+              libc.so|libdl.so|libm.so|liblog.so|libandroid.so) continue ;;
+            esac
+            local_path=''
+            if [ -f "$host_prefix/lib/$soname" ]; then
+              local_path="$host_prefix/lib/$soname"
+            else
+              local_path="$(find "$host_prefix/lib" -maxdepth 3 -type f -name "$soname" -print -quit 2>/dev/null || true)"
+            fi
+            [ -n "$local_path" ] || continue
+            cp -Lf "$local_path" "$dest/$soname"
+            printf '%s\n' "$local_path" >> "$queue"
+          done
+    done < "$queue"
+    rm -f "$queue" "$seen"
+  fi
+
+  # Keep ldd as a secondary compatibility path for unusual linker output.
+  if command -v ldd >/dev/null 2>&1; then
+    local listing
+    listing="$(ldd "$file" 2>/dev/null || true)"
+    printf '%s\n' "$listing" | awk '
+      /=> \/data\// { print $3 }
+      /^\/data\// { print $1 }
+    ' | while IFS= read -r lib; do
+      [ -f "$lib" ] || continue
+      case "$lib" in
+        "$host_prefix"/lib/*) cp -Lf "$lib" "$dest/" || true ;;
+      esac
+    done
+  fi
 }
 
 overlay_host_node_runtime() {
@@ -689,6 +732,9 @@ EOF_GIT
     "GIT_SSL_CAINFO=$stage/usr/etc/tls/cert.pem"
     "SSL_CERT_FILE=$stage/usr/etc/tls/cert.pem"
   )
+  if readelf -d "$stage/usr/bin/git" 2>/dev/null | grep -Fq '[libpcre2-8.so]'; then
+    [ -f "$stage/usr/lib/libpcre2-8.so" ] || { echo '[DSH] Git dependency libpcre2-8.so missing from embedded runtime.'; exit 8; }
+  fi
   "${env_prefix[@]}" "$stage/usr/bin/git" --version >/dev/null 2>&1 || { echo '[DSH] Embedded git smoke test failed.'; exit 8; }
   "${env_prefix[@]}" "$stage/usr/bin/ssh" -V >/dev/null 2>&1 || { echo '[DSH] Embedded ssh smoke test failed.'; exit 8; }
   [ -f "$stage/usr/libexec/git-core/git-remote-https" ] || { echo '[DSH] git-remote-https helper missing.'; exit 8; }
