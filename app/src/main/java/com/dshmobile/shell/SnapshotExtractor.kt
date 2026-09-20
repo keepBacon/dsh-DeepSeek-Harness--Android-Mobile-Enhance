@@ -37,10 +37,31 @@ object SnapshotExtractor {
     Paths.get("/system/bin/sh").normalize(),
   )
 
-  /** Extract an xz-compressed tar stream without allowing path traversal. */
-  fun extract(input: InputStream, totalBytes: Long, dest: File, onProgress: (Long, Long) -> Unit) {
+  /**
+   * Extract an xz-compressed tar stream without allowing path traversal.
+   *
+   * [preservedRoots] are existing user-owned trees below [dest] that an APK
+   * runtime refresh must never overwrite. This is used for HOME: the bundled
+   * snapshot may seed a default profile on first install, but an upgrade must
+   * preserve installed plugins, credentials, Skills, caches and user profile
+   * manifests byte-for-byte.
+   */
+  fun extract(
+    input: InputStream,
+    totalBytes: Long,
+    dest: File,
+    onProgress: (Long, Long) -> Unit,
+    preservedRoots: Set<File> = emptySet(),
+  ) {
     val root = dest.canonicalFile.toPath().normalize()
     Files.createDirectories(root)
+    val preservedPaths = preservedRoots.mapTo(LinkedHashSet()) { preserved ->
+      val path = preserved.canonicalFile.toPath().normalize()
+      if (!path.startsWith(root) || path == root) {
+        throw SecurityException("snapshot preserved root escapes destination: $path")
+      }
+      path
+    }
 
     // Most runtime archives contain tens of thousands of entries sharing the
     // same parent directories. Re-validating every path component for every
@@ -62,6 +83,21 @@ object SnapshotExtractor {
           while (entry != null) {
             val current = entry
             val target = safeTarget(root, current.name)
+
+            // APK upgrades may carry a seeded home/ tree in the archive. Once
+            // the app already owns a real user HOME, skip every entry below
+            // that protected root instead of truncating package.json/lockfiles
+            // or replacing plugin/Skill content. TarArchiveInputStream advances
+            // over unread entry data when nextEntry is requested.
+            if (preservedPaths.any { target == it || target.startsWith(it) }) {
+              done += current.size.coerceAtLeast(0)
+              if (done >= nextProgress) {
+                onProgress(done, totalBytes)
+                nextProgress = done + PROGRESS_STEP_BYTES
+              }
+              entry = tar.nextEntry
+              continue
+            }
 
             when {
               current.isDirectory -> {
