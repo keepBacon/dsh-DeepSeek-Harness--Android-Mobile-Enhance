@@ -90,6 +90,12 @@ must "$MA" 'GITHUB_REPOSITORY_URL = "https://github.com/keepBacon/dsh-DeepSeek-H
 must "$MA" 'text = "版本  V0.1"'
 must "$MA" 'text = "GitHub 仓库\n$GITHUB_REPOSITORY_URL"'
 must "$MA" 'setOnClickListener { openExternalUrl(GITHUB_REPOSITORY_URL) }'
+must "$MA" 'engineManager.recoverFromBootFailure()'
+must "$EM" 'fun recoverFromBootFailure(profile: String = "web"): PluginCommandResult'
+must "$EM" 'androidSafeBootPatchFile'
+must "$EM" 'defaultPreset: workspace-write'
+must "$EM" 'setOf("@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app")'
+must "$EM" '"--patch", androidSafeBootPatchFile.absolutePath'
 
 # V0.1 runtime extraction / engine-start performance.
 must "$SE" 'COPY_BUFFER_SIZE = 256 * 1024'

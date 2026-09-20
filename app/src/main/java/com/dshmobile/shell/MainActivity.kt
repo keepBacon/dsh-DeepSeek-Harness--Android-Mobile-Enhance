@@ -2231,8 +2231,21 @@ class MainActivity : ComponentActivity() {
           PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
         }
 
-        val started = engineManager.startEngine()
+        var started = engineManager.startEngine()
         if (started) running = waitForEngineReady()
+        if (!running) {
+          val recovery = engineManager.recoverFromBootFailure()
+          if (recovery.ok) {
+            result = result.copy(
+              output = listOf(result.output.trim(), "[Android 自动恢复] " + recovery.output)
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n"),
+            )
+            engineManager.stopEngine()
+            started = engineManager.startEngine(runtimeAlreadyChecked = true)
+            if (started) running = waitForEngineReady(45_000L)
+          }
+        }
         if (running) {
           startEngineService()
           applyShizukuKeepAlive()
@@ -2810,15 +2823,25 @@ class MainActivity : ComponentActivity() {
         }
 
         runOnUiThread { showStartingState("正在启动 DSH 引擎…", "首次启动或插件较多时可能需要一些时间。") }
-        if (!engineManager.startEngine(runtimeAlreadyChecked = true)) {
-          runOnUiThread { showEngineFailure("引擎启动失败") }
-          return@Thread
+        var started = engineManager.startEngine(runtimeAlreadyChecked = true)
+        var running = started && waitForEngineReady()
+
+        // A broken plugin/config must not permanently lock the user out of
+        // sessions, settings or credentials. Recover only after the Host has
+        // produced a recognized plugin-tree failure, then retry once.
+        if (!running) {
+          val recovery = engineManager.recoverFromBootFailure()
+          if (recovery.ok) {
+            runOnUiThread {
+              showStartingState("正在自动恢复 DSH…", recovery.output)
+            }
+            engineManager.stopEngine()
+            started = engineManager.startEngine(runtimeAlreadyChecked = true)
+            running = started && waitForEngineReady(45_000L)
+          }
         }
 
-        // Poll aggressively during the first few seconds. A 1 s fixed polling
-        // interval added ~500 ms average latency after the HTTP listener was
-        // already ready. Also stop immediately if the child process dies.
-        if (waitForEngineReady()) {
+        if (running) {
           startEngineService()
           applyShizukuKeepAlive()
           runOnUiThread { showWeb() }
