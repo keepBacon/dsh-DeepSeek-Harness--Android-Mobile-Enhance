@@ -90,6 +90,23 @@ must "$MA" 'GITHUB_REPOSITORY_URL = "https://github.com/keepBacon/dsh-DeepSeek-H
 must "$MA" 'text = "版本  V0.1"'
 must "$MA" 'text = "GitHub 仓库\n$GITHUB_REPOSITORY_URL"'
 must "$MA" 'setOnClickListener { openExternalUrl(GITHUB_REPOSITORY_URL) }'
+SKM="$ROOT/app/src/main/java/com/dshmobile/shell/SkillManager.kt"
+must "$MA" "const SKILL_NAV_ID = 'dsh-android-skill-settings-nav'"
+must "$MA" "const SKILL_PANEL_ID = 'dsh-android-skill-settings-panel'"
+must "$MA" 'window.androidBridge.listSkills(BRIDGE_CAP)'
+must "$MA" 'window.androidBridge.openSkillImporter(BRIDGE_CAP)'
+must "$MA" 'window.androidBridge.deleteSkill(BRIDGE_CAP, storageKey)'
+must "$MA" "dsh-android-skills-changed"
+must "$AB" 'fun listSkills(capability: String): String'
+must "$AB" 'fun deleteSkill(capability: String, name: String): String'
+must "$AB" 'fun openSkillImporter(capability: String)'
+must "$SKM" 'class SkillManager('
+must "$SKM" 'File(engineManager.ensureDshDataHome(), "skills")'
+must "$SKM" 'fun importUri(uri: Uri): String'
+must "$SKM" 'fun listJson(): String'
+must "$SKM" 'fun deleteJson(storageKey: String): String'
+must "$SKM" 'Skill ZIP 路径越界'
+must "$SKM" 'Files.isSymbolicLink'
 must "$MA" 'engineManager.recoverFromBootFailure()'
 must "$EM" 'fun recoverFromBootFailure(profile: String = "web"): PluginCommandResult'
 forbid "$EM" 'disableNonCoreBundles'
