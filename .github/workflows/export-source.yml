@@ -1,0 +1,35 @@
+name: Export latest source
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/export-source.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/export-source.yml
+          rm -rf .git
+          zip -qr dsh-DeepSeek-Harness-Android-Mobile-Enhance-latest-source.zip .             -x "dsh-DeepSeek-Harness-Android-Mobile-Enhance-latest-source.zip"
+          sha256sum dsh-DeepSeek-Harness-Android-Mobile-Enhance-latest-source.zip             > dsh-DeepSeek-Harness-Android-Mobile-Enhance-latest-source.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-latest-source
+          path: |
+            dsh-DeepSeek-Harness-Android-Mobile-Enhance-latest-source.zip
+            dsh-DeepSeek-Harness-Android-Mobile-Enhance-latest-source.zip.sha256
+          if-no-files-found: error
+          retention-days: 1
