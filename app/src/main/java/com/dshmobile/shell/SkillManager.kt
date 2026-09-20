@@ -517,7 +517,16 @@ class SkillManager(
   private fun rewriteSkillMetadata(file: File, canonicalName: String, description: String) {
     if (!file.isFile) throw IOException("缺少 SKILL.md")
     val text = file.readText()
-    if (!text.startsWith("---")) throw IOException("${file.name} 缺少 YAML frontmatter")
+    if (!text.startsWith("---")) {
+      val prefix = buildString {
+        append("---\n")
+        append("name: ").append(canonicalName).append('\n')
+        append("description: ").append(JSONObject.quote(description)).append('\n')
+        append("---\n\n")
+      }
+      writeSkillTextAtomic(file, prefix + text)
+      return
+    }
     val end = text.indexOf("\n---", startIndex = 3)
     if (end < 0) throw IOException("${file.name} frontmatter 未闭合")
 
@@ -543,9 +552,13 @@ class SkillManager(
     }
     val updated = withDescription + text.substring(end)
 
+    writeSkillTextAtomic(file, updated)
+  }
+
+  private fun writeSkillTextAtomic(file: File, text: String) {
     val temp = File(file.parentFile, ".${file.name}.metadata-${UUID.randomUUID()}.tmp")
     try {
-      temp.writeText(updated)
+      temp.writeText(text)
       try {
         Files.move(
           temp.toPath(),
