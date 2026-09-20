@@ -829,7 +829,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         val trimmed = line.trim()
         val separator = trimmed.lastIndexOf(": ")
         if (separator <= 0) continue
-        val key = trimmed.substring(0, separator).trim().trim('"', ''')
+        val key = trimmed.substring(0, separator).trim().trim('"', '\'')
         val value = trimmed.substring(separator + 2).trim().substringBefore(" #").trim()
         if ((value == "true" || value == "set this to true or false") && safeBuildApprovalKey(key)) {
           found += key
