@@ -141,14 +141,19 @@ class MainActivity : ComponentActivity() {
       }
     }
 
-  /** Phone files -> real workspace files. Separate from chat attachment upload. */
+  /**
+   * Phone files -> files inside the current DSH working directory.
+   *
+   * The target is snapshotted before Android's picker opens. Selecting a phone
+   * file never creates, replaces, or switches the workspace itself.
+   */
   private val workspaceFilePicker =
     registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-      val workspace = pendingWorkspaceImportPath ?: ShellState.lastWorkspacePath(this)
+      val workspace = pendingWorkspaceImportPath
       pendingWorkspaceImportPath = null
       if (uris.isEmpty()) return@registerForActivityResult
       if (workspace.isNullOrBlank()) {
-        showSimpleMessage("尚未选择工作区", "请先在 DSH 中选择一个手机目录作为工作区。")
+        showSimpleMessage("没有当前工作目录", "请先在 DSH 中选择工作目录。手机文件导入只会复制文件，不会创建或切换工作目录。")
         return@registerForActivityResult
       }
       importFilesIntoWorkspace(workspace, uris)
@@ -1506,8 +1511,8 @@ class MainActivity : ComponentActivity() {
             button.removeAttribute('aria-haspopup');
             button.removeAttribute('aria-expanded');
             button.removeAttribute('disabled');
-            button.setAttribute('aria-label', '从手机导入文件到工作区');
-            button.setAttribute('title', '上传手机文件到工作区');
+            button.setAttribute('aria-label', '从手机上传文件到当前工作目录');
+            button.setAttribute('title', '上传手机文件到当前工作目录');
             button.innerHTML = icon('import');
             button.addEventListener('click', (event) => {
               event.preventDefault();
@@ -1893,31 +1898,32 @@ class MainActivity : ComponentActivity() {
   }
 
   /**
-   * Phone file import. This is intentionally a filesystem copy, not a chat
-   * attachment upload: the selected files become normal files under the
-   * workspace root and are therefore available to shell/tools immediately.
+   * Phone file import is a copy into the already-selected DSH working
+   * directory. It is deliberately not a workspace picker: choosing a phone file
+   * must never replace or create a workspace.
    */
   private fun showWorkspaceImportDialog() {
-    val remembered = ShellState.lastWorkspacePath(this)
-    if (remembered.isNullOrBlank()) {
-      android.app.AlertDialog.Builder(this)
-        .setTitle("导入手机文件")
-        .setMessage("还没有可用的工作区路径。先选择目标工作区目录，再选择要导入的手机文件。")
-        .setNegativeButton("取消", null)
-        .setPositiveButton("选择工作区目录") { _, _ -> workspaceImportTargetPicker.launch(null) }
-        .show()
+    val workspace = currentWritableWorkspacePath()
+    if (workspace == null) {
+      showSimpleMessage(
+        "没有可用的当前工作目录",
+        "请先通过 DSH 的工作目录选择功能设置一个目录。随后“上传手机文件”会直接把文件复制进去，不会把所选文件单独作为工作目录。",
+      )
       return
     }
-    android.app.AlertDialog.Builder(this)
-      .setTitle("导入手机文件")
-      .setMessage("目标工作区：\n$remembered\n\n支持一次选择多个文件；同名文件会自动生成不冲突的新文件名，不会覆盖原文件。")
-      .setNegativeButton("取消", null)
-      .setNeutralButton("更换目录") { _, _ -> workspaceImportTargetPicker.launch(null) }
-      .setPositiveButton("选择文件") { _, _ ->
-        pendingWorkspaceImportPath = remembered
-        workspaceFilePicker.launch(arrayOf("*/*"))
-      }
-      .show()
+    pendingWorkspaceImportPath = workspace
+    workspaceFilePicker.launch(arrayOf("*/*"))
+  }
+
+  /** Resolve the remembered DSH workspace without mutating workspace state. */
+  private fun currentWritableWorkspacePath(): String? {
+    val remembered = ShellState.lastWorkspacePath(this) ?: return null
+    return try {
+      val root = java.io.File(remembered).canonicalFile
+      if (root.isDirectory && root.canWrite()) root.absolutePath else null
+    } catch (_: Throwable) {
+      null
+    }
   }
 
   /** Handle Android share-sheet SEND/SEND_MULTIPLE as workspace imports. */
@@ -1972,9 +1978,8 @@ class MainActivity : ComponentActivity() {
       try {
         val root = java.io.File(workspacePath).canonicalFile
         canonicalRoot = root
-        if (!root.exists() || !root.isDirectory) throw java.io.IOException("工作区目录不存在：${root.absolutePath}")
-        if (!root.canWrite()) throw java.io.IOException("工作区不可写，请检查‘所有文件访问权限’：${root.absolutePath}")
-        ShellState.rememberWorkspacePath(this, root.absolutePath)
+        if (!root.exists() || !root.isDirectory) throw java.io.IOException("工作目录不存在：${root.absolutePath}")
+        if (!root.canWrite()) throw java.io.IOException("工作目录不可写，请检查‘所有文件访问权限’：${root.absolutePath}")
 
         for (uri in uris.distinctBy { it.toString() }) {
           try {
@@ -2008,7 +2013,7 @@ class MainActivity : ComponentActivity() {
         }
         val summary = buildString {
           if (imported.isNotEmpty()) {
-            append("已导入 ${imported.size} 个文件到：\n")
+            append("已上传 ${imported.size} 个文件到当前工作目录：\n")
             append(canonicalRoot?.absolutePath ?: workspacePath)
             append("\n\n")
             append(imported.take(12).joinToString("\n"))
@@ -2072,7 +2077,7 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun notifyWorkspaceFilesImported(workspace: String, files: List<String>) {
-    showTestNotification("文件已导入工作区", "${files.size} 个文件 · ${java.io.File(workspace).name}")
+    showTestNotification("文件已上传到工作目录", "${files.size} 个文件 · ${java.io.File(workspace).name}")
     val detail = org.json.JSONObject().apply {
       put("workspace", workspace)
       put("files", org.json.JSONArray(files))
