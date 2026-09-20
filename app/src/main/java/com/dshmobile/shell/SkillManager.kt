@@ -229,7 +229,7 @@ class SkillManager(
       .take(80)
       .trimEnd('-')
     return base.takeIf { validCollectionId(it) }
-      ?: "skill-pack-" + System.currentTimeMillis()
+      ?: "skill-pack-" + java.lang.Integer.toUnsignedString(displayName.hashCode(), 16)
   }
 
   private fun collectionManifestFile(dir: File): File = File(dir, "collection.json")
