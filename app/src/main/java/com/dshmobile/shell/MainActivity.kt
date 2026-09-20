@@ -1058,25 +1058,44 @@ class MainActivity : ComponentActivity() {
             }
 
             [data-dsh-mobile-settings-overlay] {
-              z-index: 1100 !important;
-              align-items: stretch !important;
-              justify-content: stretch !important;
-              padding-top: var(--dsh-mobile-bar) !important;
+              position: fixed !important;
+              inset: 0 !important;
+              z-index: 2147483000 !important;
+              width: 100vw !important;
+              height: 100dvh !important;
+              max-width: none !important;
+              max-height: none !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              box-sizing: border-box !important;
+              padding:
+                max(8px, env(safe-area-inset-top))
+                max(8px, env(safe-area-inset-right))
+                max(8px, env(safe-area-inset-bottom))
+                max(8px, env(safe-area-inset-left)) !important;
+              overflow: visible !important;
+              transform: none !important;
+              contain: none !important;
             }
 
             [data-dsh-mobile-settings-dialog] {
               position: relative !important;
               inset: auto !important;
+              transform: none !important;
               display: flex !important;
               flex-direction: column !important;
-              width: 100vw !important;
-              height: calc(100dvh - var(--dsh-mobile-bar)) !important;
-              max-width: none !important;
-              max-height: none !important;
-              margin: 0 !important;
-              border-radius: 16px 16px 0 0 !important;
+              width: min(980px, calc(100vw - 20px)) !important;
+              height: min(920px, calc(100dvh - 20px)) !important;
+              max-width: calc(100vw - 20px) !important;
+              max-height: calc(100dvh - 20px) !important;
+              margin: 0 auto !important;
+              border-radius: 18px !important;
               overflow: hidden !important;
               min-width: 0 !important;
+              min-height: 0 !important;
+              box-sizing: border-box !important;
+              box-shadow: 0 18px 64px rgba(0, 0, 0, .28) !important;
             }
 
             [data-dsh-mobile-settings-nav] {
@@ -1316,8 +1335,20 @@ class MainActivity : ComponentActivity() {
                 max-height: calc(100svh - 12px) !important;
               }
 
+              [data-dsh-mobile-settings-overlay] {
+                padding:
+                  max(4px, env(safe-area-inset-top))
+                  max(4px, env(safe-area-inset-right))
+                  max(4px, env(safe-area-inset-bottom))
+                  max(4px, env(safe-area-inset-left)) !important;
+              }
+
               [data-dsh-mobile-settings-dialog] {
-                border-radius: 12px 12px 0 0 !important;
+                width: calc(100vw - 8px) !important;
+                height: calc(100dvh - 8px) !important;
+                max-width: calc(100vw - 8px) !important;
+                max-height: calc(100dvh - 8px) !important;
+                border-radius: 12px !important;
               }
 
               [data-dsh-mobile-settings-nav] {
@@ -1331,6 +1362,12 @@ class MainActivity : ComponentActivity() {
 
             @media (orientation: landscape) and (max-height: 560px) {
               :root[data-dsh-android="mobile"] { --dsh-mobile-bar: 46px; }
+              [data-dsh-mobile-settings-dialog] {
+                width: calc(100vw - 12px) !important;
+                height: calc(100dvh - 12px) !important;
+                max-width: calc(100vw - 12px) !important;
+                max-height: calc(100dvh - 12px) !important;
+              }
               #dsh-android-mobile-bar { height: 46px; padding-block: 3px; }
               #dsh-android-mobile-bar button { width: 38px; height: 38px; min-width: 38px; min-height: 38px; }
               [data-rightbar-col], [data-rightbar-col] > * { max-height: 82svh !important; }
