@@ -869,6 +869,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     section: String,
     key: String,
     value: String,
+    quoteValue: Boolean = true,
   ): String {
     val lines = text.replace("\r\n", "\n").split("\n").toMutableList()
     var sectionIndex = lines.indexOfFirst { Regex("""^\s*${Regex.escape(section)}\s*:\s*(?:#.*)?$""").matches(it) }
@@ -888,7 +889,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
 
     val encodedKey = JSONObject.quote(key)
-    val encodedValue = JSONObject.quote(value)
+    val encodedValue = if (quoteValue) JSONObject.quote(value) else value
     for (i in sectionIndex + 1 until end) {
       val parsed = parseAllowBuildLine(lines[i]) ?: continue
       if (parsed.first == key) {
@@ -938,6 +939,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         "allowBuilds",
         "node-pty",
         "false",
+        quoteValue = false,
       )
     }
 
