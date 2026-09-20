@@ -872,6 +872,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
     quoteValue: Boolean = true,
   ): String {
     val lines = text.replace("\r\n", "\n").split("\n").toMutableList()
+    val emptyMap = Regex("""^(\s*)${Regex.escape(section)}\s*:\s*\{\s*}\s*(?:#.*)?$""")
+    val emptyMapIndex = lines.indexOfFirst { emptyMap.matches(it) }
+    if (emptyMapIndex >= 0) {
+      val indent = lines[emptyMapIndex].takeWhile { it.isWhitespace() }
+      lines[emptyMapIndex] = indent + section + ":"
+    }
     var sectionIndex = lines.indexOfFirst { Regex("""^\s*${Regex.escape(section)}\s*:\s*(?:#.*)?$""").matches(it) }
     if (sectionIndex < 0) {
       if (lines.isNotEmpty() && lines.last().isNotBlank()) lines.add("")
