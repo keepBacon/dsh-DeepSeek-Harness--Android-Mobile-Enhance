@@ -602,6 +602,11 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { notifySkillsChanged(result) }
           result
         },
+        onDeleteSkillCollection = { collectionId ->
+          val result = skillManager.deleteCollectionJson(collectionId)
+          runOnUiThread { notifySkillsChanged(result) }
+          result
+        },
         onWorkspacePath = { ShellState.lastWorkspacePath(this) },
         pickToken = pickToken,
       ),
