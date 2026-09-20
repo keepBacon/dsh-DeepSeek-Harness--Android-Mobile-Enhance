@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
   private lateinit var engineStatus: TextView
   private lateinit var progressText: TextView
   private val engineManager by lazy { EngineManager(this, pickToken) }
+  private val skillManager by lazy { SkillManager(this, engineManager) }
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -197,6 +198,22 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { installPluginInBackground(installSpec) }
         } catch (t: Throwable) {
           runOnUiThread { showSimpleMessage("导入失败", t.message ?: t.javaClass.simpleName) }
+        }
+      }.start()
+    }
+
+  /** Import a local DSH Skill bundle (.zip) or flat Skill Markdown file. */
+  private val skillPackagePicker =
+    registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+      if (uri == null) return@registerForActivityResult
+      Thread {
+        val result = skillManager.importUri(uri)
+        runOnUiThread {
+          notifySkillsChanged(result)
+          val parsed = try { org.json.JSONObject(result) } catch (_: Throwable) { null }
+          if (parsed?.optBoolean("ok", false) != true) {
+            showSimpleMessage("Skill 导入失败", parsed?.optString("error") ?: "未知错误")
+          }
         }
       }.start()
     }
@@ -573,6 +590,13 @@ class MainActivity : ComponentActivity() {
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
+        onOpenSkillImporter = { runOnUiThread { skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream")) } },
+        onListSkills = { skillManager.listJson() },
+        onDeleteSkill = { name ->
+          val result = skillManager.deleteJson(name)
+          runOnUiThread { notifySkillsChanged(result) }
+          result
+        },
         onWorkspacePath = { ShellState.lastWorkspacePath(this) },
         pickToken = pickToken,
       ),
@@ -1692,6 +1716,19 @@ class MainActivity : ComponentActivity() {
       webView.evaluateJavascript(
         "window.dispatchEvent(new CustomEvent('dsh-android-files-imported',{detail:$detail}));" +
           "window.dispatchEvent(new Event('focus'));",
+        null,
+      )
+    } catch (_: Throwable) {}
+  }
+
+  /** Notify the injected Web settings page after a Skill mutation/import. */
+  private fun notifySkillsChanged(resultJson: String) {
+    val detail = try { org.json.JSONObject(resultJson).toString() } catch (_: Throwable) {
+      org.json.JSONObject().put("ok", false).put("error", resultJson).toString()
+    }
+    try {
+      webView.evaluateJavascript(
+        "window.dispatchEvent(new CustomEvent('dsh-android-skills-changed',{detail:$detail}));",
         null,
       )
     } catch (_: Throwable) {}
