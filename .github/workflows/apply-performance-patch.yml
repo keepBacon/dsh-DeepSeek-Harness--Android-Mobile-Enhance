@@ -1,0 +1,56 @@
+name: Apply runtime performance patch
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/apply-performance-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reassemble and verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .perf-sync/patch00               .perf-sync/patch01               .perf-sync/patch02               .perf-sync/patch03               .perf-sync/patch04               .perf-sync/patch05 > /tmp/perf.b64
+          base64 --decode /tmp/perf.b64 > /tmp/runtime-perf.patch
+          echo "204cf62cc260060832bf47bc4081c083b5a9827777bac24171f9399042a717c0  /tmp/runtime-perf.patch" | sha256sum --check
+          patch -p1 --dry-run < /tmp/runtime-perf.patch
+          patch -p1 < /tmp/runtime-perf.patch
+
+      - name: Run regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-severe-fixes.sh
+          bash scripts/check-high-fixes.sh
+          bash scripts/check-remaining-fixes.sh
+          bash scripts/check-koffi-prebuild-fix.sh
+          bash scripts/check-fs-search-fix.sh
+
+      - name: Commit optimized source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .perf-sync
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Optimize runtime extraction and DSH startup"
+          git push origin HEAD:main
