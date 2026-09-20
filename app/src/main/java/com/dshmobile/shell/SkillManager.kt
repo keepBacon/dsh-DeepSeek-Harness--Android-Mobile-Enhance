@@ -429,7 +429,10 @@ class SkillManager(
             else -> null
           } ?: return@forEach
           val metadata = parseMetadata(skillFile)
-          if (metadata.originalName != metadata.name) {
+          val hasExplicitName = skillFile.inputStream().bufferedReader().useLines { lines ->
+            lines.take(80).any { Regex("""^\s*name\s*:""").containsMatchIn(it) }
+          }
+          if (!hasExplicitName || metadata.originalName != metadata.name) {
             rewriteSkillName(skillFile, metadata.name)
             repaired++
           }
@@ -447,6 +450,33 @@ class SkillManager(
    * Non-ASCII identifiers are not transliterated because doing so can silently
    * merge unrelated Skills.
    */
+  /**
+   * Legacy/community Skill packs may omit the frontmatter name.
+   * Derive a deterministic identity from the bundle directory first, then
+   * from the first Markdown H1. Installation writes the canonical name back.
+   */
+  private fun deriveSkillName(file: File, text: String): String {
+    val parent = file.parentFile?.name.orEmpty()
+      .removeSuffix(".skill")
+      .removeSuffix("-skill")
+      .trim()
+    val parentNormalized = normalizeSkillName(parent)
+    if (validName(parentNormalized) && parentNormalized !in setOf("skills", "skill", "src", "docs")) {
+      return parent
+    }
+
+    val h1 = Regex("""(?m)^#\s+(.+?)\s*$""")
+      .find(text)
+      ?.groupValues
+      ?.getOrNull(1)
+      ?.replace(Regex("""[\x60*_~]"""), "")
+      ?.trim()
+      .orEmpty()
+    if (h1.isNotBlank() && validName(normalizeSkillName(h1))) return h1
+
+    throw IOException("Skill 缺少 name，且无法从目录名或一级标题推导")
+  }
+
   private fun normalizeSkillName(raw: String): String {
     val trimmed = raw.trim().lowercase(java.util.Locale.ROOT)
     if (validName(trimmed)) return trimmed
@@ -468,15 +498,18 @@ class SkillManager(
 
     val header = text.substring(0, end)
     val pattern = Regex("""(?m)^(\s*name\s*:\s*).*$""")
-    val match = pattern.find(header) ?: throw IOException("Skill 缺少 name")
-    val current = unquote(match.value.substringAfter(':').substringBefore(" #").trim())
-    if (current == canonicalName) return
-
-    val replacement = match.groupValues[1] + canonicalName
-    val updatedHeader =
+    val match = pattern.find(header)
+    val updatedHeader = if (match == null) {
+      val prefix = if (header.endsWith("\n")) header else header + "\n"
+      prefix + "name: " + canonicalName
+    } else {
+      val current = unquote(match.value.substringAfter(':').substringBefore(" #").trim())
+      if (current == canonicalName) return
+      val replacement = match.groupValues[1] + canonicalName
       header.substring(0, match.range.first) +
         replacement +
         header.substring(match.range.last + 1)
+    }
     val updated = updatedHeader + text.substring(end)
 
     val temp = File(file.parentFile, ".${file.name}.name-${UUID.randomUUID()}.tmp")
@@ -522,7 +555,8 @@ class SkillManager(
       }
     }
 
-    val originalName = field("name") ?: throw IOException("Skill 缺少 name")
+    val originalName = field("name")?.takeIf { it.isNotBlank() }
+      ?: deriveSkillName(file, text)
     val name = normalizeSkillName(originalName)
     if (!validName(name)) {
       throw IOException("Skill name 无法安全转换为 kebab-case：$originalName")
