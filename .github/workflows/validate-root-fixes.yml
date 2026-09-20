@@ -37,3 +37,5 @@ jobs:
           ./gradlew :app:compileDebugKotlin --no-daemon
 
 # rerun: root-fix-followup
+
+# rerun: kotlin-quote-fix
