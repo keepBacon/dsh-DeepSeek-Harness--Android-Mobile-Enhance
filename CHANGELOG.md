@@ -1,3 +1,6 @@
+- Skill ZIP 导入新增集合文件夹：每个 ZIP 在 `$DSH_HOME/skill-collections/<集合>/collection.json` 建立稳定集合，Web Skill 管理页按文件夹折叠显示全部成员，并可一键删除整个集合；为保持 DSH 直接子级 Skill 发现兼容，实际 Skill 仍保存在 `$DSH_HOME/skills` 顶层。
+- 插件原生依赖兼容增强：Android profile 自动把 `node-pty` override 到与内置 Node 一起构建并通过 require smoke test 的 Runtime 副本，禁止插件再次在手机端 node-gyp 编译；Termux 完整构建若缺少可复用 node-pty 将直接失败，避免产出插件兼容性残缺 APK。
+- pnpm workspace 映射写入兼容 `overrides: {}` / `allowBuilds: {}` 空映射，避免重复 YAML key，并把 node-pty 的 allowBuilds 写为真正布尔值 false。
 - 根因修复移动端设置裁剪：DSH 设置弹窗位于带 transform/contain/overflow 的侧栏祖先中，导致 position:fixed 仍被侧栏建立的 containing block 裁剪；现打开设置时解除整条宿主祖先链的 transform/filter/contain/overflow 裁剪，关闭后恢复。
 - 根因修复插件市场与 Git 插件安装：Web Host 启动前即修复 web profile 的 pnpm workspace 策略，并把 autoInstallPeers=false/nodeLinker=hoisted 传给 Host 子进程；Git 依赖的 ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED 会提取 pnpm 输出中的完整 URL allowBuilds 键，显示授权并可正确写回后重试。
 - Skill 导入兼容性增强：允许社区 SKILL.md 缺少完整 frontmatter，按目录名/H1 推导 name、从正文推导 description，并在安装时原子写回标准 frontmatter；单个无法修复条目继续跳过而不终止整包。
