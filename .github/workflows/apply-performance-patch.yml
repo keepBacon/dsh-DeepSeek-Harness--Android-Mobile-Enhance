@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .perf-sync/patch00               .perf-sync/patch01               .perf-sync/patch02               .perf-sync/patch03               .perf-sync/patch04               .perf-sync/patch05 > /tmp/perf.b64
+          cat .perf-sync/patch00 .perf-sync/patch01 .perf-sync/patch02 .perf-sync/patch03 .perf-sync/patch04 .perf-sync/patch05 > /tmp/perf.b64
           base64 --decode /tmp/perf.b64 > /tmp/runtime-perf.patch
           echo "204cf62cc260060832bf47bc4081c083b5a9827777bac24171f9399042a717c0  /tmp/runtime-perf.patch" | sha256sum --check
           patch -p1 --dry-run < /tmp/runtime-perf.patch
@@ -54,3 +54,5 @@ jobs:
           fi
           git commit -m "Optimize runtime extraction and DSH startup"
           git push origin HEAD:main
+
+# trigger: runtime-performance-v1
