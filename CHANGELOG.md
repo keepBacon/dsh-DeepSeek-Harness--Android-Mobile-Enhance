@@ -1,4 +1,4 @@
-- 插件启动保护调整为完全非破坏式：不再自动停用/删除/改写任何插件 bundle；Android 运行时为 permission-presets 注入一个“跟随插件组合默认值”的内部 preset，使插件自定义 sandbox/approval 组合可正常启动，同时保持插件功能与组合语义。\n- README 的“使用的开源项目”清单仅保留 `thness/dsh-mobile` 与 `deepseek-ai/deepseek-harness`。
+- Web 设置新增 `Skills` 管理分页：直接管理 `$DSH_HOME/skills`，支持 ZIP/Markdown 导入、列表刷新与安全删除；Skill 变更不修改插件树、聊天记录、模型 Key、settings 或其他 DSH 用户数据。\n- 插件启动保护调整为完全非破坏式：不再自动停用/删除/改写任何插件 bundle；Android 运行时为 permission-presets 注入一个“跟随插件组合默认值”的内部 preset，使插件自定义 sandbox/approval 组合可正常启动，同时保持插件功能与组合语义。\n- README 的“使用的开源项目”清单仅保留 `thness/dsh-mobile` 与 `deepseek-ai/deepseek-harness`。
 # V0.1 — Version Reset & GitHub Entry
 
 - Runtime extraction/startup performance pass: 256 KiB streaming buffer, verified-directory cache, batched Android exec-xattr stamping, single-syscall chmod, lower-frequency progress UI updates, fast XZ preset 0 for newly rebuilt snapshots, adaptive 100/250/500 ms engine probing, 80 ms immediate-exit guard, child-liveness early failure detection, and persistent Node compile cache.
