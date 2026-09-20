@@ -579,7 +579,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       engineLogFile.parentFile?.mkdirs()
       engineLogFile.writeText("")
       val env = engineEnv(preload)
-      engineProcess = startWithArgs(args, env)
+      engineProcess = startWithArgs(args.toTypedArray(), env)
       ACTIVE_PROCESS.set(engineProcess)
 
       // Catch only truly immediate linker/loader failures here. The Activity
