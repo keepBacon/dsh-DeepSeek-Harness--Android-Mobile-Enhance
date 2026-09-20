@@ -472,9 +472,11 @@ class SkillManager(
     val current = unquote(match.value.substringAfter(':').substringBefore(" #").trim())
     if (current == canonicalName) return
 
-    val updatedHeader = pattern.replaceFirst(header) { result ->
-      result.groupValues[1] + canonicalName
-    }
+    val replacement = match.groupValues[1] + canonicalName
+    val updatedHeader =
+      header.substring(0, match.range.first) +
+        replacement +
+        header.substring(match.range.last + 1)
     val updated = updatedHeader + text.substring(end)
 
     val temp = File(file.parentFile, ".${file.name}.name-${UUID.randomUUID()}.tmp")
