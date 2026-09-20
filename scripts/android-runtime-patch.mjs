@@ -36,6 +36,7 @@ function versionAtLeast(value, floor) {
 const requireBuiltinMandatory = versionAtLeast(targetVersion, '0.1.6-alpha.2')
 const androidStableStorageMandatory = versionAtLeast(targetVersion, '0.1.5-rc.1')
 const androidFlockMandatory = versionAtLeast(targetVersion, '0.1.5-rc.1')
+const androidPermissionPresetGuardMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2')
 const warn = (msg) => console.error(`[DSH Android compat] WARN: ${msg}`)
 const info = (name, status, file = '') => report.push({ name, status, file: file ? path.relative(prefix, file) : '' })
 
@@ -75,6 +76,7 @@ const wanted = new Set([
   '@deepseek-ai/dsh-tool-fs-search',
   '@vscode/ripgrep',
   '@deepseek-ai/dsh-settings',
+  '@deepseek-ai/dsh-base',
 ])
 const dirs = packageDirsByName(wanted)
 const byName = new Map()
@@ -111,6 +113,38 @@ function eachPackage(name, relFile, fn, { mandatory = false, requiredIfPresent =
     throw new Error(`required Android compatibility patch incomplete: ${name} (${ok}/${packages.length})`)
   }
 }
+
+// A third-party bundle may legitimately override the composed sandbox/approval
+// defaults so they no longer map to a named permission preset. Upstream
+// dsh-permission-presets supports that state only when defaultPreset is explicit;
+// otherwise the whole plugin tree throws during Host boot. Pin the safe new-session
+// default in the shipped base layer so an unrelated plugin can never brick Web
+// startup merely by creating a derived "custom" composition.
+eachPackage('@deepseek-ai/dsh-base', 'cordis.patch.yml', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: explicit permission default preset'
+  if (txt.includes(marker)) return 'already'
+  const anchor = `    - id: permission
+      name: '@deepseek-ai/dsh-permission-presets'
+      config:
+        presets:
+`
+  if (!txt.includes(anchor)) {
+    if (androidPermissionPresetGuardMandatory) throw new Error(`permission preset base anchor changed: ${file}`)
+    warn(`permission preset base anchor changed: ${file}`)
+    return 'anchor-missing'
+  }
+  const replacement = `    - id: permission
+      name: '@deepseek-ai/dsh-permission-presets'
+      config:
+        # ${marker}. Keep fresh sessions on the upstream-safe default even
+        # when another bundle composes sandbox/approval into a custom pair.
+        defaultPreset: workspace-write
+        presets:
+`
+  write(file, txt.replace(anchor, replacement))
+  return 'patched'
+}, { mandatory: androidPermissionPresetGuardMandatory })
 
 // DSH 0.1.6-alpha.2: profile resolution loads node-addon-require-builtin in
 // host preparation, but that package publishes no android-arm64 binary.  The
