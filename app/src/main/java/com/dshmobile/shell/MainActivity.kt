@@ -1614,6 +1614,9 @@ class MainActivity : ComponentActivity() {
         };
 
         const tagSettings = () => {
+          document.querySelectorAll('[data-dsh-mobile-settings-host-ancestor]').forEach((node) => {
+            node.removeAttribute('data-dsh-mobile-settings-host-ancestor');
+          });
           const parts = findSettingsParts();
           if (!parts) return null;
           const { modal, nav, navButtons, navList, content } = parts;
