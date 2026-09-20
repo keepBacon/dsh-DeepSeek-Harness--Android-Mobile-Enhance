@@ -594,6 +594,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
     // 进程级 CAS：并发调用只有一个能真正启动（设备实证 EADDRINUSE 双启动）。
     if (!STARTING.compareAndSet(false, true)) return true
     return try {
+      // This must run before the Host starts, not only before Android-native
+      // plugin operations: Web marketplace plugins invoke DSH's plugin manager
+      // inside the already-running Host and therefore share this profile file.
+      ensurePluginWorkspaceCompat("web")
       val args = arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
         "web", "--port", port.toString(), "--no-open",
@@ -687,6 +691,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "DSH_RG_PATH" to File(usrDir, "bin/rg").takeIf { it.isFile }?.absolutePath.orEmpty(),
       "DSH_ANDROID_STANDALONE" to "1",
       "DSH_PICK_TOKEN" to (pickToken ?: ""),
+      // DSH's in-Web plugin manager launches pnpm as a child of this Host.
+      // Keep peer dependency resolution aligned with the shipped profile:
+      // DSH peers come from the runtime fallback rather than npm prereleases.
+      "npm_config_auto_install_peers" to "false",
+      "npm_config_node_linker" to "hoisted",
     )
 
     // The Termux Git/OpenSSH binaries are relocatable only when their prefix-
@@ -793,7 +802,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun classifyPluginFailure(text: String, timedOut: Boolean = false): String? {
     if (timedOut) return "timeout"
     val rules = listOf(
-      "build-blocked" to Regex("""ERR_PNPM_IGNORED_BUILDS|Ignored build scripts""", RegexOption.IGNORE_CASE),
+      "build-blocked" to Regex("""ERR_PNPM_IGNORED_BUILDS|Ignored build scripts|ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED|not in the ["']allowBuilds["'] allowlist""", RegexOption.IGNORE_CASE),
       "not-found" to Regex("""ERR_PNPM_FETCH_404|\bE404\b|404 Not Found|Not Found - GET""", RegexOption.IGNORE_CASE),
       "no-matching-version" to Regex("""ERR_PNPM_NO_MATCHING_VERSION|\bETARGET\b|No matching version""", RegexOption.IGNORE_CASE),
       "disk-full" to Regex("""\bENOSPC\b|no space left on device""", RegexOption.IGNORE_CASE),
@@ -839,7 +848,31 @@ class EngineManager(private val context: Context, private val pickToken: String?
     writeTextAtomic(file, workspace)
   }
 
-  /** Read exact package names pnpm 11 left undecided under allowBuilds. */
+  /**
+   * Parse one scalar allowBuilds mapping line. Git-hosted pnpm keys contain
+   * https://, so splitting at the first ':' truncates the identity and makes
+   * the approval UI disappear. The mapping delimiter is the final ': '.
+   */
+  private fun parseAllowBuildLine(line: String): Pair<String, String>? {
+    val trimmed = line.trim()
+    val separator = trimmed.lastIndexOf(": ")
+    if (separator <= 0) return null
+    val key = trimmed.substring(0, separator).trim().trim('\"', '\'')
+    val value = trimmed.substring(separator + 2)
+      .trim()
+      .substringBefore(" #")
+      .trim()
+      .trim('\"', '\'')
+    if (!safeBuildApprovalKey(key)) return null
+    return key to value
+  }
+
+  private fun safeBuildApprovalKey(value: String): Boolean {
+    if (value.isBlank() || value.length > 4096) return false
+    return value.none { ch -> ch == '\n' || ch == '\r' || ch == '\u0000' || (ch.code < 0x20 && ch != '\t') }
+  }
+
+  /** Read exact pnpm allowBuilds keys, including git-hosted URL identities. */
   fun pendingPluginBuilds(profile: String = "web"): List<String> {
     val file = pluginWorkspaceFile(profile)
     if (!file.isFile) return emptyList()
@@ -859,14 +892,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
         if (line.isBlank() || line.trimStart().startsWith("#")) continue
         val indent = line.indexOfFirst { !it.isWhitespace() }.let { if (it < 0) line.length else it }
         if (indent <= baseIndent) break
-        val trimmed = line.trim()
-        val colon = trimmed.indexOf(':')
-        if (colon <= 0) continue
-        val rawKey = trimmed.substring(0, colon).trim()
-        val rawValue = trimmed.substring(colon + 1).trim().substringBefore(" #").trim().trim('\"', '\'')
-        if (rawValue != pendingValue) continue
-        val key = rawKey.trim().trim('\"', '\'')
-        if (safePackageName(key)) result.add(key)
+        val parsed = parseAllowBuildLine(line) ?: continue
+        if (parsed.second == pendingValue) result.add(parsed.first)
       }
       result.distinct()
     } catch (t: Throwable) {
@@ -877,8 +904,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   /** Persist explicit build-script approvals without running any script yet. */
   fun approvePluginBuilds(names: List<String>, profile: String = "web"): PluginCommandResult {
-    val wanted = names.map { it.trim() }.filter { safePackageName(it) }.distinct()
-    if (wanted.isEmpty()) return PluginCommandResult(false, -1, "没有可授权的构建脚本")
+    val pendingNow = pendingPluginBuilds(profile).toSet()
+    val wanted = names.map { it.trim() }
+      .filter { safeBuildApprovalKey(it) && it in pendingNow }
+      .distinct()
+    if (wanted.isEmpty()) return PluginCommandResult(false, -1, "没有仍处于待授权状态的构建脚本")
     val file = pluginWorkspaceFile(profile)
     return try {
       file.parentFile?.mkdirs()
@@ -911,11 +941,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       for (name in wanted) {
         var found = false
         for (i in allowIndex + 1 until end) {
-          val trimmed = lines[i].trim()
-          val colon = trimmed.indexOf(':')
-          if (colon <= 0) continue
-          val key = trimmed.substring(0, colon).trim().trim('\"', '\'')
-          if (key == name) {
+          val parsed = parseAllowBuildLine(lines[i]) ?: continue
+          if (parsed.first == name) {
             val prefix = lines[i].takeWhile { it.isWhitespace() }
             lines[i] = prefix + JSONObject.quote(name) + ": true"
             found = true
