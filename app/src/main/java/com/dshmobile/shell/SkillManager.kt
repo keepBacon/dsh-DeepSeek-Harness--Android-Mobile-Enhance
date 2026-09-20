@@ -466,6 +466,20 @@ class SkillManager(
    * Derive a deterministic identity from the bundle directory first, then
    * from the first Markdown H1. Installation writes the canonical name back.
    */
+  private fun deriveSkillDescription(text: String, canonicalName: String, frontmatterEnd: Int): String {
+    val body = if (frontmatterEnd >= 0) text.substring(frontmatterEnd + 4) else text
+    val first = body.lineSequence()
+      .map { it.trim() }
+      .filter { it.isNotBlank() }
+      .filterNot { it.startsWith("#") || it.startsWith("```") || it == "---" }
+      .firstOrNull()
+      ?.replace(Regex("""[*_\x60]+"""), "")
+      ?.trim()
+      .orEmpty()
+    return first.takeIf { it.isNotBlank() }?.take(240)
+      ?: "Imported Skill: $canonicalName"
+  }
+
   private fun deriveSkillName(file: File, text: String): String {
     val parent = file.parentFile?.name.orEmpty()
       .removeSuffix(".skill")
@@ -554,10 +568,10 @@ class SkillManager(
       val count = input.read(bytes)
       if (count <= 0) "" else String(bytes, 0, count, Charsets.UTF_8)
     }
-    if (!text.startsWith("---")) throw IOException("${file.name} 缺少 YAML frontmatter")
-    val end = text.indexOf("\n---", startIndex = 3)
-    if (end < 0) throw IOException("${file.name} frontmatter 未闭合")
-    val header = text.substring(3, end)
+    val hasFrontmatter = text.startsWith("---")
+    val end = if (hasFrontmatter) text.indexOf("\n---", startIndex = 3) else -1
+    if (hasFrontmatter && end < 0) throw IOException("${file.name} frontmatter 未闭合")
+    val header = if (hasFrontmatter) text.substring(3, end) else ""
 
     fun field(name: String): String? {
       val match = Regex("""(?m)^\s*${Regex.escape(name)}\s*:\s*(.*?)\s*$""").find(header) ?: return null
@@ -578,8 +592,8 @@ class SkillManager(
     if (!validName(name)) {
       throw IOException("Skill name 无法安全转换为 kebab-case：$originalName")
     }
-    val description = field("description")?.takeIf { it.isNotBlank() }
-      ?: "Imported Skill: $name"
+    val description = field("description")?.takeIf { it.isNotBlank() && it !in setOf("|", ">") }
+      ?: deriveSkillDescription(text, name, end)
 
     return Metadata(
       name = name,
