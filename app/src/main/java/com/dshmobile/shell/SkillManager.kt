@@ -53,12 +53,23 @@ class SkillManager(
     val directoryBundle: Boolean,
   )
 
+  private data class Discovery(
+    val candidates: List<Candidate>,
+    val duplicatesSkipped: Int,
+  )
+
+  private data class ReconcileResult(
+    val moved: Int = 0,
+    val backupDir: File? = null,
+  )
+
   private val skillRoot: File
     get() = File(engineManager.ensureDshDataHome(), "skills")
 
   fun listJson(): String {
     return try {
       val root = ensureRoot()
+      val reconciled = reconcileExistingDuplicates(root)
       val rows = JSONArray()
       root.listFiles()
         ?.filter { !it.name.startsWith(".") }
@@ -92,7 +103,12 @@ class SkillManager(
             )
           }
         }
-      JSONObject().put("ok", true).put("skills", rows).toString()
+      JSONObject()
+        .put("ok", true)
+        .put("skills", rows)
+        .put("duplicatesQuarantined", reconciled.moved)
+        .put("duplicateBackupDir", reconciled.backupDir?.absolutePath)
+        .toString()
     } catch (t: Throwable) {
       errorJson(t)
     }
@@ -131,7 +147,7 @@ class SkillManager(
     return try {
       val displayName = queryDisplayName(uri) ?: "skill"
       val lower = displayName.lowercase()
-      val imported = if (lower.endsWith(".zip")) {
+      val discovery = if (lower.endsWith(".zip")) {
         queryContentSize(uri)?.let { size ->
           if (size > MAX_ZIP_INPUT_BYTES) throw IOException("Skill ZIP 超过 512 MB 导入上限")
         }
@@ -139,22 +155,34 @@ class SkillManager(
         context.contentResolver.openInputStream(uri)?.use { input ->
           extractZip(input, extracted)
         } ?: throw IOException("无法读取所选 Skill ZIP")
-        val candidates = discoverZipCandidates(extracted)
-        if (candidates.isEmpty()) throw IOException("ZIP 中没有找到有效的 SKILL.md")
-        installCandidates(candidates)
+        discoverZipCandidates(extracted)
       } else {
         val source = File(tempRoot, "selected.md")
         context.contentResolver.openInputStream(uri)?.use { input ->
           source.outputStream().use { output -> copyWithLimit(input, output, MAX_FLAT_SKILL_BYTES) }
         } ?: throw IOException("无法读取所选 Skill 文件")
         val metadata = parseMetadata(source)
-        installCandidates(listOf(Candidate(metadata, source, false)))
+        Discovery(listOf(Candidate(metadata, source, false)), 0)
       }
+
+      if (discovery.candidates.isEmpty()) throw IOException("没有找到有效的 Skill")
+      val installed = installCandidates(discovery.candidates)
+      val reconciled = reconcileExistingDuplicates(ensureRoot())
 
       JSONObject()
         .put("ok", true)
-        .put("imported", JSONArray(imported))
-        .put("message", "已安装 ${imported.size} 个 Skill")
+        .put("imported", JSONArray(installed))
+        .put("duplicatesSkipped", discovery.duplicatesSkipped)
+        .put("duplicatesQuarantined", reconciled.moved)
+        .put("duplicateBackupDir", reconciled.backupDir?.absolutePath)
+        .put(
+          "message",
+          buildString {
+            append("已安装 ${installed.size} 个 Skill")
+            if (discovery.duplicatesSkipped > 0) append("，已自动合并 ${discovery.duplicatesSkipped} 个重复 Skill 名")
+            if (reconciled.moved > 0) append("，并备份隔离 ${reconciled.moved} 个旧重复项")
+          },
+        )
         .toString()
     } catch (t: Throwable) {
       errorJson(t)
@@ -174,11 +202,13 @@ class SkillManager(
 
   private fun installCandidates(candidates: List<Candidate>): List<String> {
     val root = ensureRoot().canonicalFile
-    val names = candidates.map { it.metadata.name }
-    if (names.distinct().size != names.size) throw IOException("导入包包含重复 Skill 名称")
+    // Discovery already selects one canonical candidate per name. Keep this
+    // defensive distinctBy so future callers can never fail the whole import
+    // just because the source bundle repeats a Skill name.
+    val uniqueCandidates = candidates.distinctBy { it.metadata.name }
 
     val installed = mutableListOf<String>()
-    for (candidate in candidates) {
+    for (candidate in uniqueCandidates) {
       val name = candidate.metadata.name
       if (!validName(name)) throw IOException("Skill 名称非法：$name")
 
@@ -231,17 +261,28 @@ class SkillManager(
     }
   }
 
-  private fun discoverZipCandidates(extracted: File): List<Candidate> {
+  /**
+   * Discover Skill roots and collapse duplicate frontmatter names.
+   *
+   * Large community collections often vendor the same Skill through several
+   * mirrors (for example top-level skills/, repos/*/skills/, contrib/, embed/).
+   * DSH identifies Skills by frontmatter name, so installing every physical
+   * copy would create an ambiguous duplicate-name set. Prefer the canonical
+   * source deterministically and keep exactly one active Skill per name.
+   */
+  private fun discoverZipCandidates(extracted: File): Discovery {
     val skillFiles = mutableListOf<File>()
     extracted.walkTopDown()
       .onEnter { dir ->
         val rel = extracted.toPath().relativize(dir.toPath()).nameCount
-        rel <= 4
+        rel <= 8
       }
       .forEach { file ->
         if (file.isFile && file.name == "SKILL.md") skillFiles += file
       }
 
+    // If a parent Skill bundle is found, nested SKILL.md files are resources,
+    // not separate install roots.
     val roots = skillFiles
       .map { it.parentFile.canonicalFile }
       .sortedBy { it.toPath().nameCount }
@@ -252,10 +293,109 @@ class SkillManager(
         }
       }
 
-    return roots.map { dir ->
+    val raw = roots.map { dir ->
       val metadata = parseMetadata(File(dir, "SKILL.md"))
       Candidate(metadata, dir, true)
     }
+
+    val selected = raw
+      .groupBy { it.metadata.name }
+      .values
+      .map { group ->
+        group.minWithOrNull(
+          compareBy<Candidate> { candidatePenalty(extracted, it) }
+            .thenBy { extracted.toPath().relativize(it.source.toPath()).nameCount }
+            .thenBy { extracted.toPath().relativize(it.source.toPath()).toString() },
+        ) ?: group.first()
+      }
+      .sortedBy { it.metadata.name }
+
+    return Discovery(
+      candidates = selected,
+      duplicatesSkipped = (raw.size - selected.size).coerceAtLeast(0),
+    )
+  }
+
+  /**
+   * Lower is better. Prefer curated top-level skills/ trees and avoid mirrors,
+   * vendored copies, tests, backups and embedded/contrib replicas.
+   */
+  private fun candidatePenalty(extracted: File, candidate: Candidate): Int {
+    val relative = try {
+      extracted.toPath().relativize(candidate.source.toPath())
+    } catch (_: Throwable) {
+      candidate.source.toPath()
+    }
+    val segments = relative.map { it.toString().lowercase() }.toList()
+    val mirrorSegments = setOf(
+      "repo", "repos", "vendor", "vendors", "node_modules", "backup", "backups",
+      "example", "examples", "test", "tests", "contrib", "embed", "embedded",
+    )
+    var penalty = segments.count { it in mirrorSegments } * 100
+    if (!candidate.source.name.equals(candidate.metadata.name, ignoreCase = true)) penalty += 25
+    if (candidate.source.parentFile?.name.equals("skills", ignoreCase = true)) penalty -= 40
+    return penalty
+  }
+
+  /**
+   * Repair duplicate names left by older builds without deleting user data.
+   * One canonical entry stays active under skills/; extra physical entries are
+   * moved outside the watched Skill root into a timestamped backup directory.
+   */
+  private fun reconcileExistingDuplicates(root: File): ReconcileResult {
+    val valid = root.listFiles()
+      ?.filter { !it.name.startsWith(".") }
+      ?.mapNotNull { entry ->
+        try {
+          val skillFile = when {
+            entry.isDirectory -> File(entry, "SKILL.md").takeIf { it.isFile }
+            entry.isFile && entry.extension.equals("md", ignoreCase = true) -> entry
+            else -> null
+          } ?: return@mapNotNull null
+          Triple(entry, parseMetadata(skillFile), entry.lastModified())
+        } catch (_: Throwable) {
+          null
+        }
+      }
+      .orEmpty()
+
+    val duplicates = valid.groupBy { it.second.name }.values.filter { it.size > 1 }
+    if (duplicates.isEmpty()) return ReconcileResult()
+
+    val backupRoot = File(
+      engineManager.ensureDshDataHome(),
+      "skill-duplicates-backup/${System.currentTimeMillis()}",
+    ).apply { mkdirs() }
+    var moved = 0
+
+    for (group in duplicates) {
+      val name = group.first().second.name
+      val keep = group.minWithOrNull(
+        compareBy<Triple<File, Metadata, Long>> {
+          when {
+            it.first.name == name -> 0
+            it.first.name == "$name.md" -> 1
+            else -> 10
+          }
+        }.thenByDescending { it.third }
+          .thenBy { it.first.name },
+      ) ?: group.first()
+
+      for (item in group) {
+        if (item.first == keep.first) continue
+        val source = item.first
+        requireDirectChild(root.canonicalFile, source)
+        var target = File(backupRoot, source.name)
+        var suffix = 2
+        while (Files.exists(target.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+          target = File(backupRoot, "${source.name}.${suffix++}")
+        }
+        move(source.toPath(), target.toPath())
+        moved++
+      }
+    }
+
+    return ReconcileResult(moved = moved, backupDir = backupRoot.takeIf { moved > 0 })
   }
 
   private fun parseMetadata(file: File): Metadata {
