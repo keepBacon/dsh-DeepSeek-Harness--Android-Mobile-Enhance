@@ -1676,11 +1676,12 @@ class MainActivity : ComponentActivity() {
             remove.textContent = zh ? '删除' : 'Delete';
             remove.addEventListener('click', () => {
               const skillName = String(skill.name || '');
-              if (!skillName) return;
+              const storageKey = String(skill.storageKey || skillName);
+              if (!storageKey) return;
               const ok = window.confirm(zh ? ('确定删除 Skill “' + skillName + '”？') : ('Delete Skill "' + skillName + '"?'));
               if (!ok) return;
               try {
-                const raw = window.androidBridge && window.androidBridge.deleteSkill(BRIDGE_CAP, skillName);
+                const raw = window.androidBridge && window.androidBridge.deleteSkill(BRIDGE_CAP, storageKey);
                 const deleted = JSON.parse(raw || '{"ok":false}');
                 if (!deleted.ok) window.alert((zh ? '删除失败：' : 'Delete failed: ') + (deleted.error || 'unknown error'));
               } catch (error) {
@@ -1695,15 +1696,32 @@ class MainActivity : ComponentActivity() {
           panel.appendChild(list);
         };
 
+        const hideNativeSettingsContent = (content) => {
+          Array.from(content.children).forEach((child) => {
+            if (child.id === SKILL_PANEL_ID) return;
+            if (child.dataset.dshSkillDisplaySaved !== '1') {
+              child.dataset.dshSkillDisplaySaved = '1';
+              child.dataset.dshSkillPrevDisplay = child.style.display || '';
+            }
+            child.style.display = 'none';
+          });
+        };
+
+        const restoreNativeSettingsContent = (content) => {
+          Array.from(content.children).forEach((child) => {
+            if (child.dataset.dshSkillDisplaySaved !== '1') return;
+            child.style.display = child.dataset.dshSkillPrevDisplay || '';
+            delete child.dataset.dshSkillPrevDisplay;
+            delete child.dataset.dshSkillDisplaySaved;
+          });
+        };
+
         const deactivateSkillSettings = (parts) => {
           if (!skillSettingsActive && !document.getElementById(SKILL_PANEL_ID)) return;
           skillSettingsActive = false;
           const panel = document.getElementById(SKILL_PANEL_ID);
           if (panel) panel.remove();
-          if (parts && parts.content) {
-            parts.content.style.display = parts.content.dataset.dshSkillPrevDisplay || '';
-            delete parts.content.dataset.dshSkillPrevDisplay;
-          }
+          if (parts && parts.content) restoreNativeSettingsContent(parts.content);
           const skillButton = document.getElementById(SKILL_NAV_ID);
           if (skillButton) {
             skillButton.setAttribute('aria-selected', 'false');
@@ -1715,18 +1733,16 @@ class MainActivity : ComponentActivity() {
         const activateSkillSettings = (parts) => {
           if (!parts) return;
           skillSettingsActive = true;
-          if (!parts.content.dataset.dshSkillPrevDisplay) {
-            parts.content.dataset.dshSkillPrevDisplay = parts.content.style.display || '__empty__';
-          }
-          parts.content.style.display = 'none';
 
           let panel = document.getElementById(SKILL_PANEL_ID);
-          if (!panel) {
+          if (!panel || panel.parentElement !== parts.content) {
+            if (panel) panel.remove();
             panel = document.createElement('section');
             panel.id = SKILL_PANEL_ID;
             panel.setAttribute('aria-label', 'Skill management');
-            parts.modal.appendChild(panel);
+            parts.content.appendChild(panel);
           }
+          hideNativeSettingsContent(parts.content);
           panel.style.display = 'block';
 
           parts.navButtons.forEach((button) => {
@@ -1782,14 +1798,17 @@ class MainActivity : ComponentActivity() {
           });
 
           if (skillSettingsActive) {
-            parts.content.style.display = 'none';
             let panel = document.getElementById(SKILL_PANEL_ID);
-            if (!panel) {
+            if (!panel || panel.parentElement !== parts.content) {
+              if (panel) panel.remove();
               panel = document.createElement('section');
               panel.id = SKILL_PANEL_ID;
-              parts.modal.appendChild(panel);
+              panel.setAttribute('aria-label', 'Skill management');
+              parts.content.appendChild(panel);
               renderSkillSettings(panel);
             }
+            hideNativeSettingsContent(parts.content);
+            panel.style.display = 'block';
           }
         };
 
