@@ -318,8 +318,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
         context.assets.open("snapshot.tar.xz"),
         fd.length,
         usrDir.parentFile,
-        onProgress,
         preservedRoots = if (preserveHome) setOf(homeDir) else emptySet(),
+        onProgress = onProgress,
       )
       homeDir.mkdirs()
       // Commit the runtime identity only after extraction. This makes APK
