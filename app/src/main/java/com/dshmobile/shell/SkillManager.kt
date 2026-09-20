@@ -73,6 +73,7 @@ class SkillManager(
                 .put("userInvocable", metadata.userInvocable)
                 .put("modelInvocable", metadata.modelInvocable)
                 .put("format", if (entry.isDirectory) "bundle" else "file")
+                .put("storageKey", entry.name)
                 .put("modifiedAt", entry.lastModified()),
             )
           } catch (t: Throwable) {
@@ -80,6 +81,7 @@ class SkillManager(
               JSONObject()
                 .put("name", entry.name.removeSuffix(".md"))
                 .put("description", "")
+                .put("storageKey", entry.name)
                 .put("invalid", true)
                 .put("error", t.message ?: t.javaClass.simpleName),
             )
@@ -91,22 +93,29 @@ class SkillManager(
     }
   }
 
-  fun deleteJson(name: String): String {
-    if (!validName(name)) {
-      return JSONObject().put("ok", false).put("error", "Skill 名称非法").toString()
+  fun deleteJson(storageKey: String): String {
+    if (
+      storageKey.isBlank() || storageKey.length > 120 || storageKey.startsWith(".") ||
+      storageKey.contains('/') || storageKey.contains('\\')
+    ) {
+      return JSONObject().put("ok", false).put("error", "Skill 存储名称非法").toString()
     }
     return try {
       val root = ensureRoot().canonicalFile
-      val directory = File(root, name)
-      val flat = File(root, "$name.md")
-      val target = when {
-        Files.exists(directory.toPath(), LinkOption.NOFOLLOW_LINKS) -> directory
-        Files.exists(flat.toPath(), LinkOption.NOFOLLOW_LINKS) -> flat
-        else -> return JSONObject().put("ok", false).put("error", "Skill 不存在：$name").toString()
-      }
+      val target = File(root, storageKey)
       requireDirectChild(root, target)
+      if (!Files.exists(target.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+        return JSONObject().put("ok", false).put("error", "Skill 不存在：$storageKey").toString()
+      }
+      val acceptable =
+        Files.isDirectory(target.toPath(), LinkOption.NOFOLLOW_LINKS) ||
+          Files.isSymbolicLink(target.toPath()) ||
+          (Files.isRegularFile(target.toPath(), LinkOption.NOFOLLOW_LINKS) && target.extension.equals("md", ignoreCase = true))
+      if (!acceptable) {
+        return JSONObject().put("ok", false).put("error", "拒绝删除非 Skill 条目：$storageKey").toString()
+      }
       deleteTreeNoFollow(target.toPath())
-      JSONObject().put("ok", true).put("name", name).toString()
+      JSONObject().put("ok", true).put("storageKey", storageKey).toString()
     } catch (t: Throwable) {
       errorJson(t)
     }
@@ -295,7 +304,7 @@ class SkillManager(
           zip.closeEntry()
           continue
         }
-        val relative = Path.of(normalized).normalize()
+        val relative = java.nio.file.Paths.get(normalized).normalize()
         if (relative.isAbsolute || relative.startsWith("..") || relative.nameCount > 32) {
           throw IOException("Skill ZIP 包含不安全路径：${entry.name}")
         }
