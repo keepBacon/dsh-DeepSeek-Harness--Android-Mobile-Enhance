@@ -25,12 +25,15 @@ class AndroidBridge(
   private val onOpenConfigEditor: () -> Unit = {},
   private val onOpenAppSettings: () -> Unit = {},
   private val onImportWorkspaceFiles: () -> Unit = {},
+  private val onOpenSkillImporter: () -> Unit = {},
+  private val onListSkills: () -> String = { JSONObject().put("ok", true).put("skills", org.json.JSONArray()).toString() },
+  private val onDeleteSkill: (String) -> String = { JSONObject().put("ok", false).put("error", "Skill manager unavailable").toString() },
   private val onWorkspacePath: () -> String? = { null },
   private val pickToken: String? = null,
 ) {
 
   @JavascriptInterface
-  fun version(): String = "1.9"
+  fun version(): String = "2.0"
 
   private fun authorized(capability: String?): Boolean {
     if (capability == null) return false
@@ -92,6 +95,21 @@ class AndroidBridge(
   fun importFilesToWorkspace(capability: String) {
     if (authorized(capability)) onImportWorkspaceFiles()
   }
+
+  @JavascriptInterface
+  fun openSkillImporter(capability: String) {
+    if (authorized(capability)) onOpenSkillImporter()
+  }
+
+  @JavascriptInterface
+  fun listSkills(capability: String): String =
+    if (authorized(capability)) onListSkills()
+    else JSONObject().put("ok", false).put("error", "bridge authorization failed").toString()
+
+  @JavascriptInterface
+  fun deleteSkill(capability: String, name: String): String =
+    if (authorized(capability)) onDeleteSkill(name)
+    else JSONObject().put("ok", false).put("error", "bridge authorization failed").toString()
 
   @JavascriptInterface
   fun getLastWorkspacePath(capability: String): String? =
