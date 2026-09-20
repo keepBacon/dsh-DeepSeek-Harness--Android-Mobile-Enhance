@@ -76,7 +76,7 @@ const wanted = new Set([
   '@deepseek-ai/dsh-tool-fs-search',
   '@vscode/ripgrep',
   '@deepseek-ai/dsh-settings',
-  '@deepseek-ai/dsh-base',
+  '@deepseek-ai/dsh-permission-presets',
 ])
 const dirs = packageDirsByName(wanted)
 const byName = new Map()
@@ -114,39 +114,46 @@ function eachPackage(name, relFile, fn, { mandatory = false, requiredIfPresent =
   }
 }
 
-// A third-party bundle may legitimately override the composed sandbox/approval
-// defaults so they no longer map to a named permission preset. Upstream
-// dsh-permission-presets supports that state only when defaultPreset is explicit;
-// otherwise the whole plugin tree throws during Host boot. Pin the safe new-session
-// default in the shipped base layer so an unrelated plugin can never brick Web
-// startup merely by creating a derived "custom" composition.
-eachPackage('@deepseek-ai/dsh-base', 'cordis.patch.yml', (file) => {
-  let txt = read(file)
-  const marker = 'DSH Android compat: explicit permission default preset'
-  if (txt.includes(marker)) return 'already'
-  const anchor = `    - id: permission
-      name: '@deepseek-ai/dsh-permission-presets'
-      config:
-        presets:
-`
-  if (!txt.includes(anchor)) {
-    if (androidPermissionPresetGuardMandatory) throw new Error(`permission preset base anchor changed: ${file}`)
-    warn(`permission preset base anchor changed: ${file}`)
-    return 'anchor-missing'
-  }
-  const replacement = `    - id: permission
-      name: '@deepseek-ai/dsh-permission-presets'
-      config:
-        # ${marker}. Keep fresh sessions on the upstream-safe default even
-        # when another bundle composes sandbox/approval into a custom pair.
-        defaultPreset: workspace-write
-        presets:
-`
-  write(file, txt.replace(anchor, replacement))
-  return 'patched'
-}, { mandatory: androidPermissionPresetGuardMandatory })
+// Preserve the exact permission defaults composed by the active plugin stack.
+  // Upstream 0.1.5-rc.2 deliberately throws when sandbox + approval form a valid
+  // custom pair that is not named in the configured preset table. On Android
+  // that turns an otherwise-working plugin into a permanent Host boot failure.
+  //
+  // Add one stable internal preset mirroring the effective composed defaults.
+  // Existing presets stay first, so ordinary read-only/workspace-write/full
+  // access behavior is unchanged whenever it already matches. When a plugin
+  // intentionally composes a different valid pair, the synthetic preset makes
+  // that exact pair representable without disabling, rewriting, or removing
+  // any plugin bundle.
+  eachPackage('@deepseek-ai/dsh-permission-presets', 'lib/index.js', (file) => {
+    let txt = read(file)
+    const marker = 'DSH Android compat: preserve composed permission defaults'
+    if (txt.includes(marker)) return 'already'
 
-// DSH 0.1.6-alpha.2: profile resolution loads node-addon-require-builtin in
+    const assignment = /this\.presets\s*=\s*config\.presets\s*;?/
+    if (!assignment.test(txt)) {
+      if (androidPermissionPresetGuardMandatory) throw new Error(`permission preset constructor anchor changed: ${file}`)
+      warn(`permission preset constructor anchor changed: ${file}`)
+      return 'anchor-missing'
+    }
+
+    const replacement = `this.presets = { ...config.presets };
+      // ${marker}. This preset follows the plugin-composed deployment defaults.
+      // Standard configured presets remain earlier in insertion order and win
+      // whenever they already describe the same sandbox/approval pair.
+      const androidComposedDefault = "__dsh_android_composed_default__";
+      this.presets[androidComposedDefault] = {
+        sandbox: ctx.shell.sandboxMode,
+        approval: ctx.approval.config.policy ?? "ask",
+        name: "Follow plugin default",
+        description: "Uses the sandbox and approval defaults composed by the active plugin stack."
+      };`
+
+    write(file, txt.replace(assignment, replacement))
+    return 'patched'
+  }, { mandatory: androidPermissionPresetGuardMandatory })
+
+  // DSH 0.1.6-alpha.2: profile resolution loads node-addon-require-builtin in
 // host preparation, but that package publishes no android-arm64 binary.  The
 // package is an unrestricted proxy around require(); --expose-internals is
 // already supplied by EngineManager, so a JS fallback preserves its contract.
