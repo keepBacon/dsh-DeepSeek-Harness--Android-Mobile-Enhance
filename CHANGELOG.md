@@ -1,3 +1,4 @@
+- 修复 DSH 启动阶段 pnpm workspace 空映射检测的 RegexSyntaxException：移除动态正则对 `overrides: {}` / `allowBuilds: {}` 的匹配，改为注释剥离后的精确字符串判断，避免兼容层自身阻断引擎启动。
 - Skill ZIP 导入新增集合文件夹：每个 ZIP 在 `$DSH_HOME/skill-collections/<集合>/collection.json` 建立稳定集合，Web Skill 管理页按文件夹折叠显示全部成员，并可一键删除整个集合；为保持 DSH 直接子级 Skill 发现兼容，实际 Skill 仍保存在 `$DSH_HOME/skills` 顶层。
 - 插件原生依赖兼容增强：Android profile 自动把 `node-pty` override 到与内置 Node 一起构建并通过 require smoke test 的 Runtime 副本，禁止插件再次在手机端 node-gyp 编译；Termux 完整构建若缺少可复用 node-pty 将直接失败，避免产出插件兼容性残缺 APK。
 - pnpm workspace 映射写入兼容 `overrides: {}` / `allowBuilds: {}` 空映射，避免重复 YAML key，并把 node-pty 的 allowBuilds 写为真正布尔值 false。
