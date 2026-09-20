@@ -95,6 +95,11 @@ must "$MA" "const SKILL_NAV_ID = 'dsh-android-skill-settings-nav'"
 must "$MA" "const SKILL_PANEL_ID = 'dsh-android-skill-settings-panel'"
 must "$MA" 'window.androidBridge.listSkills(BRIDGE_CAP)'
 must "$MA" 'window.androidBridge.openSkillImporter(BRIDGE_CAP)'
+must "$MA" 'private fun currentWritableWorkspacePath(): String?'
+must "$MA" 'pendingWorkspaceImportPath = workspace'
+must "$MA" 'workspaceFilePicker.launch(arrayOf("*/*"))'
+must "$MA" '上传手机文件到当前工作目录'
+forbid "$MA" 'ShellState.rememberWorkspacePath(this, root.absolutePath)'
 must "$MA" 'window.androidBridge.deleteSkill(BRIDGE_CAP, storageKey)'
 must "$MA" "dsh-android-skills-changed"
 must "$AB" 'fun listSkills(capability: String): String'
