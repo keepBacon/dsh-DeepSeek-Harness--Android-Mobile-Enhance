@@ -235,13 +235,13 @@ class SkillManager(
         val incoming = File(root, ".incoming-$name-${UUID.randomUUID()}")
         copyTreeNoFollow(candidate.source.toPath(), incoming.toPath())
         val incomingSkill = File(incoming, "SKILL.md")
-        rewriteSkillName(incomingSkill, name)
+        rewriteSkillMetadata(incomingSkill, name, candidate.metadata.description)
         parseMetadata(incomingSkill)
         replaceTarget(root, directoryTarget, fileTarget, incoming)
       } else {
         val incoming = File(root, ".incoming-$name-${UUID.randomUUID()}.md")
         candidate.source.copyTo(incoming, overwrite = true)
-        rewriteSkillName(incoming, name)
+        rewriteSkillMetadata(incoming, name, candidate.metadata.description)
         parseMetadata(incoming)
         replaceTarget(root, fileTarget, directoryTarget, incoming)
       }
@@ -444,7 +444,7 @@ class SkillManager(
             lines.take(80).any { Regex("""^\s*name\s*:""").containsMatchIn(it) }
           }
           if (!hasExplicitName || metadata.originalName != metadata.name) {
-            rewriteSkillName(skillFile, metadata.name)
+            rewriteSkillMetadata(skillFile, metadata.name, metadata.description)
             repaired++
           }
         } catch (_: Throwable) {
@@ -500,7 +500,7 @@ class SkillManager(
   }
 
   /** Rewrite only the YAML frontmatter name field using an atomic replace. */
-  private fun rewriteSkillName(file: File, canonicalName: String) {
+  private fun rewriteSkillMetadata(file: File, canonicalName: String, description: String) {
     if (!file.isFile) throw IOException("缺少 SKILL.md")
     val text = file.readText()
     if (!text.startsWith("---")) throw IOException("${file.name} 缺少 YAML frontmatter")
@@ -521,9 +521,15 @@ class SkillManager(
         replacement +
         header.substring(match.range.last + 1)
     }
-    val updated = updatedHeader + text.substring(end)
+    val descriptionPattern = Regex("""(?m)^(\s*description\s*:\s*).*$""")
+    val withDescription = if (descriptionPattern.containsMatchIn(updatedHeader)) {
+      updatedHeader
+    } else {
+      updatedHeader + "\ndescription: " + JSONObject.quote(description)
+    }
+    val updated = withDescription + text.substring(end)
 
-    val temp = File(file.parentFile, ".${file.name}.name-${UUID.randomUUID()}.tmp")
+    val temp = File(file.parentFile, ".${file.name}.metadata-${UUID.randomUUID()}.tmp")
     try {
       temp.writeText(updated)
       try {
@@ -573,7 +579,7 @@ class SkillManager(
       throw IOException("Skill name 无法安全转换为 kebab-case：$originalName")
     }
     val description = field("description")?.takeIf { it.isNotBlank() }
-      ?: throw IOException("Skill 缺少 description")
+      ?: "Imported Skill: $name"
 
     return Metadata(
       name = name,
