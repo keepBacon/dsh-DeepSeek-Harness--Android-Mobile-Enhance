@@ -1,3 +1,7 @@
+- 移动端 Web 设置改为独立的视口级居中弹窗：不再按侧边栏几何布局，分页导航横向滚动，内容区独立滚动，并适配竖屏、横屏与安全区。
+- 修复社区插件安装兼容：每次插件操作前自动修复旧 profile 的 pnpm-workspace 配置（nodeLinker=hoisted、autoInstallPeers=false），避免社区插件把 DSH 预发布 peer 误当成需要从 npm 安装的依赖而触发 NO_MATCHING_VERSION。
+- 修复 Git/GitHub 插件安装 runtime：构建时递归收集 ELF NEEDED 依赖闭包，解决内置 Git 缺失 libpcre2-8.so 等传递依赖导致 git ls-remote 无法启动。
+- Skill ZIP 导入进一步容错：缺少 frontmatter name 时从目录名或一级标题推导并写回；旧式名称自动 kebab-case；单个无法修复条目只跳过，不再让整包失败；缺少 description 时补充安全描述。
 - 修复覆盖安装 APK 后插件丢失：运行时升级/修复只替换 `usr/`，若检测到既有用户 HOME，则 snapshot 中的 `home/` bootstrap 数据完全跳过，保留 web profile 的 package.json、pnpm lock、node_modules、插件启用状态、Skill 与凭据。\n- Skill ZIP 导入上限调整：压缩包最大 512 MB、最多 50,000 项、单项最大 512 MB、解压总量最大 2 GB；解决约 63 MB 但包含大量小文件的 Skill 被 4096 项/64 MB 旧限制误拒绝的问题，同时保留 ZIP 路径穿越与解压炸弹防护。\n- Web 设置新增 `Skills` 管理分页：直接管理 `$DSH_HOME/skills`，支持 ZIP/Markdown 导入、列表刷新与安全删除；Skill 变更不修改插件树、聊天记录、模型 Key、settings 或其他 DSH 用户数据。\n- 插件启动保护调整为完全非破坏式：不再自动停用/删除/改写任何插件 bundle；Android 运行时为 permission-presets 注入一个“跟随插件组合默认值”的内部 preset，使插件自定义 sandbox/approval 组合可正常启动，同时保持插件功能与组合语义。\n- README 的“使用的开源项目”清单仅保留 `thness/dsh-mobile` 与 `deepseek-ai/deepseek-harness`。
 # V0.1 — Version Reset & GitHub Entry
 
