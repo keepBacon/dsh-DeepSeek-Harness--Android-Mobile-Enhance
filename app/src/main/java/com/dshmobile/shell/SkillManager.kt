@@ -28,9 +28,14 @@ class SkillManager(
   private val engineManager: EngineManager,
 ) {
   companion object {
-    private const val MAX_ARCHIVE_BYTES = 64L * 1024 * 1024
-    private const val MAX_ENTRY_BYTES = 32L * 1024 * 1024
-    private const val MAX_ENTRIES = 4096
+    // Large UI/documentation Skills commonly contain thousands of small
+    // reference/assets files. Keep explicit anti-zip-bomb bounds, but do not
+    // reject normal ~60-100 MB bundles merely because they exceed 4096 entries.
+    private const val MAX_ZIP_INPUT_BYTES = 512L * 1024 * 1024
+    private const val MAX_EXTRACTED_BYTES = 2L * 1024 * 1024 * 1024
+    private const val MAX_ENTRY_BYTES = 512L * 1024 * 1024
+    private const val MAX_ENTRIES = 50_000
+    private const val MAX_FLAT_SKILL_BYTES = 16L * 1024 * 1024
     private const val MAX_FRONTMATTER_BYTES = 256 * 1024
     private val SKILL_NAME = Regex("""^[a-z0-9]+(?:-[a-z0-9]+)*$""")
   }
@@ -127,6 +132,9 @@ class SkillManager(
       val displayName = queryDisplayName(uri) ?: "skill"
       val lower = displayName.lowercase()
       val imported = if (lower.endsWith(".zip")) {
+        queryContentSize(uri)?.let { size ->
+          if (size > MAX_ZIP_INPUT_BYTES) throw IOException("Skill ZIP 超过 512 MB 导入上限")
+        }
         val extracted = File(tempRoot, "archive").apply { mkdirs() }
         context.contentResolver.openInputStream(uri)?.use { input ->
           extractZip(input, extracted)
@@ -137,7 +145,7 @@ class SkillManager(
       } else {
         val source = File(tempRoot, "selected.md")
         context.contentResolver.openInputStream(uri)?.use { input ->
-          source.outputStream().use { output -> copyWithLimit(input, output, MAX_ARCHIVE_BYTES) }
+          source.outputStream().use { output -> copyWithLimit(input, output, MAX_FLAT_SKILL_BYTES) }
         } ?: throw IOException("无法读取所选 Skill 文件")
         val metadata = parseMetadata(source)
         installCandidates(listOf(Candidate(metadata, source, false)))
@@ -297,7 +305,7 @@ class SkillManager(
       while (true) {
         val entry = zip.nextEntry ?: break
         entries++
-        if (entries > MAX_ENTRIES) throw IOException("Skill ZIP 文件数量超过上限")
+        if (entries > MAX_ENTRIES) throw IOException("Skill ZIP 文件数量超过 $MAX_ENTRIES 个上限")
 
         val normalized = entry.name.replace('\\', '/').trimStart('/')
         if (normalized.isBlank()) {
@@ -324,8 +332,8 @@ class SkillManager(
               if (read == 0) continue
               entryBytes += read
               total += read
-              if (entryBytes > MAX_ENTRY_BYTES) throw IOException("Skill ZIP 单文件超过 32 MB")
-              if (total > MAX_ARCHIVE_BYTES) throw IOException("Skill ZIP 解压后超过 64 MB")
+              if (entryBytes > MAX_ENTRY_BYTES) throw IOException("Skill ZIP 单文件超过 512 MB")
+              if (total > MAX_EXTRACTED_BYTES) throw IOException("Skill ZIP 解压后超过 2 GB")
               output.write(buffer, 0, read)
             }
           }
@@ -343,7 +351,7 @@ class SkillManager(
       if (read < 0) break
       if (read == 0) continue
       total += read
-      if (total > limit) throw IOException("Skill 文件超过 64 MB")
+      if (total > limit) throw IOException("单文件 Skill 超过 16 MB")
       output.write(buffer, 0, read)
     }
   }
@@ -397,6 +405,16 @@ class SkillManager(
   private fun requireDirectChild(root: File, child: File) {
     val parent = child.parentFile?.canonicalFile ?: throw IOException("Skill 路径无父目录")
     if (parent != root.canonicalFile) throw IOException("Skill 路径越界")
+  }
+
+  private fun queryContentSize(uri: Uri): Long? {
+    return try {
+      context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+        if (!cursor.moveToFirst() || cursor.isNull(0)) null else cursor.getLong(0)
+      }
+    } catch (_: Throwable) {
+      null
+    }
   }
 
   private fun queryDisplayName(uri: Uri): String? {
