@@ -295,11 +295,15 @@ class EngineManager(private val context: Context, private val pickToken: String?
     if (userHomeInitializedMarker.isFile || runtimeIdMarker.isFile) return true
     if (File(dshDataDir, ".migrated-from").isFile) return true
     val dsh = File(homeDir, ".dsh")
+    val webProfile = File(dsh, "profiles/web")
     return File(dsh, ".credentials.yaml").isFile ||
       File(dsh, "sessions").exists() ||
       File(dsh, "storages").exists() ||
       File(dsh, "attachments").exists() ||
-      File(dsh, "skills").exists()
+      File(dsh, "skills").exists() ||
+      File(webProfile, "package.json").isFile ||
+      File(webProfile, "pnpm-lock.yaml").isFile ||
+      File(webProfile, "node_modules").isDirectory
   }
 
   fun extractSnapshot(onProgress: (Long, Long) -> Unit): Boolean {
