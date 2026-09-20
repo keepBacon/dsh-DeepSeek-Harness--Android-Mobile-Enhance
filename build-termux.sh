@@ -407,6 +407,21 @@ overlay_host_node_runtime() {
   echo "[DSH] Embedded Node -> $embedded"
 }
 
+validate_reusable_node_pty() {
+  local stage="$1" manifest dir
+  manifest="$(find "$stage/usr/lib/node_modules" -type f -path '*/node-pty/package.json' -print -quit 2>/dev/null || true)"
+  [ -n "$manifest" ] || {
+    echo '[DSH] Embedded node-pty package is missing; Android community plugins would fall back to node-gyp on-device.'
+    exit 7
+  }
+  dir="${manifest%/package.json}"
+  if ! LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/node" -e     'const root=process.argv[1]; try { require(root) } catch (e) { console.error(e && e.stack || e); process.exit(1) }'     "$dir" >/dev/null 2>&1; then
+    echo "[DSH] Embedded node-pty is not loadable by the exact bundled Node: $dir"
+    exit 7
+  fi
+  echo "[DSH] Reusable node-pty runtime: OK -> $dir"
+}
+
 copy_native_module_deps() {
   local stage="$1"
   find "$stage/usr/lib/node_modules" -type f -name '*.node' -print0 2>/dev/null \
@@ -810,6 +825,7 @@ refresh_dsh_runtime() {
   # Build only the native packages DSH actually needs.  The rest of the graph
   # stays install-script-free, which avoids accidental desktop-only postinstalls.
   build_native_modules "$stage" "$node_headers"
+  validate_reusable_node_pty "$stage"
   install_sharp_wasm "$stage" "$used_registry"
   apply_android_runtime_patches "$stage"
   copy_ripgrep_runtime "$stage"
