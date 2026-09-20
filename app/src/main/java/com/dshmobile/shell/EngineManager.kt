@@ -847,6 +847,60 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * declared by community plugins and can fail with NO_MATCHING_VERSION even
    * though the plugin should consume the runtime's shared DSH modules.
    */
+  private fun findRuntimePackageDir(packageName: String): File? {
+    val root = File(usrDir, "lib/node_modules")
+    if (!root.isDirectory) return null
+    return root.walkTopDown()
+      .maxDepth(8)
+      .filter { it.isFile && it.name == "package.json" }
+      .mapNotNull { manifest ->
+        try {
+          val json = JSONObject(manifest.readText())
+          if (json.optString("name") == packageName) manifest.parentFile else null
+        } catch (_: Throwable) {
+          null
+        }
+      }
+      .firstOrNull()
+  }
+
+  private fun setWorkspaceMappingValue(
+    text: String,
+    section: String,
+    key: String,
+    value: String,
+  ): String {
+    val lines = text.replace("\r\n", "\n").split("\n").toMutableList()
+    var sectionIndex = lines.indexOfFirst { Regex("""^\s*${Regex.escape(section)}\s*:\s*(?:#.*)?$""").matches(it) }
+    if (sectionIndex < 0) {
+      if (lines.isNotEmpty() && lines.last().isNotBlank()) lines.add("")
+      sectionIndex = lines.size
+      lines.add("$section:")
+    }
+    val baseIndent = lines[sectionIndex].takeWhile { it.isWhitespace() }.length
+    var end = sectionIndex + 1
+    while (end < lines.size) {
+      val line = lines[end]
+      if (line.isBlank() || line.trimStart().startsWith("#")) { end++; continue }
+      val indent = line.takeWhile { it.isWhitespace() }.length
+      if (indent <= baseIndent) break
+      end++
+    }
+
+    val encodedKey = JSONObject.quote(key)
+    val encodedValue = JSONObject.quote(value)
+    for (i in sectionIndex + 1 until end) {
+      val parsed = parseAllowBuildLine(lines[i]) ?: continue
+      if (parsed.first == key) {
+        val prefix = lines[i].takeWhile { it.isWhitespace() }
+        lines[i] = prefix + encodedKey + ": " + encodedValue
+        return lines.joinToString("\n").trimEnd() + "\n"
+      }
+    }
+    lines.add(end, " ".repeat(baseIndent + 2) + encodedKey + ": " + encodedValue)
+    return lines.joinToString("\n").trimEnd() + "\n"
+  }
+
   private fun ensurePluginWorkspaceCompat(profile: String = "web") {
     val file = pluginWorkspaceFile(profile)
     file.parentFile?.mkdirs()
@@ -867,6 +921,26 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
     setScalar("nodeLinker", "hoisted")
     setScalar("autoInstallPeers", "false")
+
+    // Android cannot compile arbitrary native addons during plugin install.
+    // Reuse native packages that were already built and smoke-tested together
+    // with the embedded Node runtime. This avoids node-gyp on-device while
+    // keeping the plugin's normal JS package resolution intact.
+    findRuntimePackageDir("node-pty")?.let { runtimeNodePty ->
+      workspace = setWorkspaceMappingValue(
+        workspace,
+        "overrides",
+        "node-pty",
+        "link:" + runtimeNodePty.absolutePath,
+      )
+      workspace = setWorkspaceMappingValue(
+        workspace,
+        "allowBuilds",
+        "node-pty",
+        "false",
+      )
+    }
+
     writeTextAtomic(file, workspace)
   }
 
