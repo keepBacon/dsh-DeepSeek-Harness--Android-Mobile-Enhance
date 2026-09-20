@@ -69,6 +69,16 @@ class SkillManager(
   private val skillRoot: File
     get() = File(engineManager.ensureDshDataHome(), "skills")
 
+  /**
+   * Collection folders are management metadata, not Skill discovery roots.
+   * DSH's filesystem provider discovers direct children of DSH_HOME/skills;
+   * nested recursive SKILL.md discovery is intentionally unsupported. Active
+   * Skills therefore remain top-level while each imported ZIP gets a real
+   * collection folder here that references all installed entries.
+   */
+  private val collectionRoot: File
+    get() = File(engineManager.ensureDshDataHome(), "skill-collections")
+
   fun listJson(): String {
     return try {
       val root = ensureRoot()
@@ -110,6 +120,7 @@ class SkillManager(
       JSONObject()
         .put("ok", true)
         .put("skills", rows)
+        .put("collections", listCollectionsJson())
         .put("duplicatesQuarantined", reconciled.moved)
         .put("duplicateBackupDir", reconciled.backupDir?.absolutePath)
         .put("namesNormalized", repairedNames)
@@ -120,10 +131,7 @@ class SkillManager(
   }
 
   fun deleteJson(storageKey: String): String {
-    if (
-      storageKey.isBlank() || storageKey.length > 120 || storageKey.startsWith(".") ||
-      storageKey.contains('/') || storageKey.contains('\\')
-    ) {
+    if (!validStorageKey(storageKey)) {
       return JSONObject().put("ok", false).put("error", "Skill 存储名称非法").toString()
     }
     return try {
@@ -141,9 +149,198 @@ class SkillManager(
         return JSONObject().put("ok", false).put("error", "拒绝删除非 Skill 条目：$storageKey").toString()
       }
       deleteTreeNoFollow(target.toPath())
+      removeMemberFromCollections(storageKey)
       JSONObject().put("ok", true).put("storageKey", storageKey).toString()
     } catch (t: Throwable) {
       errorJson(t)
+    }
+  }
+
+  fun deleteCollectionJson(collectionId: String): String {
+    if (!validCollectionId(collectionId)) {
+      return JSONObject().put("ok", false).put("error", "Skill 集合名称非法").toString()
+    }
+    return try {
+      val root = ensureCollectionRoot().canonicalFile
+      val dir = File(root, collectionId)
+      requireDirectChild(root, dir)
+      if (!dir.isDirectory) {
+        return JSONObject().put("ok", false).put("error", "Skill 集合不存在：$collectionId").toString()
+      }
+      val manifest = readCollectionManifest(dir)
+      val members = manifest.optJSONArray("members") ?: JSONArray()
+      val referencedElsewhere = collectionMemberReferences(excludeCollectionId = collectionId)
+      var deleted = 0
+      var keptShared = 0
+      val skills = ensureRoot().canonicalFile
+
+      for (i in 0 until members.length()) {
+        val storageKey = members.optString(i).trim()
+        if (!validStorageKey(storageKey)) continue
+        if (storageKey in referencedElsewhere) {
+          keptShared++
+          continue
+        }
+        val target = File(skills, storageKey)
+        requireDirectChild(skills, target)
+        if (Files.exists(target.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+          deleteTreeNoFollow(target.toPath())
+          deleted++
+        }
+      }
+
+      deleteTreeNoFollow(dir.toPath())
+      JSONObject()
+        .put("ok", true)
+        .put("collectionId", collectionId)
+        .put("deletedSkills", deleted)
+        .put("sharedSkillsKept", keptShared)
+        .toString()
+    } catch (t: Throwable) {
+      errorJson(t)
+    }
+  }
+
+  private fun validStorageKey(storageKey: String): Boolean =
+    storageKey.isNotBlank() &&
+      storageKey.length <= 120 &&
+      !storageKey.startsWith(".") &&
+      !storageKey.contains('/') &&
+      !storageKey.contains('\\')
+
+  private fun ensureCollectionRoot(): File {
+    val root = collectionRoot
+    if (Files.isSymbolicLink(root.toPath())) throw IOException("Skill 集合根目录不能是符号链接")
+    if (!root.exists() && !root.mkdirs()) throw IOException("无法创建 Skill 集合目录")
+    if (!root.isDirectory) throw IOException("Skill 集合路径不是目录")
+    return root
+  }
+
+  private fun validCollectionId(value: String): Boolean =
+    value.length in 1..96 && Regex("""^[a-z0-9]+(?:-[a-z0-9]+)*$""").matches(value)
+
+  private fun collectionIdFromDisplayName(displayName: String): String {
+    val base = displayName
+      .substringBeforeLast('.', displayName)
+      .lowercase(java.util.Locale.ROOT)
+      .replace(Regex("""[^a-z0-9]+"""), "-")
+      .trim('-')
+      .replace(Regex("""-+"""), "-")
+      .take(80)
+      .trimEnd('-')
+    return base.takeIf { validCollectionId(it) }
+      ?: "skill-pack-" + System.currentTimeMillis()
+  }
+
+  private fun collectionManifestFile(dir: File): File = File(dir, "collection.json")
+
+  private fun readCollectionManifest(dir: File): JSONObject {
+    val file = collectionManifestFile(dir)
+    if (!file.isFile) return JSONObject()
+    return try { JSONObject(file.readText()) } catch (_: Throwable) { JSONObject() }
+  }
+
+  private fun writeCollectionManifest(
+    collectionId: String,
+    displayName: String,
+    members: List<String>,
+  ): File {
+    val root = ensureCollectionRoot().canonicalFile
+    val dir = File(root, collectionId)
+    requireDirectChild(root, dir)
+    if (!dir.exists() && !dir.mkdirs()) throw IOException("无法创建 Skill 集合：$collectionId")
+    if (!dir.isDirectory || Files.isSymbolicLink(dir.toPath())) throw IOException("Skill 集合目录非法：$collectionId")
+
+    val previous = readCollectionManifest(dir)
+    val previousMembers = previous.optJSONArray("members")
+    val merged = LinkedHashSet<String>()
+    if (previousMembers != null) {
+      for (i in 0 until previousMembers.length()) {
+        previousMembers.optString(i).takeIf { validStorageKey(it) }?.let { merged += it }
+      }
+    }
+    members.filter { validStorageKey(it) }.forEach { merged += it }
+
+    val json = JSONObject()
+      .put("id", collectionId)
+      .put("displayName", displayName)
+      .put("updatedAt", System.currentTimeMillis())
+      .put("members", JSONArray(merged.toList()))
+    val file = collectionManifestFile(dir)
+    val temp = File(dir, ".collection-" + UUID.randomUUID() + ".tmp")
+    try {
+      temp.writeText(json.toString(2))
+      try {
+        Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+      } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+        Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+      }
+    } finally {
+      try { Files.deleteIfExists(temp.toPath()) } catch (_: Throwable) {}
+    }
+    return dir
+  }
+
+  private fun listCollectionsJson(): JSONArray {
+    val rows = JSONArray()
+    val root = ensureCollectionRoot()
+    root.listFiles()
+      ?.filter { it.isDirectory && !it.name.startsWith(".") && validCollectionId(it.name) }
+      ?.sortedBy { it.name }
+      ?.forEach { dir ->
+        val manifest = readCollectionManifest(dir)
+        val members = manifest.optJSONArray("members") ?: JSONArray()
+        val live = JSONArray()
+        for (i in 0 until members.length()) {
+          val key = members.optString(i)
+          if (!validStorageKey(key)) continue
+          val target = File(skillRoot, key)
+          if (Files.exists(target.toPath(), LinkOption.NOFOLLOW_LINKS)) live.put(key)
+        }
+        rows.put(
+          JSONObject()
+            .put("id", dir.name)
+            .put("displayName", manifest.optString("displayName", dir.name))
+            .put("members", live)
+            .put("count", live.length())
+            .put("updatedAt", manifest.optLong("updatedAt", dir.lastModified())),
+        )
+      }
+    return rows
+  }
+
+  private fun collectionMemberReferences(excludeCollectionId: String? = null): Set<String> {
+    val refs = LinkedHashSet<String>()
+    val root = ensureCollectionRoot()
+    root.listFiles()
+      ?.filter { it.isDirectory && it.name != excludeCollectionId }
+      ?.forEach { dir ->
+        val members = readCollectionManifest(dir).optJSONArray("members") ?: return@forEach
+        for (i in 0 until members.length()) {
+          members.optString(i).takeIf { validStorageKey(it) }?.let { refs += it }
+        }
+      }
+    return refs
+  }
+
+  private fun removeMemberFromCollections(storageKey: String) {
+    val root = ensureCollectionRoot()
+    root.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
+      val manifest = readCollectionManifest(dir)
+      val members = manifest.optJSONArray("members") ?: return@forEach
+      val kept = mutableListOf<String>()
+      var changed = false
+      for (i in 0 until members.length()) {
+        val key = members.optString(i)
+        if (key == storageKey) changed = true else if (validStorageKey(key)) kept += key
+      }
+      if (!changed) return@forEach
+      val displayName = manifest.optString("displayName", dir.name)
+      if (kept.isEmpty()) {
+        try { deleteTreeNoFollow(dir.toPath()) } catch (_: Throwable) {}
+      } else {
+        writeCollectionManifest(dir.name, displayName, kept)
+      }
     }
   }
 
@@ -152,7 +349,8 @@ class SkillManager(
     return try {
       val displayName = queryDisplayName(uri) ?: "skill"
       val lower = displayName.lowercase()
-      val discovery = if (lower.endsWith(".zip")) {
+      val isZip = lower.endsWith(".zip")
+      val discovery = if (isZip) {
         queryContentSize(uri)?.let { size ->
           if (size > MAX_ZIP_INPUT_BYTES) throw IOException("Skill ZIP 超过 512 MB 导入上限")
         }
@@ -178,10 +376,19 @@ class SkillManager(
       if (discovery.candidates.isEmpty()) throw IOException("没有找到有效的 Skill")
       val installed = installCandidates(discovery.candidates)
       val reconciled = reconcileExistingDuplicates(ensureRoot())
+      val collectionId = if (isZip) collectionIdFromDisplayName(displayName) else null
+      if (collectionId != null) {
+        writeCollectionManifest(
+          collectionId,
+          displayName.substringBeforeLast('.', displayName),
+          installed,
+        )
+      }
 
       JSONObject()
         .put("ok", true)
         .put("imported", JSONArray(installed))
+        .put("collectionId", collectionId)
         .put("duplicatesSkipped", discovery.duplicatesSkipped)
         .put("namesNormalized", discovery.namesNormalized)
         .put("invalidSkipped", discovery.invalidSkipped)
@@ -191,6 +398,7 @@ class SkillManager(
           "message",
           buildString {
             append("已安装 ${installed.size} 个 Skill")
+            if (collectionId != null) append("，已创建集合文件夹 ").append(collectionId)
             if (discovery.namesNormalized > 0) append("，已规范化 ${discovery.namesNormalized} 个旧式 Skill 名")
             if (discovery.duplicatesSkipped > 0) append("，已自动合并 ${discovery.duplicatesSkipped} 个重复 Skill 名")
             if (discovery.invalidSkipped > 0) append("，已跳过 ${discovery.invalidSkipped} 个无法安全修复的无效条目")
