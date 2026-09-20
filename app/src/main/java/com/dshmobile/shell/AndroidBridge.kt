@@ -28,6 +28,7 @@ class AndroidBridge(
   private val onOpenSkillImporter: () -> Unit = {},
   private val onListSkills: () -> String = { JSONObject().put("ok", true).put("skills", org.json.JSONArray()).toString() },
   private val onDeleteSkill: (String) -> String = { JSONObject().put("ok", false).put("error", "Skill manager unavailable").toString() },
+  private val onDeleteSkillCollection: (String) -> String = { JSONObject().put("ok", false).put("error", "Skill collection manager unavailable").toString() },
   private val onWorkspacePath: () -> String? = { null },
   private val pickToken: String? = null,
 ) {
@@ -109,6 +110,11 @@ class AndroidBridge(
   @JavascriptInterface
   fun deleteSkill(capability: String, name: String): String =
     if (authorized(capability)) onDeleteSkill(name)
+    else JSONObject().put("ok", false).put("error", "bridge authorization failed").toString()
+
+  @JavascriptInterface
+  fun deleteSkillCollection(capability: String, collectionId: String): String =
+    if (authorized(capability)) onDeleteSkillCollection(collectionId)
     else JSONObject().put("ok", false).put("error", "bridge authorization failed").toString()
 
   @JavascriptInterface
