@@ -817,6 +817,28 @@ class EngineManager(private val context: Context, private val pickToken: String?
     return rules.firstOrNull { it.second.containsMatchIn(text) }?.first
   }
 
+  private fun buildApprovalKeysFromOutput(output: String): List<String> {
+    val lines = output.lines()
+    val found = mutableListOf<String>()
+    for (i in lines.indices) {
+      if (lines[i].trim() != "allowBuilds:") continue
+      for (j in (i + 1) until minOf(lines.size, i + 8)) {
+        val line = lines[j]
+        if (line.isBlank()) continue
+        if (!line.first().isWhitespace()) break
+        val trimmed = line.trim()
+        val separator = trimmed.lastIndexOf(": ")
+        if (separator <= 0) continue
+        val key = trimmed.substring(0, separator).trim().trim('"', ''')
+        val value = trimmed.substring(separator + 2).trim().substringBefore(" #").trim()
+        if ((value == "true" || value == "set this to true or false") && safeBuildApprovalKey(key)) {
+          found += key
+        }
+      }
+    }
+    return found.distinct()
+  }
+
   private fun pluginWorkspaceFile(profile: String = "web"): File = File(profileDir(profile), "pnpm-workspace.yaml")
 
   /**
@@ -904,11 +926,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   /** Persist explicit build-script approvals without running any script yet. */
   fun approvePluginBuilds(names: List<String>, profile: String = "web"): PluginCommandResult {
-    val pendingNow = pendingPluginBuilds(profile).toSet()
+    // names originate from pnpm's exact allowBuilds diagnostic and are shown
+    // to the user before this explicit approval action. Git keys may not have
+    // been persisted to pnpm-workspace.yaml at all, so requiring a preexisting
+    // placeholder would make the approval button a no-op.
     val wanted = names.map { it.trim() }
-      .filter { safeBuildApprovalKey(it) && it in pendingNow }
+      .filter { safeBuildApprovalKey(it) }
       .distinct()
-    if (wanted.isEmpty()) return PluginCommandResult(false, -1, "没有仍处于待授权状态的构建脚本")
+    if (wanted.isEmpty()) return PluginCommandResult(false, -1, "没有可授权的构建脚本")
     val file = pluginWorkspaceFile(profile)
     return try {
       file.parentFile?.mkdirs()
@@ -993,7 +1018,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
         val code = process.exitValue()
         val output = readPluginLog()
         val kind = if (code == 0) null else classifyPluginFailure(output)
-        val pending = if (kind == "build-blocked") pendingPluginBuilds(profile) else emptyList()
+        val pending = if (kind == "build-blocked") {
+          (pendingPluginBuilds(profile) + buildApprovalKeysFromOutput(output)).distinct()
+        } else emptyList()
         PluginCommandResult(code == 0, code, output, failureKind = kind, pendingBuilds = pending)
       }
     } catch (t: Throwable) {
