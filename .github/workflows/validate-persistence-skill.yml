@@ -35,3 +35,4 @@ jobs:
           ./gradlew :app:compileDebugKotlin --no-daemon
 
 # rerun: trailing-lambda-compat
+# rerun: named-args-fix
