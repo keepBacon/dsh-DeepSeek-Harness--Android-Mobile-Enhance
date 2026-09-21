@@ -672,6 +672,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "PATH" to (usrDir.absolutePath + "/bin:/system/bin"),
       "LD_LIBRARY_PATH" to (usrDir.absolutePath + "/lib"),
       "HOME" to homeDir.absolutePath,
+      // Sidebar terminal + model terminal tools must resolve the embedded
+      // Android-compatible Bash rather than the app process' empty/default
+      // shell. The plugin checks DSH_SIDEBAR_SHELL before $SHELL.
+      "DSH_SIDEBAR_SHELL" to File(usrDir, "bin/bash").absolutePath,
+      "SHELL" to File(usrDir, "bin/bash").absolutePath,
       "DSH_HOME" to ensureDshDataHome().absolutePath,
       "TMPDIR" to File(homeDir, "tmp").apply { mkdirs() }.absolutePath,
       "XDG_CACHE_HOME" to nodeCacheDir.absolutePath,
