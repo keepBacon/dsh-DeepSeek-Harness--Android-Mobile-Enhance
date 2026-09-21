@@ -1,3 +1,4 @@
+- 终端可用性根因修复：Runtime 现在打包真实 Termux Bash 到 `usr/libexec/dsh/bash-real`，以 `/system/bin/sh` 包装器暴露稳定的 `usr/bin/bash`/`usr/bin/sh`，Host 强制设置 `DSH_SIDEBAR_SHELL`/`SHELL` 指向内置 Bash；完整构建会实际用 node-pty spawn Bash 并执行命令，失败则拒绝产出 APK。
 # V0.1.1 — Compatibility & Stability Update
 
 - 应用版本升级为 `V0.1.1`（`versionName=0.1.1`, `versionCode=36`）。
