@@ -1,3 +1,4 @@
+- Runtime 工具环境增强：完整构建现在打包 Termux 兼容的 `pkg` / `apt` / `dpkg`、Python3 / pip 与常用 CLI 工具。由于 Termux 包通常绑定 `/data/data/com.termux/files/usr`，应用通过 PRoot 兼容命名空间将本应用私有 `files/usr` 映射到该前缀；包管理器写入仍落在本应用私有目录。构建时会验证 Python、pip、dpkg、apt 与 pkg 可执行。
 - 终端可用性根因修复：Runtime 现在打包真实 Termux Bash 到 `usr/libexec/dsh/bash-real`，以 `/system/bin/sh` 包装器暴露稳定的 `usr/bin/bash`/`usr/bin/sh`，Host 强制设置 `DSH_SIDEBAR_SHELL`/`SHELL` 指向内置 Bash；完整构建会实际用 node-pty spawn Bash 并执行命令，失败则拒绝产出 APK。
 # V0.1.1 — Compatibility & Stability Update
 
