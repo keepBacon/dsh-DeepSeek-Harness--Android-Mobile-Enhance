@@ -20,6 +20,7 @@ DeepSeek Harness Mobile 是面向 Android 的 DeepSeek Harness 独立运行外�
 - 支持 npm、GitHub、Git、SSH、本地 ZIP/Tarball 等插件来源。
 - 提供插件安装、启用、禁用、卸载、兼容性检查与错误日志能力。
 - 内置 pnpm、npm/npx、ripgrep、Git、OpenSSH、CA bundle 等运行时能力。
+- 内置 Termux 兼容工具层：`pkg` / `apt` / `dpkg`、Python 3 / pip，以及常用 CLI 工具，模型可直接在终端/工具调用中使用。
 - 针对 Android/Termux 环境处理 `node-pty`、Koffi、Sharp、ripgrep resolver、动态库加载和 W^X 等兼容问题。
 - 设置页提供项目 GitHub 仓库入口。
 - 运行时缺失或损坏时提供诊断与修复流程。
@@ -125,9 +126,10 @@ https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobile-Enhance
 
 ```bash
 pkg update -y
-pkg install openjdk-17 nodejs-lts clang cmake ninja make python binutils pkg-config \
-  libandroid-spawn ripgrep git openssh ca-certificates \
-  curl unzip tar xz-utils aapt2 -y
+pkg install openjdk-17 nodejs-lts clang cmake ninja make python python-pip proot \
+  binutils pkg-config libandroid-spawn ripgrep git openssh ca-certificates \
+  curl jq unzip zip tar gzip xz-utils coreutils findutils grep sed gawk less which procps \
+  apt dpkg termux-tools termux-keyring aapt2 -y
 ```
 
 解压源码后执行：
@@ -172,6 +174,50 @@ usr/bin/bash -> /system/bin/sh
 ```
 
 的安全兼容；其他可能逃逸解压根目录的绝对链接和路径穿越仍会被拒绝。
+
+## 内置 Termux 工具环境
+
+V0.1.1 的 runtime 不再只是“Termux 风格目录”。完整构建会把一组经过依赖闭包解析的 Termux 工具包打进应用，包括：
+
+- `pkg` / `apt` / `dpkg`
+- Python 3 / pip
+- coreutils / findutils / grep / sed / gawk
+- tar / gzip / xz / unzip / zip
+- curl / jq / less / which / procps / make
+- 以及上述工具的实际运行依赖
+
+由于官方 Termux 包通常编译时绑定 `/data/data/com.termux/files/usr`，应用不会假装自己的私有前缀就是原版 Termux。对需要该固定前缀的命令，runtime 通过 PRoot 兼容命名空间把：
+
+```text
+/data/data/com.dshmobile.shell/files/usr
+```
+
+映射到：
+
+```text
+/data/data/com.termux/files/usr
+```
+
+因此终端和模型可以直接执行：
+
+```bash
+python3 --version
+python3 script.py
+pip install <package>
+
+pkg list-installed
+pkg install <package>
+apt update
+apt install <package>
+```
+
+包管理器安装的新文件仍实际写入本应用自己的私有 `files/usr`，不会修改独立 Termux 应用的数据。
+
+可通过构建环境变量扩展预装工具：
+
+```bash
+DSH_EXTRA_TERMUX_PACKAGES="ffmpeg openssl-tool" bash build-termux.sh
+```
 
 ## Shell / Terminal 兼容
 
