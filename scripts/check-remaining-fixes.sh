@@ -80,14 +80,14 @@ must "$MA" 'appSettings.innerHTML = upstreamSettingsIcon();'
 forbid "$BG" 'snapshot-x86_64.tar.xz'
 must "$BG" 'snapshot-arm64.tar.xz'
 
-# V0.1 identity and settings repository entry.
-must "$BG" 'versionCode = 35'
-must "$BG" 'versionName = "0.1"'
-must "$MA" 'DSH-Android/0.1'
-must "$BT" '"app": "0.1"'
-must "$BT" "printf 'app=0.1\\ndsh=%s\\nsha256=%s\\n'"
+# V0.1.1 identity and settings repository entry.
+must "$BG" 'versionCode = 36'
+must "$BG" 'versionName = "0.1.1"'
+must "$MA" 'DSH-Android/0.1.1'
+must "$BT" '"app": "0.1.1"'
+must "$BT" "printf 'app=0.1.1\\ndsh=%s\\nsha256=%s\\n'"
 must "$MA" 'GITHUB_REPOSITORY_URL = "https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobile-Enhance"'
-must "$MA" 'text = "版本  V0.1"'
+must "$MA" 'text = "版本  V0.1.1"'
 must "$MA" 'text = "GitHub 仓库\n$GITHUB_REPOSITORY_URL"'
 must "$MA" 'setOnClickListener { openExternalUrl(GITHUB_REPOSITORY_URL) }'
 SKM="$ROOT/app/src/main/java/com/dshmobile/shell/SkillManager.kt"
@@ -191,7 +191,7 @@ must "$ROOT/scripts/android-runtime-patch.mjs" 'sandbox: ctx.shell.sandboxMode'
 must "$ROOT/scripts/android-runtime-patch.mjs" 'approval: ctx.approval.config.policy ?? "ask"'
 forbid "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: explicit permission default preset'
 
-# V0.1 runtime extraction / engine-start performance.
+# V0.1.1 runtime extraction / engine-start performance.
 must "$SE" 'COPY_BUFFER_SIZE = 256 * 1024'
 must "$SE" 'PROGRESS_STEP_BYTES = 4L * 1024L * 1024L'
 must "$SE" 'safeDirectories = HashSet<Path>(4096)'
