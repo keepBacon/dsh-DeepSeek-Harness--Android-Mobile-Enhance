@@ -1,4 +1,4 @@
-# DeepSeek Harness Mobile V0.1
+# DeepSeek Harness Mobile V0.1.1
 
 > **DeepSeek Harness Mobile Enhance：面向 Android 的 DeepSeek Harness 增强版，重点强化工作区文件导入、插件安装、UI 切换、Termux/Android 兼容性与移动端稳定性。**
 
@@ -6,7 +6,7 @@
 
 DeepSeek Harness Mobile 是面向 Android 的 DeepSeek Harness 独立运行外壳。应用在本机启动 DSH Host，并通过受限的 Android WebView 提供移动端界面，同时保留插件、工作区、终端、Git/SSH 与文件搜索等能力。
 
-> 当前应用版本：**V0.1**  
+> 当前应用版本：**V0.1.1**  
 > 默认 DSH：`@deepseek-ai/dsh 0.1.5-rc.2`  
 > Android：`minSdk 26` / `targetSdk 34` / `compileSdk 36`  
 > 主要架构：`arm64`
@@ -134,8 +134,8 @@ pkg install openjdk-17 nodejs-lts clang cmake ninja make python binutils pkg-con
 
 ```bash
 cd /storage/emulated/0/Download
-unzip dsh-mobile-v0.1-source.zip
-cd dsh-mobile-v0.1
+unzip dsh-mobile-v0.1.1-source.zip
+cd dsh-mobile-v0.1.1
 bash build-termux.sh
 ```
 
@@ -165,7 +165,7 @@ usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js
 usr/lib/libtermux-exec-ld-preload.so
 ```
 
-V0.1 同时保留对 Android 系统 Shell 合法绝对符号链接：
+V0.1.1 同时保留对 Android 系统 Shell 合法绝对符号链接：
 
 ```text
 usr/bin/bash -> /system/bin/sh
