@@ -392,6 +392,8 @@ copy_link_deps() {
   fi
 }
 
+. "$ROOT/scripts/embed-termux-tools.sh"
+
 install_terminal_shell_runtime() {
   local stage="$1" host_bash host_prefix real_bash
   host_bash="$(command -v bash 2>/dev/null || true)"
@@ -914,6 +916,7 @@ refresh_dsh_runtime() {
   rm -rf "$stage/usr/lib/node_modules/@deepseek-ai/dsh"
 
   overlay_host_node_runtime "$stage"
+  install_termux_tool_runtime "$stage"
   install_terminal_shell_runtime "$stage"
   local node_headers
   node_headers="$(prepare_node_headers)"
@@ -949,6 +952,7 @@ refresh_dsh_runtime() {
   build_native_modules "$stage" "$node_headers"
   validate_reusable_node_pty "$stage"
   validate_terminal_runtime "$stage"
+  validate_termux_tool_runtime "$stage"
   install_sharp_wasm "$stage" "$used_registry"
   apply_android_runtime_patches "$stage"
   copy_ripgrep_runtime "$stage"
