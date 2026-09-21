@@ -124,10 +124,12 @@ LEGACY_HOME="$LEGACY_ROOT/home"
 CMD="${1:-}"
 [ -n "$CMD" ] || { echo "usage: termux-run <command> [args...]" >&2; exit 2; }
 shift
-mkdir -p "$REAL_HOME" "$REAL_HOME/tmp"
+/system/bin/mkdir -p "$REAL_HOME" "$REAL_HOME/tmp"
 exec "$REAL_PREFIX/bin/proot" --link2symlink -0 \
   -b "$REAL_PREFIX:$LEGACY_PREFIX" \
   -b "$REAL_HOME:$LEGACY_HOME" \
+  -b /proc \
+  -b /dev \
   -w "$PWD" \
   /system/bin/env \
     DSH_TERMUX_INNER=1 \
@@ -141,7 +143,7 @@ EOF_TERMUX_RUN
   cat > "$stage/usr/libexec/dsh/termux-wrapper" <<'EOF_TERMUX_WRAPPER'
 #!/system/bin/sh
 set -eu
-name="$(basename "$0")"
+name="${0##*/}"
 prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
 [ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
 case "$name" in
