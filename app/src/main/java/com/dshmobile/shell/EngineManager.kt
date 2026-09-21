@@ -168,8 +168,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append(" · npm/npx ").append(if (npmTools) "可用" else "不可用")
       append(" · Git/HTTPS ").append(if (gitHttps) "可用" else "不可用")
       append(" · SSH ").append(if (ssh) "可用" else "不可用")
-      append(" · Python3 ").append(if (File(usrDir, "bin/python3").isFile) "可用" else "不可用")
-      append(" · pkg/apt ").append(if (File(usrDir, "bin/pkg").isFile && File(usrDir, "bin/apt").isFile) "可用" else "不可用")
+      append(" · Python3 ").append(if (File(usrDir, "libexec/dsh/wrappers/python3").isFile) "可用" else "不可用")
+      append(" · pkg/apt ").append(if (File(usrDir, "libexec/dsh/wrappers/pkg").isFile && File(usrDir, "libexec/dsh/wrappers/apt").isFile) "可用" else "不可用")
       if (gitHttps) append(" · CA 已内置")
       if (sshKey) append(" · SSH 密钥已配置")
       if (SecureCredentialStore.sshPassphrase(context) != null) append(" · SSH 口令已安全保存")
@@ -671,7 +671,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun engineEnv(preload: File = preloadBin): Map<String, String> {
     File(homeDir, ".ssh").mkdirs()
     val env = mutableMapOf(
-      "PATH" to (usrDir.absolutePath + "/bin:/system/bin"),
+      "PATH" to (usrDir.absolutePath + "/libexec/dsh/wrappers:" + usrDir.absolutePath + "/bin:/system/bin"),
       "LD_LIBRARY_PATH" to (usrDir.absolutePath + "/lib"),
       "HOME" to homeDir.absolutePath,
       // Sidebar terminal + model terminal tools must resolve the embedded
@@ -1691,11 +1691,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
       dshBin to "@deepseek-ai/dsh/lib/bin.js",
       preloadBin to "usr/lib/libtermux-exec-ld-preload.so",
       File(usrDir, "bin/bash") to "usr/bin/bash",
-      File(usrDir, "bin/python3") to "usr/bin/python3",
-      File(usrDir, "bin/pip3") to "usr/bin/pip3",
-      File(usrDir, "bin/pkg") to "usr/bin/pkg",
-      File(usrDir, "bin/apt") to "usr/bin/apt",
-      File(usrDir, "bin/dpkg") to "usr/bin/dpkg",
+      File(usrDir, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
+      File(usrDir, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
+      File(usrDir, "libexec/dsh/wrappers/pkg") to "usr/libexec/dsh/wrappers/pkg",
+      File(usrDir, "libexec/dsh/wrappers/apt") to "usr/libexec/dsh/wrappers/apt",
+      File(usrDir, "libexec/dsh/wrappers/dpkg") to "usr/libexec/dsh/wrappers/dpkg",
       File(usrDir, "bin/proot") to "usr/bin/proot",
     )
     val missing = required.filterNot { it.first.isFile }.map { it.second }
