@@ -1,0 +1,33 @@
+name: Validate embedded Termux tools
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/validate-embedded-termux-tools.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Shell syntax and static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n build-termux.sh
+          bash -n scripts/embed-termux-tools.sh
+          bash scripts/check-remaining-fixes.sh
+      - name: Kotlin compile
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileDebugKotlin --no-daemon
