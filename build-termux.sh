@@ -389,6 +389,124 @@ copy_link_deps() {
   fi
 }
 
+install_terminal_shell_runtime() {
+  local stage="$1" host_bash host_prefix real_bash
+  host_bash="$(command -v bash 2>/dev/null || true)"
+  host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  [ -n "$host_bash" ] && [ -x "$host_bash" ] || {
+    echo '[DSH] Termux bash is required for the embedded interactive terminal.'
+    exit 7
+  }
+
+  mkdir -p "$stage/usr/bin" "$stage/usr/libexec/dsh" "$stage/usr/etc"
+  real_bash="$stage/usr/libexec/dsh/bash-real"
+  cp -Lf "$host_bash" "$real_bash"
+  chmod 0755 "$real_bash"
+  copy_link_deps "$host_bash" "$stage/usr/lib"
+
+  # Do not expose Termux's build-host absolute prefix through Bash's compiled
+  # startup-file paths. A tiny Android-system-shell trampoline enters the real
+  # embedded Bash with profile loading disabled; the sidebar may still pass
+  # its normal -l argument and users receive an actual Bash process.
+  rm -f "$stage/usr/bin/bash"
+  cat > "$stage/usr/bin/bash" <<'EOF'
+#!/system/bin/sh
+REAL="$TERMUX__PREFIX/libexec/dsh/bash-real"
+if [ ! -x "$REAL" ]; then
+  echo "embedded bash runtime missing: $REAL" >&2
+  exit 127
+fi
+exec "$REAL" --noprofile --norc "$@"
+EOF
+  chmod 0755 "$stage/usr/bin/bash"
+
+  # Keep a stable POSIX shell name in the embedded PATH as well. Package
+  # scripts with #!/usr/bin/env sh should never depend on an absolute symlink
+  # surviving snapshot extraction.
+  rm -f "$stage/usr/bin/sh"
+  cat > "$stage/usr/bin/sh" <<'EOF'
+#!/system/bin/sh
+exec /system/bin/sh "$@"
+EOF
+  chmod 0755 "$stage/usr/bin/sh"
+
+  if [ -f "$host_prefix/etc/inputrc" ]; then
+    cp -Lf "$host_prefix/etc/inputrc" "$stage/usr/etc/inputrc"
+  else
+    cat > "$stage/usr/etc/inputrc" <<'EOF'
+set editing-mode emacs
+set completion-ignore-case on
+EOF
+  fi
+}
+
+validate_terminal_runtime() {
+  local stage="$1"
+  local node_pty_manifest node_pty_dir smoke_home preload=''
+  [ -x "$stage/usr/bin/bash" ] || { echo '[DSH] Embedded terminal shell missing.'; exit 7; }
+  [ -x "$stage/usr/libexec/dsh/bash-real" ] || { echo '[DSH] Embedded real Bash missing.'; exit 7; }
+
+  smoke_home="$CACHE_DIR/terminal-smoke-home"
+  rm -rf "$smoke_home"; mkdir -p "$smoke_home/tmp"
+
+  # First prove the shell itself runs with the same relocation variables used
+  # by the APK.
+  if ! env     PATH="$stage/usr/bin:/system/bin"     LD_LIBRARY_PATH="$stage/usr/lib"     HOME="$smoke_home"     TMPDIR="$smoke_home/tmp"     TERMUX__PREFIX="$stage/usr"     TERMUX__ROOTFS="$stage"     SHELL="$stage/usr/bin/bash"     "$stage/usr/bin/bash" -lc 'printf "__DSH_BASH_OK__"' 2>/dev/null       | grep -Fq '__DSH_BASH_OK__'; then
+    echo '[DSH] Embedded Bash relocation smoke test failed.'
+    exit 7
+  fi
+
+  # Then prove node-pty can create a real PTY and execute that shell. Merely
+  # require()'ing node-pty is insufficient: Android failures often appear only
+  # at forkpty/spawn time.
+  node_pty_manifest="$(find "$stage/usr/lib/node_modules" -type f -path '*/node-pty/package.json' -print -quit 2>/dev/null || true)"
+  [ -n "$node_pty_manifest" ] || { echo '[DSH] node-pty missing for terminal smoke test.'; exit 7; }
+  node_pty_dir="${node_pty_manifest%/package.json}"
+  [ -f "$stage/usr/lib/libtermux-exec-ld-preload.so" ] && preload="$stage/usr/lib/libtermux-exec-ld-preload.so"
+
+  if ! env     PATH="$stage/usr/bin:/system/bin"     LD_LIBRARY_PATH="$stage/usr/lib"     LD_PRELOAD="$preload"     HOME="$smoke_home"     TMPDIR="$smoke_home/tmp"     TERM=xterm-256color     TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force     TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1     TERMUX__PREFIX="$stage/usr"     TERMUX__ROOTFS="$stage"     SHELL="$stage/usr/bin/bash"     DSH_SIDEBAR_SHELL="$stage/usr/bin/bash"     "$stage/usr/bin/node" - "$node_pty_dir" "$stage/usr/bin/bash" "$smoke_home" <<'NODE'
+const ptyRoot = process.argv[2]
+const shell = process.argv[3]
+const cwd = process.argv[4]
+let pty
+try {
+  pty = require(ptyRoot)
+} catch (error) {
+  console.error(error && error.stack || error)
+  process.exit(1)
+}
+const child = pty.spawn(shell, ['-lc', 'printf "__DSH_PTY_OK__"; exit'], {
+  name: 'xterm-256color',
+  cols: 80,
+  rows: 24,
+  cwd,
+  env: { ...process.env, SHELL: shell, DSH_SIDEBAR_SHELL: shell },
+})
+let output = ''
+const timer = setTimeout(() => {
+  try { child.kill() } catch {}
+  console.error('node-pty terminal smoke timeout')
+  process.exit(2)
+}, 8000)
+child.onData(data => { output += data })
+child.onExit(() => {
+  clearTimeout(timer)
+  if (!output.includes('__DSH_PTY_OK__')) {
+    console.error(output)
+    process.exit(3)
+  }
+  process.stdout.write('__DSH_PTY_OK__\n')
+  process.exit(0)
+})
+NODE
+  then
+    echo '[DSH] Embedded node-pty + Bash spawn smoke test failed.'
+    exit 7
+  fi
+
+  echo '[DSH] Interactive terminal runtime: OK (Bash + node-pty spawn)'
+}
+
 overlay_host_node_runtime() {
   local stage="$1" host_node host_prefix
   host_node="$(command -v node)"
@@ -793,6 +911,7 @@ refresh_dsh_runtime() {
   rm -rf "$stage/usr/lib/node_modules/@deepseek-ai/dsh"
 
   overlay_host_node_runtime "$stage"
+  install_terminal_shell_runtime "$stage"
   local node_headers
   node_headers="$(prepare_node_headers)"
 
@@ -826,6 +945,7 @@ refresh_dsh_runtime() {
   # stays install-script-free, which avoids accidental desktop-only postinstalls.
   build_native_modules "$stage" "$node_headers"
   validate_reusable_node_pty "$stage"
+  validate_terminal_runtime "$stage"
   install_sharp_wasm "$stage" "$used_registry"
   apply_android_runtime_patches "$stage"
   copy_ripgrep_runtime "$stage"
