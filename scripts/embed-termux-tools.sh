@@ -50,10 +50,10 @@ copy_termux_package_payload() {
 install_termux_tool_runtime() {
   local stage="$1"
   [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || { echo "[DSH] Embedded Termux tool runtime disabled."; return 0; }
-  for cmd in apt-cache dpkg-query proot python3; do
+  for cmd in apt-cache dpkg-query proot python3 file; do
     command -v "$cmd" >/dev/null 2>&1 || {
       echo "[DSH] 缺少 Termux 工具 $cmd。" >&2
-      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make -y" >&2
+      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file -y" >&2
       return 7
     }
   done
