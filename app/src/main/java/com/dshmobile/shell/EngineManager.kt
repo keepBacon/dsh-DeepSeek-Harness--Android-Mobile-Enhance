@@ -168,6 +168,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append(" · npm/npx ").append(if (npmTools) "可用" else "不可用")
       append(" · Git/HTTPS ").append(if (gitHttps) "可用" else "不可用")
       append(" · SSH ").append(if (ssh) "可用" else "不可用")
+      append(" · Python3 ").append(if (File(usrDir, "bin/python3").isFile) "可用" else "不可用")
+      append(" · pkg/apt ").append(if (File(usrDir, "bin/pkg").isFile && File(usrDir, "bin/apt").isFile) "可用" else "不可用")
       if (gitHttps) append(" · CA 已内置")
       if (sshKey) append(" · SSH 密钥已配置")
       if (SecureCredentialStore.sshPassphrase(context) != null) append(" · SSH 口令已安全保存")
@@ -688,6 +690,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "TERMUX_EXEC__EXECVE_CALL__INTERCEPT" to "1",
       "TERMUX__ROOTFS" to usrDir.parentFile.absolutePath,
       "TERMUX__PREFIX" to usrDir.absolutePath,
+      "TERMUX_PREFIX" to usrDir.absolutePath,
+      "PREFIX" to usrDir.absolutePath,
+      "TERMUX_HOME" to homeDir.absolutePath,
       "TERMUX_APP__DATA_DIR" to context.filesDir.parentFile.absolutePath,
       "TERMUX_APP__LEGACY_DATA_DIR" to "/data/data/com.dshmobile.shell",
       "TERMUX_VERSION" to "0.118.3",
@@ -1685,6 +1690,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       nodeBin to "usr/bin/node",
       dshBin to "@deepseek-ai/dsh/lib/bin.js",
       preloadBin to "usr/lib/libtermux-exec-ld-preload.so",
+      File(usrDir, "bin/bash") to "usr/bin/bash",
+      File(usrDir, "bin/python3") to "usr/bin/python3",
+      File(usrDir, "bin/pip3") to "usr/bin/pip3",
+      File(usrDir, "bin/pkg") to "usr/bin/pkg",
+      File(usrDir, "bin/apt") to "usr/bin/apt",
+      File(usrDir, "bin/dpkg") to "usr/bin/dpkg",
+      File(usrDir, "bin/proot") to "usr/bin/proot",
     )
     val missing = required.filterNot { it.first.isFile }.map { it.second }
     return RuntimeHealth(missing.isEmpty(), missing)
