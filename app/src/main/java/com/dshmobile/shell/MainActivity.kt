@@ -418,7 +418,7 @@ class MainActivity : ComponentActivity() {
       displayZoomControls = false
       textZoom = 100
       userAgentString = "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36 DSH-Android/0.1"
+        "(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36 DSH-Android/0.1.1"
       // prefers-color-scheme 跟随系统深色（某些厂商 WebView 默认不跟随；
       // FORCE_DARK_AUTO 让 media query 反映系统深浅，dsh 的"跟随系统"主题依赖它）。
       if (Build.VERSION.SDK_INT >= 29) {
@@ -622,10 +622,10 @@ class MainActivity : ComponentActivity() {
       loadWithOverviewMode = native
       userAgentString = if (native) {
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 DSH-Android/0.1"
+          "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 DSH-Android/0.1.1"
       } else {
         "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36 DSH-Android/0.1"
+          "(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36 DSH-Android/0.1.1"
       }
     }
   }
@@ -669,7 +669,7 @@ class MainActivity : ComponentActivity() {
       setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
     })
     wrap.addView(TextView(this).apply {
-      text = "版本  V0.1"
+      text = "版本  V0.1.1"
       textSize = 14f
       setPadding(0, (4 * density).toInt(), 0, (8 * density).toInt())
     })
