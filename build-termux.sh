@@ -841,7 +841,7 @@ refresh_dsh_runtime() {
   cat > "$stage/usr/etc/dsh-android-compat.json" <<EOF
 {
   "schema": 1,
-  "app": "0.1",
+  "app": "0.1.1",
   "dsh": "$DSH_VERSION",
   "node": "$embedded_node",
   "requireBuiltinFallback": true,
@@ -948,7 +948,7 @@ fi
 echo "[DSH] Runtime snapshot + pnpm OK: $(du -h "$SNAPSHOT" | awk '{print $1}')"
 RUNTIME_DSH_VERSION="$(snapshot_dsh_version || true)"
 RUNTIME_SHA256="$(sha256sum "$SNAPSHOT" | awk '{print $1}')"
-printf 'app=0.1\ndsh=%s\nsha256=%s\n' "$RUNTIME_DSH_VERSION" "$RUNTIME_SHA256" > "$ROOT/app/src/main/assets/runtime-version.txt"
+printf 'app=0.1.1\ndsh=%s\nsha256=%s\n' "$RUNTIME_DSH_VERSION" "$RUNTIME_SHA256" > "$ROOT/app/src/main/assets/runtime-version.txt"
 echo "[DSH] Runtime ID: DSH ${RUNTIME_DSH_VERSION:-unknown} / ${RUNTIME_SHA256:0:12}"
 
 AAPT2_BIN="$(command -v aapt2)"
