@@ -128,7 +128,7 @@ https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobile-Enhance
 pkg update -y
 pkg install openjdk-17 nodejs-lts clang cmake ninja make python python-pip proot \
   binutils pkg-config libandroid-spawn ripgrep git openssh ca-certificates \
-  curl jq unzip zip tar gzip xz-utils coreutils findutils grep sed gawk less which procps \
+  curl jq unzip zip tar gzip xz-utils coreutils findutils grep sed gawk less which procps file \
   apt dpkg termux-tools termux-keyring aapt2 -y
 ```
 
@@ -167,13 +167,14 @@ usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js
 usr/lib/libtermux-exec-ld-preload.so
 ```
 
-V0.1.1 同时保留对 Android 系统 Shell 合法绝对符号链接：
+V0.1.1 的交互终端使用内置的真实 Termux Bash。运行时通过稳定包装入口调用：
 
 ```text
-usr/bin/bash -> /system/bin/sh
+usr/bin/bash
+→ usr/libexec/dsh/bash-real
 ```
 
-的安全兼容；其他可能逃逸解压根目录的绝对链接和路径穿越仍会被拒绝。
+并保留 `/system/bin/sh` 作为 Android 系统脚本兼容入口。其他可能逃逸解压根目录的绝对链接和路径穿越仍会被拒绝。
 
 ## 内置 Termux 工具环境
 
