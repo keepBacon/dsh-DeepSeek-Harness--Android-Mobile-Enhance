@@ -74,7 +74,7 @@ install_termux_tool_runtime() {
   [ -s "$package_list" ] || { echo "[DSH] Termux 工具依赖闭包为空。" >&2; return 7; }
   echo "[DSH] Bundling Termux tool/package-manager closure: $(wc -l < "$package_list") packages"
 
-  mkdir -p "$stage/usr/bin" "$stage/usr/lib" "$stage/usr/libexec/dsh/pm-bin" \
+  mkdir -p "$stage/usr/bin" "$stage/usr/lib" "$stage/usr/libexec/dsh/pm-bin" "$stage/usr/libexec/dsh/wrappers" \
     "$stage/usr/var/lib/dpkg/info" "$stage/usr/var/lib/dpkg/updates" "$stage/usr/var/lib/dpkg/triggers" \
     "$stage/usr/var/lib/apt/lists/partial" "$stage/usr/var/cache/apt/archives/partial" "$stage/usr/tmp"
 
@@ -157,12 +157,15 @@ exec "$prefix/libexec/dsh/termux-run" "$real" "$@"
 EOF_TERMUX_WRAPPER
   chmod 0755 "$stage/usr/libexec/dsh/termux-wrapper"
 
+  # Keep package-owned files under usr/bin intact so apt/pkg upgrades can
+  # replace them normally. DSH prepends this wrapper directory to PATH, which
+  # keeps relocation/proot entry stable even after package-manager self-updates.
   for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3; do
-    rm -f "$stage/usr/bin/$cmd"
-    ln -s ../libexec/dsh/termux-wrapper "$stage/usr/bin/$cmd"
+    rm -f "$stage/usr/libexec/dsh/wrappers/$cmd"
+    ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$cmd"
   done
-  rm -f "$stage/usr/bin/termux-run"
-  ln -s ../libexec/dsh/termux-run "$stage/usr/bin/termux-run"
+  rm -f "$stage/usr/libexec/dsh/wrappers/termux-run"
+  ln -s ../termux-run "$stage/usr/libexec/dsh/wrappers/termux-run"
 
   while IFS= read -r -d '' elf; do
     case "$(file -b "$elf" 2>/dev/null || true)" in *ELF*) copy_link_deps "$elf" "$stage/usr/lib" ;; esac
@@ -176,11 +179,12 @@ validate_termux_tool_runtime() {
   [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || return 0
   local home="$CACHE_DIR/tool-runtime-smoke-home"
   rm -rf "$home"; mkdir -p "$home/tmp"
-  local common_env=(env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
-  "${common_env[@]}" "$stage/usr/bin/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
-  "${common_env[@]}" "$stage/usr/bin/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
-  "${common_env[@]}" "$stage/usr/bin/dpkg-query" -W python >/dev/null 2>&1 || { echo "[DSH] Embedded dpkg database smoke test failed."; return 7; }
-  "${common_env[@]}" "$stage/usr/bin/apt" --version >/dev/null 2>&1 || { echo "[DSH] Embedded apt smoke test failed."; return 7; }
-  "${common_env[@]}" "$stage/usr/bin/pkg" list-installed >/dev/null 2>&1 || { echo "[DSH] Embedded pkg smoke test failed."; return 7; }
+  local wrappers="$stage/usr/libexec/dsh/wrappers"
+  local common_env=(env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
+  "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
+  "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
+  "${common_env[@]}" "$wrappers/dpkg-query" -W python >/dev/null 2>&1 || { echo "[DSH] Embedded dpkg database smoke test failed."; return 7; }
+  "${common_env[@]}" "$wrappers/apt" --version >/dev/null 2>&1 || { echo "[DSH] Embedded apt smoke test failed."; return 7; }
+  "${common_env[@]}" "$wrappers/pkg" list-installed >/dev/null 2>&1 || { echo "[DSH] Embedded pkg smoke test failed."; return 7; }
   echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + common CLI)"
 }
