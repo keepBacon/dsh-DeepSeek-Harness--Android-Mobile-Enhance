@@ -1,0 +1,31 @@
+name: Validate apt app-uid fix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/validate-apt-appuid.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Static checks
+        run: |
+          set -euo pipefail
+          bash -n build-termux.sh
+          bash -n scripts/embed-termux-tools.sh
+          bash scripts/check-remaining-fixes.sh
+      - name: Kotlin compile
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileDebugKotlin --no-daemon
