@@ -226,9 +226,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
     return RuntimeHealth(missing.isEmpty(), missing)
   }
 
-  /** Remove only the engine runtime. HOME / DSH user data are intentionally preserved. */
+  /**
+   * Mark the runtime for transactional replacement without deleting it first.
+   *
+   * A repair must never destroy the last runnable /usr before a replacement has
+   * been completely extracted and validated. User HOME is never touched here.
+   */
   fun clearBrokenRuntime() {
-    try { usrDir.deleteRecursively() } catch (_: Throwable) {}
     try { runtimeIdMarker.delete() } catch (_: Throwable) {}
     ACTIVE_PROCESS.set(null)
     engineProcess = null
@@ -308,42 +312,111 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(webProfile, "node_modules").isDirectory
   }
 
+  private fun runtimeHealthFilesAt(rootUsr: File): RuntimeHealth {
+    val required = listOf(
+      File(rootUsr, "bin/node") to "usr/bin/node",
+      File(rootUsr, "lib/node_modules/@deepseek-ai/dsh/lib/bin.js") to "@deepseek-ai/dsh/lib/bin.js",
+      File(rootUsr, "lib/libtermux-exec-ld-preload.so") to "usr/lib/libtermux-exec-ld-preload.so",
+      File(rootUsr, "bin/bash") to "usr/bin/bash",
+      File(rootUsr, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
+      File(rootUsr, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
+      File(rootUsr, "libexec/dsh/wrappers/pkg") to "usr/libexec/dsh/wrappers/pkg",
+      File(rootUsr, "libexec/dsh/wrappers/apt") to "usr/libexec/dsh/wrappers/apt",
+      File(rootUsr, "libexec/dsh/wrappers/dpkg") to "usr/libexec/dsh/wrappers/dpkg",
+      File(rootUsr, "bin/proot") to "usr/bin/proot",
+    )
+    val missing = required.filterNot { it.first.isFile }.map { it.second }
+    return RuntimeHealth(missing.isEmpty(), missing)
+  }
+
+  private fun seedHomeFromStage(stageHome: File) {
+    if (!stageHome.isDirectory) return
+    if (shouldPreserveUserHome()) return
+    if (!homeDir.exists()) {
+      if (!stageHome.renameTo(homeDir)) {
+        homeDir.mkdirs()
+        copyTree(stageHome, homeDir, emptySet(), overwrite = false)
+      }
+      return
+    }
+    // A pre-existing HOME may contain user-created files even without an old
+    // marker. Never replace it; only seed files that do not already exist.
+    copyTree(stageHome, homeDir, emptySet(), overwrite = false)
+  }
+
   fun extractSnapshot(onProgress: (Long, Long) -> Unit): Boolean {
+    val stageRoot = File(context.filesDir, ".runtime-stage-" + System.nanoTime())
+    val stageUsr = File(stageRoot, "usr")
+    val stageHome = File(stageRoot, "home")
+    val backupUsr = File(context.filesDir, ".usr-backup-" + System.nanoTime())
+    var oldUsrBackedUp = false
+    var newUsrCommitted = false
+
     return try {
-      // A previous interrupted extraction may have left usr/bin/node behind
-      // while the preload or DSH files are missing. Rebuild only /usr so a
-      // half-extracted runtime can never make engineReady report a false positive.
-      val preserveHome = shouldPreserveUserHome()
-      if (usrDir.exists() && !runtimeHealth().ok) usrDir.deleteRecursively()
+      // Never extract directly over the live runtime. A malformed archive,
+      // unsupported symlink or interrupted copy must leave both user data and
+      // the previous /usr untouched.
+      if (!stageRoot.mkdirs()) throw java.io.IOException("无法创建运行时暂存目录")
+
       val fd = context.assets.openFd("snapshot.tar.xz")
       SnapshotExtractor.extract(
         context.assets.open("snapshot.tar.xz"),
         fd.length,
-        usrDir.parentFile,
-        preservedRoots = if (preserveHome) setOf(homeDir) else emptySet(),
+        stageRoot,
+        preservedRoots = emptySet(),
         onProgress = onProgress,
       )
-      homeDir.mkdirs()
-      // Commit the runtime identity only after extraction. This makes APK
-      // upgrades replace the old embedded engine while keeping HOME / DSH_HOME
-      // and every user workspace/profile untouched.
-      runtimeIdMarker.writeText(bundledRuntimeId())
-      // Written only after a complete extraction; future runtime repairs can
-      // distinguish a real user HOME from an interrupted first-install seed.
-      userHomeInitializedMarker.writeText("1\n")
-      val health = runtimeHealth()
-      if (!health.ok) {
-        runtimeIdMarker.delete()
-        LAST_START_ERROR = health.describe()
-        Log.e(TAG, "snapshot incomplete: " + health.describe())
-        false
-      } else {
-        LAST_START_ERROR = ""
-        true
+
+      val stagedHealth = runtimeHealthFilesAt(stageUsr)
+      if (!stagedHealth.ok) {
+        throw java.io.IOException("暂存运行时不完整：" + stagedHealth.describe())
       }
+
+      // Seed HOME independently. Existing user HOME is authoritative and is
+      // never renamed/deleted as part of a runtime repair.
+      seedHomeFromStage(stageHome)
+
+      if (usrDir.exists()) {
+        if (backupUsr.exists()) backupUsr.deleteRecursively()
+        if (!usrDir.renameTo(backupUsr)) {
+          throw java.io.IOException("无法备份现有运行时；已取消修复以保护数据")
+        }
+        oldUsrBackedUp = true
+      }
+
+      if (!stageUsr.renameTo(usrDir)) {
+        throw java.io.IOException("无法提交新运行时")
+      }
+      newUsrCommitted = true
+
+      val health = runtimeHealthFilesOnly()
+      if (!health.ok) {
+        throw java.io.IOException("新运行时提交后校验失败：" + health.describe())
+      }
+
+      runtimeIdMarker.writeText(bundledRuntimeId())
+      userHomeInitializedMarker.writeText("1\n")
+      if (oldUsrBackedUp) backupUsr.deleteRecursively()
+      stageRoot.deleteRecursively()
+      LAST_START_ERROR = ""
+      true
     } catch (t: Throwable) {
+      // Roll back /usr if commit had started. HOME and public DSH data are never
+      // part of this transaction and therefore cannot be lost here.
+      try {
+        if (newUsrCommitted && usrDir.exists()) usrDir.deleteRecursively()
+        if (oldUsrBackedUp && backupUsr.exists() && !usrDir.exists()) {
+          if (!backupUsr.renameTo(usrDir)) {
+            Log.e(TAG, "runtime rollback rename failed; backup retained at ${backupUsr.absolutePath}")
+          }
+        }
+      } catch (rollback: Throwable) {
+        Log.e(TAG, "runtime rollback failed", rollback)
+      }
+      try { stageRoot.deleteRecursively() } catch (_: Throwable) {}
+      try { runtimeIdMarker.delete() } catch (_: Throwable) {}
       LAST_START_ERROR = "运行时解压异常：" + (t.message ?: t.javaClass.simpleName)
-      Log.e(TAG, "snapshot extract failed", t)
+      Log.e(TAG, "transactional snapshot extract failed", t)
       false
     }
   }
