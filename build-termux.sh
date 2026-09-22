@@ -1,5 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'rc=$?; echo "[DSH] BUILD FAILED: line ${BASH_LINENO[0]:-$LINENO}, exit=$rc, command=$BASH_COMMAND" >&2' ERR
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
