@@ -15,9 +15,9 @@ must "$P" 'process.env.DSH_RG_PATH'
 must "$P" 'ripgrepResolverOverrideReady()'
 must "$BT" 'validate_ripgrep_runtime()'
 must "$BT" 'validate_ripgrep_runtime "$stage"'
-must "$BG" 'versionName = "0.1"'
+must "$BG" 'versionName = "0.1.1"'
 must "$BG" 'versionCode = 35'
-must "$MA" 'DSH-Android/0.1'
+must "$MA" 'DSH-Android/0.1.1'
 must "$BT" '"app": "0.1"'
 node --check "$P" >/dev/null
 
