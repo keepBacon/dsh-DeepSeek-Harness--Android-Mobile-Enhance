@@ -19,6 +19,7 @@ copy_termux_package_payload() {
   local stage="$1" pkg="$2"
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local src rel dest target mapped relative
+
   while IFS= read -r src; do
     [ -n "$src" ] || continue
     case "$src" in
@@ -27,10 +28,16 @@ copy_termux_package_payload() {
       *) continue ;;
     esac
     dest="$stage/usr/$rel"
+
+    # The upstream snapshot contains entries such as usr/bin/bash ->
+    # /system/bin/sh. A plain cp to that destination follows the symlink and
+    # attempts to overwrite Android's /system/bin/sh. Package payloads are the
+    # authoritative overlay here, so replace incompatible destination nodes
+    # without ever following them.
     if [ -L "$src" ]; then
       mkdir -p "$(dirname "$dest")"
+      [ ! -e "$dest" ] && [ ! -L "$dest" ] || rm -rf -- "$dest"
       target="$(readlink "$src")"
-      rm -f "$dest"
       if [[ "$target" = "$host_prefix"/* ]]; then
         mapped="$stage/usr/${target#"$host_prefix"/}"
         relative="$(realpath -m --relative-to="$(dirname "$dest")" "$mapped")"
@@ -39,10 +46,14 @@ copy_termux_package_payload() {
         ln -s "$target" "$dest"
       fi
     elif [ -d "$src" ]; then
+      if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -d "$dest" ]; }; then
+        rm -rf -- "$dest"
+      fi
       mkdir -p "$dest"
     elif [ -f "$src" ]; then
       mkdir -p "$(dirname "$dest")"
-      cp -p "$src" "$dest"
+      [ ! -e "$dest" ] && [ ! -L "$dest" ] || rm -rf -- "$dest"
+      cp -p -- "$src" "$dest"
     fi
   done < <(dpkg-query -L "$pkg" 2>/dev/null || true)
 }
@@ -78,8 +89,14 @@ install_termux_tool_runtime() {
     "$stage/usr/var/lib/dpkg/info" "$stage/usr/var/lib/dpkg/updates" "$stage/usr/var/lib/dpkg/triggers" \
     "$stage/usr/var/lib/apt/lists/partial" "$stage/usr/var/cache/apt/archives/partial" "$stage/usr/tmp"
 
+  local package_index=0 package_total
+  package_total="$(wc -l < "$package_list" | tr -d ' ')"
   while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
+    package_index=$((package_index + 1))
+    if [ "$package_index" -eq 1 ] || [ $((package_index % 10)) -eq 0 ] || [ "$package_index" -eq "$package_total" ]; then
+      echo "[DSH]   overlay package $package_index/$package_total: $pkg"
+    fi
     copy_termux_package_payload "$stage" "$pkg"
   done < "$package_list"
 
