@@ -37,3 +37,5 @@ jobs:
 # rerun: version-check-fix
 
 # rerun: final-v011-check-fix
+
+# rerun: runtime-metadata-check-fix
