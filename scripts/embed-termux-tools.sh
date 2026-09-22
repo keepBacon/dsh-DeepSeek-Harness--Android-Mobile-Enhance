@@ -140,6 +140,9 @@ LEGACY_PREFIX="$LEGACY_ROOT/usr"
 LEGACY_HOME="$LEGACY_ROOT/home"
 CMD="${1:-}"
 [ -n "$CMD" ] || { echo "usage: termux-run <command> [args...]" >&2; exit 2; }
+case "$CMD" in
+  *[!A-Za-z0-9._+-]*|'') echo "invalid embedded command: $CMD" >&2; exit 2 ;;
+esac
 shift
 /system/bin/mkdir -p "$REAL_HOME" "$REAL_HOME/tmp"
 exec "$REAL_PREFIX/bin/proot" --link2symlink -0 \
@@ -151,9 +154,9 @@ exec "$REAL_PREFIX/bin/proot" --link2symlink -0 \
   /system/bin/env \
     DSH_TERMUX_INNER=1 \
     HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
-    TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/libexec/dsh/pm-bin:$LEGACY_PREFIX/bin:/system/bin" \
+    TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
     LD_LIBRARY_PATH="$LEGACY_PREFIX/lib" SHELL="$LEGACY_PREFIX/bin/bash" \
-    "$LEGACY_PREFIX/libexec/dsh/pm-bin/$CMD" "$@"
+    "$LEGACY_PREFIX/bin/$CMD" "$@"
 EOF_TERMUX_RUN
   chmod 0755 "$stage/usr/libexec/dsh/termux-run"
 
@@ -164,15 +167,13 @@ name="${0##*/}"
 prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
 [ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
 case "$name" in
-  python|python3) real="python3-real" ;;
-  pip|pip3)
-    if [ "${DSH_TERMUX_INNER:-0}" = "1" ]; then exec "$prefix/libexec/dsh/pm-bin/python3-real" -m pip "$@"; fi
-    exec "$prefix/libexec/dsh/termux-run" python3-real -m pip "$@"
-    ;;
-  *) real="$name-real" ;;
+  python) command_name="python3" ;;
+  *) command_name="$name" ;;
 esac
-if [ "${DSH_TERMUX_INNER:-0}" = "1" ]; then exec "$prefix/libexec/dsh/pm-bin/$real" "$@"; fi
-exec "$prefix/libexec/dsh/termux-run" "$real" "$@"
+if [ "${DSH_TERMUX_INNER:-0}" = "1" ]; then
+  exec "$prefix/bin/$command_name" "$@"
+fi
+exec "$prefix/libexec/dsh/termux-run" "$command_name" "$@"
 EOF_TERMUX_WRAPPER
   chmod 0755 "$stage/usr/libexec/dsh/termux-wrapper"
 
@@ -203,7 +204,19 @@ validate_termux_tool_runtime() {
   "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/dpkg-query" -W python >/dev/null 2>&1 || { echo "[DSH] Embedded dpkg database smoke test failed."; return 7; }
-  "${common_env[@]}" "$wrappers/apt" --version >/dev/null 2>&1 || { echo "[DSH] Embedded apt smoke test failed."; return 7; }
-  "${common_env[@]}" "$wrappers/pkg" list-installed >/dev/null 2>&1 || { echo "[DSH] Embedded pkg smoke test failed."; return 7; }
+
+  local apt_log="$CACHE_DIR/embedded-apt-smoke.log"
+  if ! "${common_env[@]}" "$wrappers/apt" --version >"$apt_log" 2>&1; then
+    echo "[DSH] Embedded apt smoke test failed. Diagnostic:" >&2
+    sed -n '1,80p' "$apt_log" >&2 || true
+    return 7
+  fi
+
+  local pkg_log="$CACHE_DIR/embedded-pkg-smoke.log"
+  if ! "${common_env[@]}" "$wrappers/pkg" list-installed >"$pkg_log" 2>&1; then
+    echo "[DSH] Embedded pkg smoke test failed. Diagnostic:" >&2
+    sed -n '1,80p' "$pkg_log" >&2 || true
+    return 7
+  fi
   echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + common CLI)"
 }
