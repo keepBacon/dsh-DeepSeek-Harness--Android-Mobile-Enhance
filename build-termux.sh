@@ -350,15 +350,23 @@ copy_link_deps() {
   fi
 
   if [ -n "$readelf_bin" ]; then
-    local queue="$CACHE_DIR/.elfdeps-$-$RANDOM.queue"
-    local seen="$CACHE_DIR/.elfdeps-$-$RANDOM.seen"
+    local queue="$CACHE_DIR/.elfdeps-${BASHPID:-$}-$RANDOM.queue"
+    local seen="$CACHE_DIR/.elfdeps-${BASHPID:-$}-$RANDOM.seen"
     : > "$queue"; : > "$seen"
     printf '%s\n' "$file" >> "$queue"
     while IFS= read -r current; do
       [ -f "$current" ] || continue
       grep -Fxq "$current" "$seen" 2>/dev/null && continue
       printf '%s\n' "$current" >> "$seen"
-      "$readelf_bin" -d "$current" 2>/dev/null         | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p'         | while IFS= read -r soname; do
+
+      # copy_link_deps is also called for package-owned shell/Perl wrappers
+      # such as Termux 'pkg'. readelf legitimately returns non-zero for those
+      # files. Under set -o pipefail that used to abort the entire build after
+      # the package overlay finished. Treat non-ELF inputs as having no DT_NEEDED
+      # entries instead of turning that normal condition into a fatal error.
+      { "$readelf_bin" -d "$current" 2>/dev/null || true; } \
+        | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p' \
+        | while IFS= read -r soname; do
             [ -n "$soname" ] || continue
             case "$soname" in
               libc.so|libdl.so|libm.so|liblog.so|libandroid.so) continue ;;
