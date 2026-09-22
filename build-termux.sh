@@ -103,6 +103,42 @@ snapshot_has_npm_runtime() {
     '
 }
 
+normalize_snapshot_symlinks() {
+  local stage="$1"
+  local legacy_prefix="/data/data/com.termux/files/usr"
+  local link target mapped relative
+
+  while IFS= read -r -d '' link; do
+    target="$(readlink "$link")"
+    case "$target" in
+      "$legacy_prefix"/*)
+        mapped="$stage/usr/${target#"$legacy_prefix"/}"
+        relative="$(realpath -m --relative-to="$(dirname "$link")" "$mapped")"
+        rm -f -- "$link"
+        ln -s "$relative" "$link"
+        ;;
+      /system/bin/sh)
+        # Exact Android system-shell target is intentionally supported.
+        ;;
+      /*)
+        echo "[DSH] Refusing snapshot absolute symlink: ${link#"$stage"/} -> $target" >&2
+        return 4
+        ;;
+    esac
+  done < <(find "$stage" -type l -print0)
+
+  # Build-time invariant: no Termux-prefix absolute links may survive into the
+  # APK. Android extraction also contains a relocation fallback, but a clean
+  # archive is the primary defense against first-run extraction failures.
+  if find "$stage" -type l -print0 | while IFS= read -r -d '' link; do
+       target="$(readlink "$link")"
+       case "$target" in "$legacy_prefix"/*) exit 0 ;; esac
+     done; then
+    echo '[DSH] legacy Termux absolute symlink survived normalization.' >&2
+    return 4
+  fi
+}
+
 # Repack every top-level snapshot tree, not just usr/. Some upstream/mobile
 # snapshots seed HOME with profile/default files; dropping home/ during a pnpm
 # or DSH refresh silently changes first-launch behaviour.
@@ -113,6 +149,7 @@ repack_snapshot_stage() {
     entries+=("${item#./}")
   done < <(cd "$stage" && find . -mindepth 1 -maxdepth 1 -print0)
   [ "${#entries[@]}" -gt 0 ] || { echo '[DSH] staging snapshot is empty.'; exit 4; }
+  normalize_snapshot_symlinks "$stage"
   # xz preset 0 uses a much smaller dictionary than the default preset 6,
   # reducing Android-side decompression CPU/memory at the cost of a larger APK.
   # Override DSH_XZ_PRESET if distribution size matters more than first launch.
