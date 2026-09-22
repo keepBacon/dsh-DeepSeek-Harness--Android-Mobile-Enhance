@@ -1,3 +1,6 @@
+- 修复 Runtime 首次解压/修复因 Termux 包绝对符号链接而失败：`/data/data/com.termux/files/usr/...` 形式的 archive symlink 会安全重定位到应用自身 `files/usr` 内的相对链接；任意其他绝对链接仍拒绝。
+- Runtime 修复改为事务式：先完整解压到 `.runtime-stage-*` 并校验，之后才备份并替换 live `usr`；提交失败会自动回滚旧 `usr`，用户 HOME、会话、模型 Key、插件/Skill 数据不参与运行时替换。
+- 构建阶段新增 snapshot symlink 规范化，打包前消除旧 Termux prefix 的绝对链接，从源头避免 APK 首次解压再次触发同类故障。
 - 修复完整 Termux 工具打包在“Bundling Termux tool/package-manager closure”后静默退出：包 payload 覆盖时不再跟随 snapshot 中的绝对/旧符号链接写入目标，先按类型安全替换目标节点；同时增加逐包进度与 ERR trap，未来构建失败会直接打印行号、退出码和具体命令。
 - Runtime 工具环境增强：完整构建现在打包 Termux 兼容的 `pkg` / `apt` / `dpkg`、Python3 / pip 与常用 CLI 工具。由于 Termux 包通常绑定 `/data/data/com.termux/files/usr`，应用通过 PRoot 兼容命名空间将本应用私有 `files/usr` 映射到该前缀；包管理器写入仍落在本应用私有目录。构建时会验证 Python、pip、dpkg、apt 与 pkg 可执行。
 - 终端可用性根因修复：Runtime 现在打包真实 Termux Bash 到 `usr/libexec/dsh/bash-real`，以 `/system/bin/sh` 包装器暴露稳定的 `usr/bin/bash`/`usr/bin/sh`，Host 强制设置 `DSH_SIDEBAR_SHELL`/`SHELL` 指向内置 Bash；完整构建会实际用 node-pty spawn Bash 并执行命令，失败则拒绝产出 APK。
