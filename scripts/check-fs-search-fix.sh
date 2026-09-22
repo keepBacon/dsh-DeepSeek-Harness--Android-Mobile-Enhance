@@ -18,7 +18,7 @@ must "$BT" 'validate_ripgrep_runtime "$stage"'
 must "$BG" 'versionName = "0.1.1"'
 must "$BG" 'versionCode = 36'
 must "$MA" 'DSH-Android/0.1.1'
-must "$BT" '"app": "0.1"'
+must "$BT" '"app": "0.1.1"'
 node --check "$P" >/dev/null
 
 TMP="$(mktemp -d)"
