@@ -145,7 +145,10 @@ case "$CMD" in
 esac
 shift
 /system/bin/mkdir -p "$REAL_HOME" "$REAL_HOME/tmp"
-exec "$REAL_PREFIX/bin/proot" --link2symlink -0 \
+# Do NOT fake uid 0 here. Termux apt/pkg are intentionally designed to run
+# as the app uid because the prefix is app-writable, and current Termux builds
+# explicitly reject uid 0 for safety. PRoot is used only for path translation.
+exec "$REAL_PREFIX/bin/proot" --link2symlink \
   -b "$REAL_PREFIX:$LEGACY_PREFIX" \
   -b "$REAL_HOME:$LEGACY_HOME" \
   -b /proc \
@@ -207,14 +210,14 @@ validate_termux_tool_runtime() {
 
   local apt_log="$CACHE_DIR/embedded-apt-smoke.log"
   if ! "${common_env[@]}" "$wrappers/apt" --version >"$apt_log" 2>&1; then
-    echo "[DSH] Embedded apt smoke test failed. Diagnostic:" >&2
+    echo "[DSH] Embedded apt smoke test failed. Diagnostic (host uid=$(id -u 2>/dev/null || echo unknown)):" >&2
     sed -n '1,80p' "$apt_log" >&2 || true
     return 7
   fi
 
   local pkg_log="$CACHE_DIR/embedded-pkg-smoke.log"
   if ! "${common_env[@]}" "$wrappers/pkg" list-installed >"$pkg_log" 2>&1; then
-    echo "[DSH] Embedded pkg smoke test failed. Diagnostic:" >&2
+    echo "[DSH] Embedded pkg smoke test failed. Diagnostic (host uid=$(id -u 2>/dev/null || echo unknown)):" >&2
     sed -n '1,80p' "$pkg_log" >&2 || true
     return 7
   fi
