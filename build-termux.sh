@@ -130,11 +130,15 @@ normalize_snapshot_symlinks() {
   # Build-time invariant: no Termux-prefix absolute links may survive into the
   # APK. Android extraction also contains a relocation fallback, but a clean
   # archive is the primary defense against first-run extraction failures.
-  if find "$stage" -type l -print0 | while IFS= read -r -d '' link; do
-       target="$(readlink "$link")"
-       case "$target" in "$legacy_prefix"/*) exit 0 ;; esac
-     done; then
-    echo '[DSH] legacy Termux absolute symlink survived normalization.' >&2
+  local survivor=""
+  while IFS= read -r -d '' link; do
+    target="$(readlink "$link")"
+    case "$target" in
+      "$legacy_prefix"/*) survivor="${link#"$stage"/} -> $target"; break ;;
+    esac
+  done < <(find "$stage" -type l -print0)
+  if [ -n "$survivor" ]; then
+    echo "[DSH] legacy Termux absolute symlink survived normalization: $survivor" >&2
     return 4
   fi
 }
