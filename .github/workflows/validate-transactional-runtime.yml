@@ -35,3 +35,5 @@ jobs:
           ./gradlew :app:compileDebugKotlin --no-daemon
 
 # rerun: version-check-fix
+
+# rerun: final-v011-check-fix
