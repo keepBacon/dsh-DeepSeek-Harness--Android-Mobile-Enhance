@@ -15,7 +15,7 @@ must "$BT" 'koffi loaded without a native .node entry in require.cache'
 must "$BT" 'CFLAGS="$flags" CXXFLAGS="$flags"'
 forbid "$BT" 'koffi build returned success but no .node addon was produced'
 must "$BG" 'versionName = "0.1.1"'
-must "$BG" 'versionCode = 35'
+must "$BG" 'versionCode = 36'
 must "$MA" 'DSH-Android/0.1.1'
 
 echo '[OK] Koffi Android prebuilt/source fallback regression checks passed'
