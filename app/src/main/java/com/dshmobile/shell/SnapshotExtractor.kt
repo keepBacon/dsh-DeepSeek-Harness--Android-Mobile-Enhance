@@ -16,8 +16,10 @@ import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
  * Shared snapshot extraction: xz tar -> dest with owner-only permissions.
  *
  * Security invariant: every archive entry must remain below [dest], and archive
- * symlink targets must also remain below [dest] except for the one Android OS
- * shell target used by the bundled Termux-compat runtime (`/system/bin/sh`).
+ * symlink targets must also remain below [dest]. The Android OS shell target
+ * `/system/bin/sh` is allowed exactly, while absolute links rooted at the
+ * historical Termux prefix are relocated back into [dest]/usr. Arbitrary
+ * absolute links remain forbidden.
  * Parent symlinks are still rejected, so a prior archive entry cannot redirect
  * a later regular-file write outside the extraction root.
  */
@@ -36,6 +38,9 @@ object SnapshotExtractor {
   private val trustedAbsoluteSymlinkTargets = setOf(
     Paths.get("/system/bin/sh").normalize(),
   )
+
+  private val legacyTermuxPrefix: Path =
+    Paths.get("/data/data/com.termux/files/usr").normalize()
 
   /**
    * Extract an xz-compressed tar stream without allowing path traversal.
@@ -107,19 +112,35 @@ object SnapshotExtractor {
                 val parent = target.parent ?: root
                 ensureSafeDirectory(root, parent, safeDirectories)
                 val rawLink = Paths.get(current.linkName).normalize()
-                if (rawLink.isAbsolute) {
-                  if (rawLink !in trustedAbsoluteSymlinkTargets) {
-                    throw SecurityException("snapshot symlink uses untrusted absolute target: ${current.name} -> ${current.linkName}")
+                val linkToCreate = when {
+                  !rawLink.isAbsolute -> {
+                    val resolvedLink = parent.resolve(rawLink).normalize()
+                    if (!resolvedLink.startsWith(root)) {
+                      throw SecurityException("snapshot symlink escapes destination: ${current.name} -> ${current.linkName}")
+                    }
+                    rawLink
                   }
-                } else {
-                  val resolvedLink = parent.resolve(rawLink).normalize()
-                  if (!resolvedLink.startsWith(root)) {
-                    throw SecurityException("snapshot symlink escapes destination: ${current.name} -> ${current.linkName}")
+                  rawLink in trustedAbsoluteSymlinkTargets -> rawLink
+                  rawLink.startsWith(legacyTermuxPrefix) -> {
+                    // Termux packages frequently ship absolute links rooted at
+                    // /data/data/com.termux/files/usr. Inside DSH that prefix
+                    // is app-local files/usr, so turn the archive link into an
+                    // equivalent relative link instead of trusting an external
+                    // absolute path.
+                    val suffix = legacyTermuxPrefix.relativize(rawLink)
+                    val relocated = root.resolve("usr").resolve(suffix).normalize()
+                    if (!relocated.startsWith(root.resolve("usr").normalize())) {
+                      throw SecurityException("snapshot Termux symlink escapes usr: ${current.name} -> ${current.linkName}")
+                    }
+                    parent.relativize(relocated)
                   }
+                  else -> throw SecurityException(
+                    "snapshot symlink uses untrusted absolute target: ${current.name} -> ${current.linkName}",
+                  )
                 }
 
                 if (Files.deleteIfExists(target)) invalidateSafeDirectoryCache(safeDirectories, target)
-                Files.createSymbolicLink(target, rawLink)
+                Files.createSymbolicLink(target, linkToCreate)
               }
               current.isLink -> {
                 // Preserve legitimate in-tree hard links while refusing aliases
