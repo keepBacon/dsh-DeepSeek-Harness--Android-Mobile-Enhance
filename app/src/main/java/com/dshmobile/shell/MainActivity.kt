@@ -2126,6 +2126,176 @@ class MainActivity : ComponentActivity() {
   }
 
   /**
+   * Native multi-select browser for files and directories.
+   *
+   * Android SAF supports multi-select files but OpenDocumentTree is single-tree
+   * only. For true multi-folder selection we use direct shared-storage access
+   * and keep selections across directory navigation. Symlinks are excluded.
+   */
+  private fun showWorkspaceBulkImportPicker() {
+    val workspace = currentWritableWorkspacePath()
+    if (workspace == null) {
+      showSimpleMessage("没有可用的当前工作目录", "请先在 DSH 中选择工作目录。批量导入只复制文件/文件夹，不会创建或切换工作区。")
+      return
+    }
+
+    if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+      android.app.AlertDialog.Builder(this)
+        .setTitle("需要文件访问权限")
+        .setMessage("多选文件夹需要直接读取共享存储。请先授予“所有文件访问权限”，再重新打开批量导入。")
+        .setNegativeButton("取消", null)
+        .setPositiveButton("前往授权") { _, _ -> requestWorkspaceStorageAccess() }
+        .show()
+      return
+    }
+    if (Build.VERSION.SDK_INT < 30 && !hasLegacyStoragePermission()) {
+      requestLegacyStoragePermission()
+      showSimpleMessage("需要存储权限", "授权后请重新打开“批量导入文件 / 文件夹”。")
+      return
+    }
+
+    @Suppress("DEPRECATION")
+    val storageRoot = try {
+      Environment.getExternalStorageDirectory().canonicalFile
+    } catch (_: Throwable) {
+      java.io.File("/storage/emulated/0")
+    }
+    if (!storageRoot.isDirectory || !storageRoot.canRead()) {
+      showSimpleMessage("共享存储不可访问", storageRoot.absolutePath)
+      return
+    }
+
+    val density = resources.displayMetrics.density
+    val selected = LinkedHashMap<String, java.io.File>()
+    var current = storageRoot
+
+    val outer = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding((12 * density).toInt(), (4 * density).toInt(), (12 * density).toInt(), 0)
+    }
+    val pathLabel = TextView(this).apply {
+      textSize = 12f
+      setTextIsSelectable(true)
+      setPadding(0, (4 * density).toInt(), 0, (6 * density).toInt())
+    }
+    val selectedLabel = TextView(this).apply {
+      textSize = 12f
+      setPadding(0, 0, 0, (6 * density).toInt())
+    }
+    val up = Button(this).apply { text = "上一级" }
+    val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    val scroller = android.widget.ScrollView(this).apply {
+      isFillViewport = true
+      addView(list)
+      layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (420 * density).toInt())
+    }
+    outer.addView(pathLabel)
+    outer.addView(selectedLabel)
+    outer.addView(up)
+    outer.addView(scroller)
+
+    lateinit var renderDirectory: () -> Unit
+    renderDirectory = {
+      val canonicalCurrent = try { current.canonicalFile } catch (_: Throwable) { storageRoot }
+      current = if (canonicalCurrent.path == storageRoot.path ||
+        canonicalCurrent.path.startsWith(storageRoot.path + java.io.File.separator)) canonicalCurrent else storageRoot
+
+      pathLabel.text = current.absolutePath
+      selectedLabel.text = "已选择 ${selected.size} 项"
+      up.isEnabled = current != storageRoot
+      list.removeAllViews()
+
+      val children = try {
+        current.listFiles()?.asSequence()
+          ?.filter { it.exists() && !java.nio.file.Files.isSymbolicLink(it.toPath()) }
+          ?.sortedWith(compareBy<java.io.File>({ !it.isDirectory }, { it.name.lowercase() }))
+          ?.toList().orEmpty()
+      } catch (_: Throwable) { emptyList() }
+
+      if (children.isEmpty()) {
+        list.addView(TextView(this).apply {
+          text = "此目录为空或不可读取"
+          textSize = 13f
+          setPadding(8, 16, 8, 16)
+        })
+      } else {
+        children.take(1200).forEach { child ->
+          val canonical = try { child.canonicalFile } catch (_: Throwable) { child.absoluteFile }
+          val key = canonical.absolutePath
+          val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, (2 * density).toInt(), 0, (2 * density).toInt())
+          }
+          val check = android.widget.CheckBox(this).apply {
+            isChecked = selected.containsKey(key)
+            contentDescription = "选择 ${child.name}"
+            setOnCheckedChangeListener { _, checked ->
+              if (checked) selected[key] = canonical else selected.remove(key)
+              selectedLabel.text = "已选择 ${selected.size} 项"
+            }
+          }
+          val name = TextView(this).apply {
+            text = (if (child.isDirectory) "📁 " else "📄 ") + child.name
+            textSize = 14f
+            isClickable = true
+            isFocusable = true
+            setPadding((6 * density).toInt(), (10 * density).toInt(), (4 * density).toInt(), (10 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+              if (child.isDirectory) {
+                current = canonical
+                renderDirectory()
+              } else {
+                check.isChecked = !check.isChecked
+              }
+            }
+          }
+          row.addView(check)
+          row.addView(name)
+          list.addView(row)
+        }
+        if (children.size > 1200) {
+          list.addView(TextView(this).apply {
+            text = "当前目录项目过多，仅显示前 1200 项。可进入更具体的子目录后继续选择。"
+            textSize = 12f
+            setPadding(8, 12, 8, 12)
+          })
+        }
+      }
+    }
+
+    up.setOnClickListener {
+      val parent = current.parentFile ?: storageRoot
+      current = if (parent.path == storageRoot.path ||
+        parent.path.startsWith(storageRoot.path + java.io.File.separator)) parent else storageRoot
+      renderDirectory()
+    }
+
+    val dialog = android.app.AlertDialog.Builder(this)
+      .setTitle("批量导入到工作区")
+      .setMessage("勾选任意文件或文件夹；点击文件夹名称可进入目录。选择会跨目录保留。")
+      .setView(outer)
+      .setNegativeButton("取消", null)
+      .setPositiveButton("导入", null)
+      .create()
+
+    dialog.setOnShowListener {
+      dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+        if (selected.isEmpty()) {
+          showSimpleMessage("尚未选择内容", "请至少勾选一个文件或文件夹。")
+          return@setOnClickListener
+        }
+        val sources = selected.values.toList()
+        dialog.dismiss()
+        importFilesystemItemsIntoWorkspace(workspace, sources)
+      }
+    }
+    renderDirectory()
+    dialog.show()
+  }
+
+  /**
    * Phone file import is a copy into the already-selected DSH working
    * directory. It is deliberately not a workspace picker: choosing a phone file
    * must never replace or create a workspace.
