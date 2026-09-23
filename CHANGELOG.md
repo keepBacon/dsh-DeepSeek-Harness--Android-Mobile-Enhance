@@ -1,3 +1,4 @@
+- 应用设置新增工作区导入：支持系统文件选择器一次多选文件，以及内置共享存储浏览器跨目录勾选多个文件/文件夹后批量递归复制到当前 DSH 工作区；导入不会切换工作区，包含同名避让、符号链接拒绝、层级/项目数限制与工作区递归保护。
 - 修复 Runtime 首次解压/修复因 Termux 包绝对符号链接而失败：`/data/data/com.termux/files/usr/...` 形式的 archive symlink 会安全重定位到应用自身 `files/usr` 内的相对链接；任意其他绝对链接仍拒绝。
 - Runtime 修复改为事务式：先完整解压到 `.runtime-stage-*` 并校验，之后才备份并替换 live `usr`；提交失败会自动回滚旧 `usr`，用户 HOME、会话、模型 Key、插件/Skill 数据不参与运行时替换。
 - 构建阶段新增 snapshot symlink 规范化，打包前消除旧 Termux prefix 的绝对链接，从源头避免 APK 首次解压再次触发同类故障。
