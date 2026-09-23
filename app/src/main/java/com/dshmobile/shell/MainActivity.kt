@@ -2368,6 +2368,145 @@ class MainActivity : ComponentActivity() {
     workspaceImportTargetPicker.launch(null)
   }
 
+  private data class WorkspaceFolderCopyState(
+    var entries: Int = 0,
+  )
+
+  /** Copy selected physical files/directories into the current workspace. */
+  private fun importFilesystemItemsIntoWorkspace(workspacePath: String, sources: List<java.io.File>) {
+    Thread {
+      val imported = mutableListOf<String>()
+      val failures = mutableListOf<String>()
+      var canonicalRoot: java.io.File? = null
+      try {
+        val root = java.io.File(workspacePath).canonicalFile
+        canonicalRoot = root
+        if (!root.isDirectory) throw java.io.IOException("工作目录不存在：${root.absolutePath}")
+        if (!root.canWrite()) throw java.io.IOException("工作目录不可写：${root.absolutePath}")
+
+        val uniqueSources = sources
+          .mapNotNull { try { it.canonicalFile } catch (_: Throwable) { null } }
+          .distinctBy { it.absolutePath }
+          .sortedBy { it.absolutePath.length }
+        val normalized = uniqueSources.filter { candidate ->
+          uniqueSources.none { ancestor ->
+            ancestor != candidate && ancestor.isDirectory &&
+              candidate.absolutePath.startsWith(ancestor.absolutePath + java.io.File.separator)
+          }
+        }
+
+        for (source in normalized) {
+          try {
+            if (!source.exists()) throw java.io.IOException("来源不存在")
+            if (java.nio.file.Files.isSymbolicLink(source.toPath())) throw java.io.IOException("拒绝导入符号链接")
+            val srcPath = source.absolutePath
+            val rootPath = root.absolutePath
+            if (srcPath == rootPath || srcPath.startsWith(rootPath + java.io.File.separator)) {
+              throw java.io.IOException("来源已经位于当前工作区")
+            }
+            if (source.isDirectory && rootPath.startsWith(srcPath + java.io.File.separator)) {
+              throw java.io.IOException("不能导入包含当前工作区的上级目录")
+            }
+
+            if (source.isFile) {
+              val temp = java.io.File(root, ".dsh-import-${java.util.UUID.randomUUID()}.tmp")
+              try {
+                source.inputStream().buffered(128 * 1024).use { input ->
+                  temp.outputStream().buffered(128 * 1024).use { output ->
+                    copyWithLimit(input, output, MAX_WORKSPACE_IMPORT_BYTES, "单个文件超过 2 GB 上限")
+                  }
+                }
+                imported += publishWorkspaceImport(temp, root, sanitizeFilename(source.name)).name
+              } catch (t: Throwable) {
+                temp.delete()
+                throw t
+              }
+            } else if (source.isDirectory) {
+              val target = reserveUniqueDirectory(root, sanitizeFilename(source.name))
+              try {
+                val state = WorkspaceFolderCopyState()
+                copyWorkspaceDirectoryTree(source, target, state, 0)
+                imported += target.name + "/"
+              } catch (t: Throwable) {
+                target.deleteRecursively()
+                throw t
+              }
+            } else {
+              throw java.io.IOException("不支持的文件类型")
+            }
+          } catch (t: Throwable) {
+            failures += "${source.name}：${t.message ?: t.javaClass.simpleName}"
+          }
+        }
+      } catch (t: Throwable) {
+        failures += (t.message ?: t.javaClass.simpleName)
+      }
+
+      runOnUiThread {
+        if (imported.isNotEmpty()) notifyWorkspaceFilesImported(canonicalRoot?.absolutePath ?: workspacePath, imported)
+        val summary = buildString {
+          if (imported.isNotEmpty()) {
+            append("已导入 ${imported.size} 项到：\n")
+            append(canonicalRoot?.absolutePath ?: workspacePath)
+            append("\n\n")
+            append(imported.take(16).joinToString("\n"))
+            if (imported.size > 16) append("\n…以及另外 ${imported.size - 16} 项")
+          }
+          if (failures.isNotEmpty()) {
+            if (isNotEmpty()) append("\n\n")
+            append("失败 ${failures.size} 项：\n")
+            append(failures.take(10).joinToString("\n"))
+            if (failures.size > 10) append("\n…")
+          }
+        }.ifBlank { "没有导入任何内容。" }
+        showSimpleMessage(if (failures.isEmpty()) "工作区导入完成" else "工作区导入完成（部分失败）", summary)
+      }
+    }.start()
+  }
+
+  private fun copyWorkspaceDirectoryTree(
+    source: java.io.File,
+    target: java.io.File,
+    state: WorkspaceFolderCopyState,
+    depth: Int,
+  ) {
+    if (depth > MAX_WORKSPACE_IMPORT_DEPTH) throw java.io.IOException("文件夹层级超过 $MAX_WORKSPACE_IMPORT_DEPTH")
+    val children = source.listFiles() ?: throw java.io.IOException("无法读取文件夹：${source.absolutePath}")
+    for (child in children) {
+      state.entries += 1
+      if (state.entries > MAX_WORKSPACE_IMPORT_ENTRIES) throw java.io.IOException("文件夹项目超过 $MAX_WORKSPACE_IMPORT_ENTRIES 个")
+      if (java.nio.file.Files.isSymbolicLink(child.toPath())) throw java.io.IOException("文件夹包含符号链接：${child.name}")
+      val cleanName = sanitizeFilename(child.name)
+      if (child.isDirectory) {
+        val dir = reserveUniqueDirectory(target, cleanName)
+        copyWorkspaceDirectoryTree(child, dir, state, depth + 1)
+      } else if (child.isFile) {
+        val temp = java.io.File(target, ".dsh-import-${java.util.UUID.randomUUID()}.tmp")
+        try {
+          child.inputStream().buffered(128 * 1024).use { input ->
+            temp.outputStream().buffered(128 * 1024).use { output ->
+              copyWithLimit(input, output, MAX_WORKSPACE_IMPORT_BYTES, "单个文件超过 2 GB 上限")
+            }
+          }
+          publishWorkspaceImport(temp, target, cleanName)
+        } catch (t: Throwable) {
+          temp.delete()
+          throw t
+        }
+      }
+    }
+  }
+
+  private fun reserveUniqueDirectory(root: java.io.File, requestedName: String): java.io.File {
+    val clean = sanitizeFilename(requestedName).ifBlank { "import-folder" }
+    for (index in 0..9999) {
+      val candidate = java.io.File(root, if (index == 0) clean else "$clean ($index)")
+      if (candidate.mkdir()) return candidate
+      if (!candidate.exists()) throw java.io.IOException("无法创建目录：${candidate.absolutePath}")
+    }
+    throw java.io.IOException("同名文件夹过多：$clean")
+  }
+
   private fun importFilesIntoWorkspace(workspacePath: String, uris: List<Uri>) {
     Thread {
       val imported = mutableListOf<String>()
