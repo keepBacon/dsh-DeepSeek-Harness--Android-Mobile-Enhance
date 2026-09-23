@@ -119,6 +119,8 @@ class MainActivity : ComponentActivity() {
 
     /** 单个导入工作区文件的安全上限。 */
     const val MAX_WORKSPACE_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
+    const val MAX_WORKSPACE_IMPORT_ENTRIES = 100_000
+    const val MAX_WORKSPACE_IMPORT_DEPTH = 64
 
     /** Imported plugin archive size before extraction. */
     const val MAX_PLUGIN_PACKAGE_BYTES = 512L * 1024 * 1024
@@ -664,6 +666,34 @@ class MainActivity : ComponentActivity() {
     wrap.addView(group)
 
     wrap.addView(TextView(this).apply {
+      text = "工作区导入"
+      textSize = 16f
+      setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
+    })
+    val workspacePathLabel = TextView(this).apply {
+      text = currentWritableWorkspacePath()?.let { "当前工作区\n$it" } ?: "当前没有可写工作区"
+      textSize = 13f
+      setTextIsSelectable(true)
+      setPadding(0, 0, 0, (8 * density).toInt())
+    }
+    wrap.addView(workspacePathLabel)
+    wrap.addView(Button(this).apply {
+      text = "导入文件（可多选）"
+      contentDescription = "选择多个手机文件并复制到当前 DSH 工作区"
+      setOnClickListener { showWorkspaceImportDialog() }
+    })
+    wrap.addView(Button(this).apply {
+      text = "批量导入文件 / 文件夹"
+      contentDescription = "多选文件和文件夹并递归复制到当前 DSH 工作区"
+      setOnClickListener { showWorkspaceBulkImportPicker() }
+    })
+    wrap.addView(TextView(this).apply {
+      text = "文件可一次多选；文件夹可在目录浏览器中跨目录勾选多个。导入只复制内容，不会切换工作区。"
+      textSize = 12f
+      setPadding(0, (6 * density).toInt(), 0, 0)
+    })
+
+    wrap.addView(TextView(this).apply {
       text = "关于"
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
@@ -688,10 +718,15 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { openExternalUrl(GITHUB_REPOSITORY_URL) }
     })
 
+    val scroll = android.widget.ScrollView(this).apply {
+      isFillViewport = true
+      addView(wrap)
+    }
+
     android.app.AlertDialog.Builder(this)
       .setTitle("应用设置")
       .setIcon(android.R.drawable.ic_menu_preferences)
-      .setView(wrap)
+      .setView(scroll)
       .setNegativeButton("取消", null)
       .setPositiveButton("应用") { _, _ ->
         val selected = if (group.checkedRadioButtonId == nativeId) ShellState.UI_MODE_NATIVE else ShellState.UI_MODE_MOBILE
