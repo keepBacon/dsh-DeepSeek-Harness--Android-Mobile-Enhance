@@ -13,6 +13,8 @@ SHI="$ROOT/app/src/main/java/com/dshmobile/shell/ShizukuSupport.kt"
 SE="$ROOT/app/src/main/java/com/dshmobile/shell/SnapshotExtractor.kt"
 EP="$ROOT/app/src/main/java/com/dshmobile/shell/EngineProbe.kt"
 ES="$ROOT/app/src/main/java/com/dshmobile/shell/EngineService.kt"
+DFL="$ROOT/scripts/dsh-release-family-lock.json"
+DFT="$ROOT/scripts/dsh-runtime-family.mjs"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 must() { grep -Fq "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
@@ -270,13 +272,28 @@ must "$BT" '"directSingleResourceClientRoutes": true'
 must "$BT" "batch.url.includes('/??')"
 must "$BT" "row.url.includes('/??')"
 must "$BT" '"corePluginTreeSmokeTest": true'
-must "$BT" 'npm 主源失败，直接切换备用源'
-forbid "$BT" 'npm 主源失败，3 秒后重试一次'
+forbid "$BT" '"@deepseek-ai/dsh@$DSH_VERSION" "pnpm@$PNPM_VERSION"'
+must "$BT" 'npm install --package-lock-only'
+must "$BT" 'npm ci --ignore-scripts'
+must "$BT" 'Resolving exact DSH release family'
+must "$BT" 'verify-lock "$DSH_RELEASE_FAMILY_LOCK"'
+must "$BT" 'verify-installed "$DSH_RELEASE_FAMILY_LOCK"'
+must "$BT" 'rm -rf "$stage/usr/lib/node_modules"'
+must "$BT" '"dshReleaseFamilyLocked": true'
+must "$BT" '"dshNpmLockSha256": "$runtime_npm_lock_sha"'
+must "$DFL" '"version": "0.1.5-rc.2"'
+must "$DFL" '"sourceCommit": "a30530342297e6006623a775166fee1d14fd413a"'
+must "$DFL" '"@deepseek-ai/dsh-sdk-protocol"'
+must "$DFL" '"@deepseek-ai/dsh-session-format-v0-to-v1"'
+must "$DFT" "mode==='manifest'"
+must "$DFT" "mode==='verify-lock'"
+must "$DFT" "mode==='verify-installed'"
 must "$BT" 'XZ_OPT="-$DSH_XZ_PRESET" tar -cJf'
 
 # Syntax/regression checks.
 for f in "$ROOT"/build*.sh "$ROOT"/scripts/*.sh; do bash -n "$f"; done
 node --check "$ROOT/scripts/android-runtime-patch.mjs" >/dev/null
+node --check "$DFT" >/dev/null
 python - "$ROOT" <<'PY'
 from pathlib import Path
 import sys, textwrap, xml.etree.ElementTree as ET, subprocess, tempfile

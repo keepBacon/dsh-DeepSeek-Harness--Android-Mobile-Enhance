@@ -18,6 +18,9 @@ RELEASE_URL="https://github.com/thness/dsh-mobile/releases/download/v0.10.1/$REL
 RELEASE_APK_SHA256="09b6ffcaeb48852b4e9f66516326f4f5441cfb9606e82a6cb81a41feb1bd79f7"
 PNPM_VERSION="11.7.0"
 DSH_VERSION="${DSH_VERSION:-0.1.5-rc.2}"
+DSH_RELEASE_SOURCE_COMMIT="a30530342297e6006623a775166fee1d14fd413a"
+DSH_RELEASE_FAMILY_LOCK="$ROOT/scripts/dsh-release-family-lock.json"
+DSH_RUNTIME_FAMILY_TOOL="$ROOT/scripts/dsh-runtime-family.mjs"
 DSH_REFRESH_RUNTIME="${DSH_REFRESH_RUNTIME:-1}"
 DSH_NATIVE_COMPAT="${DSH_NATIVE_COMPAT:-1}"
 DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
@@ -1086,32 +1089,58 @@ refresh_dsh_runtime() {
   local node_headers
   node_headers="$(prepare_node_headers)"
 
-  local primary_registry fallback_registry
+  local primary_registry fallback_registry used_registry selected_probe runtime_npm_lock_sha
   primary_registry="${DSH_NPM_REGISTRY:-$(npm config get registry 2>/dev/null || true)}"
   [ -n "$primary_registry" ] || primary_registry="https://registry.npmjs.org/"
   fallback_registry="${DSH_NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com/}"
-  npm_runtime_install() {
-    local registry="$1"
-    echo "[DSH] npm registry: $registry"
-    # DSH core plugins intentionally declare runtime services in peerDependencies.
-    # Do not disable peer installation here: that can produce a package tree
-    # which passes npm install but cannot resolve Cordis plugins at boot.
-    # Preserve peer semantics, tolerate compatible overrides, and hide warning spam.
-    npm install --global --prefix "$stage/usr" --ignore-scripts --no-audit --no-fund --prefer-offline \
-      --include=peer --strict-peer-deps=false --loglevel=error \
-      --registry="$registry" --fetch-retries=5 --fetch-retry-factor=2 \
-      --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 --fetch-timeout=300000 \
-      "@deepseek-ai/dsh@$DSH_VERSION" "pnpm@$PNPM_VERSION"
+
+  [ -f "$DSH_RELEASE_FAMILY_LOCK" ] || { echo "[DSH] Missing release-family lock: $DSH_RELEASE_FAMILY_LOCK"; exit 6; }
+  [ -f "$DSH_RUNTIME_FAMILY_TOOL" ] || { echo "[DSH] Missing release-family verifier: $DSH_RUNTIME_FAMILY_TOOL"; exit 6; }
+  local install_manifest="$CACHE_DIR/dsh-runtime-install-$DSH_VERSION.json"
+  node "$DSH_RUNTIME_FAMILY_TOOL" manifest "$DSH_RELEASE_FAMILY_LOCK" "$DSH_VERSION" "$PNPM_VERSION" > "$install_manifest"
+
+  npm_registry_resolve() {
+    local registry="$1" probe="$2"
+    rm -rf "$probe"; mkdir -p "$probe"; cp "$install_manifest" "$probe/package.json"
+    if ! (cd "$probe" && npm install --package-lock-only --ignore-scripts --no-audit --no-fund --prefer-offline \
+      --include=peer --strict-peer-deps=false --loglevel=error --registry="$registry" \
+      --fetch-retries=3 --fetch-retry-factor=2 --fetch-retry-mintimeout=10000 \
+      --fetch-retry-maxtimeout=60000 --fetch-timeout=180000 >"$probe/npm-resolve.log" 2>&1); then return 1; fi
+    node "$DSH_RUNTIME_FAMILY_TOOL" verify-lock "$DSH_RELEASE_FAMILY_LOCK" "$probe/package-lock.json" "$DSH_VERSION" >>"$probe/npm-resolve.log" 2>&1
   }
-  local used_registry="$primary_registry"
-  if ! npm_runtime_install "$primary_registry"; then
-    if [ "$fallback_registry" = "$primary_registry" ]; then
-      echo '[DSH] npm runtime 刷新失败。'; exit 6
-    fi
-    used_registry="$fallback_registry"
-    echo "[DSH] npm 主源失败，直接切换备用源: $fallback_registry"
-    npm_runtime_install "$fallback_registry" || { echo '[DSH] npm 主源和备用源均失败。'; exit 6; }
+
+  local primary_probe="$CACHE_DIR/npm-family-primary-$DSH_VERSION"
+  local fallback_probe="$CACHE_DIR/npm-family-fallback-$DSH_VERSION"
+  echo "[DSH] Resolving exact DSH release family $DSH_VERSION before mutating the runtime…"
+  if npm_registry_resolve "$primary_registry" "$primary_probe"; then
+    used_registry="$primary_registry"; selected_probe="$primary_probe"
+  elif [ "$fallback_registry" != "$primary_registry" ] && npm_registry_resolve "$fallback_registry" "$fallback_probe"; then
+    used_registry="$fallback_registry"; selected_probe="$fallback_probe"
+    echo "[DSH] Primary registry cannot provide a coherent $DSH_VERSION family; using verified fallback: $fallback_registry"
+  else
+    echo '[DSH] No registry can resolve a complete same-version DSH release family.'
+    [ -f "$primary_probe/npm-resolve.log" ] && { echo '[DSH] Primary resolver tail:'; tail -n 80 "$primary_probe/npm-resolve.log"; }
+    [ -f "$fallback_probe/npm-resolve.log" ] && { echo '[DSH] Fallback resolver tail:'; tail -n 80 "$fallback_probe/npm-resolve.log"; }
+    exit 6
   fi
+
+  # Install exactly one verified graph into a clean prefix. A failed registry
+  # probe never mutates stage/usr, so fallback cannot mix two package families.
+  rm -rf "$stage/usr/lib/node_modules"
+  mkdir -p "$stage/usr/lib/node_modules" "$stage/usr/bin"
+  cp "$selected_probe/package.json" "$stage/usr/lib/package.json"
+  cp "$selected_probe/package-lock.json" "$stage/usr/lib/package-lock.json"
+  echo "[DSH] Installing one locked dependency graph from: $used_registry"
+  (cd "$stage/usr/lib" && npm ci --ignore-scripts --no-audit --no-fund --prefer-offline \
+    --include=peer --strict-peer-deps=false --loglevel=error --registry="$used_registry" \
+    --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 \
+    --fetch-retry-maxtimeout=120000 --fetch-timeout=300000) || { echo '[DSH] Locked DSH runtime install failed.'; exit 6; }
+
+  runtime_npm_lock_sha="$(sha256sum "$stage/usr/lib/package-lock.json" | awk '{print $1}')"
+  node "$DSH_RUNTIME_FAMILY_TOOL" verify-installed "$DSH_RELEASE_FAMILY_LOCK" "$stage/usr/lib/node_modules" "$DSH_VERSION"
+  [ -x "$stage/usr/lib/node_modules/.bin/dsh" ] || { echo '[DSH] dsh bin missing from locked install.'; exit 6; }
+  ln -sfn ../lib/node_modules/.bin/dsh "$stage/usr/bin/dsh"
+  rm -f "$stage/usr/lib/package.json" "$stage/usr/lib/package-lock.json"
 
   # Build only the native packages DSH actually needs.  The rest of the graph
   # stays install-script-free, which avoids accidental desktop-only postinstalls.
@@ -1137,6 +1166,10 @@ refresh_dsh_runtime() {
   "schema": 1,
   "app": "0.1.1",
   "dsh": "$DSH_VERSION",
+  "dshSourceCommit": "$DSH_RELEASE_SOURCE_COMMIT",
+  "dshReleaseFamilyLocked": true,
+  "dshNpmLockSha256": "$runtime_npm_lock_sha",
+  "dshRegistry": "$used_registry",
   "node": "$embedded_node",
   "requireBuiltinFallback": true,
   "flockSingleProcessFallback": true,
