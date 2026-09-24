@@ -125,33 +125,36 @@ eachPackage('@earendil-works/pi-ai', 'dist/api/openai-completions.js', (file) =>
   const marker = 'DSH Android compat: StepFun Plan stream contract'
   if (txt.includes(marker)) return 'already'
 
-  const baseUrlAnchor = 'const baseUrl = model.baseUrl;'
-  if (txt.split(baseUrlAnchor).length !== 2) {
-    throw new Error(`StepFun Plan baseUrl anchor changed: ${file}`)
+  // Scope every anchor to detectCompat(). The published pi-ai bundle repeats
+  // several compat field names elsewhere, so whole-file uniqueness checks are
+  // intentionally invalid and caused healthy 0.85.1 builds to fail closed.
+  const compatStart = txt.indexOf('function detectCompat(model) {')
+  const compatEnd = txt.indexOf('\nfunction getCompat(model)', compatStart)
+  if (compatStart < 0 || compatEnd <= compatStart) {
+    throw new Error(`StepFun Plan detectCompat anchor changed: ${file}`)
   }
-  txt = txt.replace(
+  let compat = txt.slice(compatStart, compatEnd)
+  const replaceCompatOnce = (needle, replacement, label) => {
+    const count = compat.split(needle).length - 1
+    if (count !== 1) {
+      throw new Error(`StepFun Plan ${label} anchor changed (${count} matches): ${file}`)
+    }
+    compat = compat.replace(needle, replacement)
+  }
+
+  const baseUrlAnchor = 'const baseUrl = model.baseUrl;'
+  replaceCompatOnce(
     baseUrlAnchor,
     `${baseUrlAnchor}\n\tconst isStepFunPlan = provider === "stepfun-plan" || /\\/step_plan(?:\\/|$)/i.test(baseUrl); // ${marker}`,
+    'baseUrl',
   )
+  replaceCompatOnce('const isNonStandard =', 'const isNonStandard =\n\t\tisStepFunPlan ||', 'non-standard provider')
+  replaceCompatOnce('const useMaxTokens =', 'const useMaxTokens =\n\t\tisStepFunPlan ||', 'max_tokens provider')
+  replaceCompatOnce('supportsUsageInStreaming: true,', 'supportsUsageInStreaming: !isStepFunPlan,', 'stream usage')
+  replaceCompatOnce('supportsFinishReason: true,', 'supportsFinishReason: !isStepFunPlan,', 'finish_reason')
+  replaceCompatOnce('supportsStrictMode: !isMoonshot', 'supportsStrictMode: !isStepFunPlan && !isMoonshot', 'strict mode')
 
-  const nonStandardAnchor = 'const isNonStandard ='
-  const maxTokensAnchor = 'const useMaxTokens ='
-  if (txt.split(nonStandardAnchor).length !== 2 || txt.split(maxTokensAnchor).length !== 2) {
-    throw new Error(`StepFun Plan provider-shape anchor changed: ${file}`)
-  }
-  txt = txt.replace(nonStandardAnchor, 'const isNonStandard =\n\t\tisStepFunPlan ||')
-  txt = txt.replace(maxTokensAnchor, 'const useMaxTokens =\n\t\tisStepFunPlan ||')
-
-  const usageAnchor = 'supportsUsageInStreaming: true,'
-  const finishAnchor = 'supportsFinishReason: true,'
-  const strictAnchor = 'supportsStrictMode: !isMoonshot'
-  if (txt.split(usageAnchor).length !== 2 || txt.split(finishAnchor).length !== 2 || txt.split(strictAnchor).length !== 2) {
-    throw new Error(`StepFun Plan compat-field anchor changed: ${file}`)
-  }
-  txt = txt.replace(usageAnchor, 'supportsUsageInStreaming: !isStepFunPlan,')
-  txt = txt.replace(finishAnchor, 'supportsFinishReason: !isStepFunPlan,')
-  txt = txt.replace(strictAnchor, 'supportsStrictMode: !isStepFunPlan && !isMoonshot')
-
+  txt = txt.slice(0, compatStart) + compat + txt.slice(compatEnd)
   write(file, txt)
   return 'patched'
 }, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })

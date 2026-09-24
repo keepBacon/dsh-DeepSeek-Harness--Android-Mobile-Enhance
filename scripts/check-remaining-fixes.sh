@@ -229,6 +229,8 @@ must "$ROOT/scripts/android-runtime-patch.mjs" 'approval: ctx.approval.config.po
 forbid "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: explicit permission default preset'
 must "$ROOT/scripts/android-runtime-patch.mjs" "'@earendil-works/pi-ai'"
 must "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: StepFun Plan stream contract'
+must "$ROOT/scripts/android-runtime-patch.mjs" "const compatStart = txt.indexOf('function detectCompat(model) {'"
+must "$ROOT/scripts/android-runtime-patch.mjs" "const compatEnd = txt.indexOf('\\nfunction getCompat(model)'"
 must "$ROOT/scripts/android-runtime-patch.mjs" 'provider === "stepfun-plan"'
 must "$ROOT/scripts/android-runtime-patch.mjs" '/\\/step_plan(?:\\/|$)/i'
 must "$ROOT/scripts/android-runtime-patch.mjs" 'supportsUsageInStreaming: !isStepFunPlan'
