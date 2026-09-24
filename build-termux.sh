@@ -978,7 +978,12 @@ refresh_dsh_runtime() {
   npm_runtime_install() {
     local registry="$1"
     echo "[DSH] npm registry: $registry"
+    # DSH is installed as one already-published runtime graph. npm's modern
+    # peer auto-resolution can repeatedly backtrack across DSH prerelease peers,
+    # producing an ERESOLVE warning storm on Termux. pnpm profiles intentionally
+    # use autoInstallPeers=false as well, so keep the bootstrap policy aligned.
     npm install --global --prefix "$stage/usr" --ignore-scripts --no-audit --no-fund --prefer-offline \
+      --legacy-peer-deps \
       --registry="$registry" --fetch-retries=5 --fetch-retry-factor=2 \
       --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 --fetch-timeout=300000 \
       "@deepseek-ai/dsh@$DSH_VERSION" "pnpm@$PNPM_VERSION"

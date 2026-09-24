@@ -249,6 +249,7 @@ must "$MA" 'EngineProbe.check(250)'
 must "$ES" 'EngineProbe.check(350)'
 must "$EP" 'MAX_PROBE_BODY = 16 * 1024'
 must "$BT" 'DSH_XZ_PRESET="${DSH_XZ_PRESET:-0}"'
+must "$BT" '--legacy-peer-deps'
 must "$BT" 'XZ_OPT="-$DSH_XZ_PRESET" tar -cJf'
 
 # Syntax/regression checks.

@@ -1,3 +1,4 @@
+- 修复 Termux 完整构建期间 npm 持续刷 `ERESOLVE overriding peer dependency`：Runtime bootstrap 的全局 npm 安装改用 `--legacy-peer-deps`，与 Android profile 的 `autoInstallPeers=false` 策略保持一致，避免 DSH 预发布 peer 依赖触发反复回溯解析。
 - 修复 StepFun Plan 流式请求反复出现 `upstream stream ended before a completion event` 并重试到 5/5：Android Runtime 仅对 `stepfun-plan` / `/step_plan/` 端点启用 OpenAI-compatible 专用兼容默认值（`max_tokens`、禁用 store/developer role/stream usage/strict schema，并允许缺少 `finish_reason` 时由流结束推断完成）；其他 Provider 继续保持严格的流完整性检查。
 - 应用设置新增工作区导入：支持系统文件选择器一次多选文件，以及内置共享存储浏览器跨目录勾选多个文件/文件夹后批量递归复制到当前 DSH 工作区；导入不会切换工作区，包含同名避让、符号链接拒绝、层级/项目数限制与工作区递归保护。
 - 修复 Runtime 首次解压/修复因 Termux 包绝对符号链接而失败：`/data/data/com.termux/files/usr/...` 形式的 archive symlink 会安全重定位到应用自身 `files/usr` 内的相对链接；任意其他绝对链接仍拒绝。
