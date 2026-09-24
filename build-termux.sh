@@ -955,8 +955,10 @@ validate_dsh_core_plugin_tree() {
   local stage="$1"
   local smoke_home="$CACHE_DIR/core-plugin-tree-smoke-home"
   local smoke_log="$CACHE_DIR/core-plugin-tree-smoke.log"
-  local port=$((39000 + RANDOM % 1500))
+  local smoke_validator="$ROOT/scripts/validate-web-runtime-smoke.mjs"
   local preload=""
+
+  [ -f "$smoke_validator" ] || { echo "[DSH] Missing Web runtime smoke validator: $smoke_validator"; exit 8; }
 
   rm -rf "$smoke_home"
   mkdir -p "$smoke_home/tmp"
@@ -990,19 +992,19 @@ validate_dsh_core_plugin_tree() {
     DSH_ANDROID_STANDALONE=1 \
     "$stage/usr/bin/node" --expose-internals \
       "$stage/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-      web --port "$port" --no-open >"$smoke_log" 2>&1 &
+      web --port 0 --no-open >"$smoke_log" 2>&1 &
   local pid=$!
   local ok=0
   local client_ok=0
 
-  # A bare GET / is intentionally 401 in DSH 0.1.5-rc.2. Readiness is the
-  # launch URL printed only after the Web profile has finished booting, not a
-  # successful TCP connection or an unauthenticated HTTP response.
+  # DSH itself owns readiness: the launch URL is printed only after the Web
+  # profile has finished booting. Use fixed-string discovery here so shell,
+  # JavaScript and regular-expression escaping can never disagree again.
   for _ in $(seq 1 360); do
     if ! kill -0 "$pid" 2>/dev/null; then
       break
     fi
-    if grep -Eq "dsh web: http://127\\.0\\.0\\.1:${port}/\\?token=[A-Za-z0-9_-]+" "$smoke_log"; then
+    if grep -Fq 'dsh web: http://127.0.0.1:' "$smoke_log"; then
       ok=1
       break
     fi
@@ -1010,80 +1012,7 @@ validate_dsh_core_plugin_tree() {
   done
 
   if [ "$ok" = "1" ]; then
-    if env LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/node" - "$port" "$smoke_log" <<'NODE'
-import fs from 'node:fs'
-
-const port = Number(process.argv[2])
-const logFile = process.argv[3]
-const output = fs.readFileSync(logFile, 'utf8')
-const ready = new RegExp(`dsh web: (http://127\\\\.0\\\\.0\\\\.1:${port}/\\\\?token=[A-Za-z0-9_-]+)`).exec(output)
-if (ready?.[1] === undefined) throw new Error('authenticated dsh web launch URL missing from readiness log')
-
-const launchUrl = ready[1]
-const origin = new URL(launchUrl).origin
-const base = origin + '/'
-
-// Pin the real browser-auth contract: unauthenticated index access must stay
-// denied; the one-time launch token is exchanged only at GET /?token=... for
-// an authority-bound signed cookie.
-const denied = await fetch(base, { redirect: 'manual' })
-if (denied.status !== 401) throw new Error(`unauthenticated index expected HTTP 401, got ${denied.status}`)
-
-const exchange = await fetch(launchUrl, { redirect: 'manual' })
-const setCookie = exchange.headers.get('set-cookie')
-const location = exchange.headers.get('location')
-if (exchange.status !== 303 || setCookie === null || location !== '/') {
-  throw new Error(`launch-token exchange invalid: HTTP ${exchange.status}, location=${JSON.stringify(location)}, cookie=${setCookie === null ? 'missing' : 'present'}`)
-}
-const cookie = setCookie.split(';', 1)[0]
-if (!cookie.includes('=')) throw new Error('launch-token exchange returned a malformed cookie')
-
-const page = await fetch(base, {
-  redirect: 'manual',
-  headers: { cookie },
-})
-if (!page.ok) throw new Error(`authenticated index HTTP ${page.status}`)
-const html = await page.text()
-const marker = 'globalThis["__DSH_BOOT__"] = '
-const start = html.indexOf(marker)
-if (start < 0) throw new Error('window.__DSH_BOOT__ injection missing')
-const scriptEnd = html.indexOf('</script>', start)
-if (scriptEnd < 0) throw new Error('window.__DSH_BOOT__ script terminator missing')
-const raw = html.slice(start + marker.length, scriptEnd).trim().replace(/;\s*$/, '')
-const graph = JSON.parse(raw)
-if (!Array.isArray(graph.entries) || graph.entries.length === 0) {
-  throw new Error('client boot graph has no entries')
-}
-if (!Array.isArray(graph.batches) || graph.batches.length === 0) {
-  throw new Error('client boot graph has no batches')
-}
-for (const batch of graph.batches) {
-  if (!batch || typeof batch.url !== 'string' || batch.url.includes('/??')) {
-    throw new Error('Android client bootstrap still advertises a combo URL: ' + JSON.stringify(batch?.url))
-  }
-}
-for (const row of graph.entries) {
-  if (!row || typeof row.id !== 'string' || typeof row.url !== 'string') {
-    throw new Error('malformed client boot row')
-  }
-  if (row.url.includes('/??')) {
-    throw new Error(row.id + ': Android single-resource URL unexpectedly contains /??')
-  }
-  const url = new URL(row.url, base)
-  const response = await fetch(url, {
-    cache: 'no-store',
-    headers: { cookie },
-  })
-  if (!response.ok) throw new Error(`${row.id}: HTTP ${response.status} for ${url.pathname}${url.search}`)
-  const body = await response.text()
-  if (body.length < 32 || !body.includes('__ModuleLoader__')) {
-    throw new Error(`${row.id}: client bundle response is empty/truncated/invalid`)
-  }
-}
-console.log('[DSH] Web browser auth: OK (401 -> token exchange 303 -> authenticated index 200)')
-console.log(`[DSH] Web client bundles: OK (${graph.entries.length} single-resource scripts)`)
-NODE
-    then
+    if env LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/node" "$smoke_validator" "$smoke_log"; then
       client_ok=1
     fi
   fi
@@ -1221,6 +1150,8 @@ refresh_dsh_runtime() {
   "corePluginTreeSmokeTest": true,
   "webClientBundleSmokeTest": true,
   "webBrowserAuthSmokeTest": true,
+  "standaloneWebSmokeValidator": true,
+  "kernelAssignedWebSmokePort": true,
   "directSingleResourceClientRoutes": true
 }
 EOF

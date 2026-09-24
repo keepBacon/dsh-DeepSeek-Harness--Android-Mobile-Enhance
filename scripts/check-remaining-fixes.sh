@@ -15,6 +15,7 @@ EP="$ROOT/app/src/main/java/com/dshmobile/shell/EngineProbe.kt"
 ES="$ROOT/app/src/main/java/com/dshmobile/shell/EngineService.kt"
 DFL="$ROOT/scripts/dsh-release-family-lock.json"
 DFT="$ROOT/scripts/dsh-runtime-family.mjs"
+WST="$ROOT/scripts/validate-web-runtime-smoke.mjs"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 must() { grep -Fq "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
@@ -265,15 +266,23 @@ forbid "$BT" '      --legacy-peer-deps \\'
 must "$BT" '--include=peer --strict-peer-deps=false --loglevel=error'
 must "$BT" 'validate_dsh_core_plugin_tree()'
 must "$BT" 'Core plugin tree: OK (real web boot)'
-must "$BT" 'Web client bundles: OK ('
-must "$BT" 'Web browser auth: OK (401 -> token exchange 303 -> authenticated index 200)'
-must "$BT" 'globalThis["__DSH_BOOT__"] = '
-must "$BT" 'exchange.status !== 303'
-must "$BT" 'denied.status !== 401'
-must "$BT" "exchange.headers.get('set-cookie')"
-must "$BT" 'headers: { cookie }'
-forbid "$BT" 'curl -sS --max-time 1 -o /dev/null "http://127.0.0.1:$port/"'
+must "$BT" 'validate-web-runtime-smoke.mjs'
+must "$BT" 'web --port 0 --no-open'
+must "$BT" "grep -Fq 'dsh web: http://127.0.0.1:'"
+forbid "$BT" 'new RegExp(`dsh web:'
+forbid "$BT" "node" - "\$port" "\$smoke_log" <<'NODE'"
 must "$BT" '"webBrowserAuthSmokeTest": true'
+must "$BT" '"standaloneWebSmokeValidator": true'
+must "$BT" '"kernelAssignedWebSmokePort": true'
+must "$WST" 'Web browser auth: OK (401 -> token exchange 303 -> authenticated index 200)'
+must "$WST" 'Web launch URL parsing: OK (structured URL validation, no eval/heredoc regex)'
+must "$WST" 'globalThis["__DSH_BOOT__"] = '
+must "$WST" 'exchange.status !== 303'
+must "$WST" 'denied.status !== 401'
+must "$WST" "exchange.headers.get('set-cookie')"
+must "$WST" 'headers: { cookie }'
+must "$WST" 'AbortSignal.timeout(10_000)'
+must "$WST" "parsedLaunch.searchParams.getAll('token')"
 must "$BT" '"webClientBundleSmokeTest": true'
 must "$BT" '"directSingleResourceClientRoutes": true'
 must "$BT" "batch.url.includes('/??')"
@@ -312,6 +321,7 @@ must "$BT" 'XZ_OPT="-$DSH_XZ_PRESET" tar -cJf'
 for f in "$ROOT"/build*.sh "$ROOT"/scripts/*.sh; do bash -n "$f"; done
 node --check "$ROOT/scripts/android-runtime-patch.mjs" >/dev/null
 node --check "$DFT" >/dev/null
+node --check "$WST" >/dev/null
 python - "$ROOT" <<'PY'
 from pathlib import Path
 import sys, textwrap, xml.etree.ElementTree as ET, subprocess, tempfile
