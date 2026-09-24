@@ -990,6 +990,7 @@ validate_dsh_core_plugin_tree() {
       web --port "$port" --no-open >"$smoke_log" 2>&1 &
   local pid=$!
   local ok=0
+  local client_ok=0
 
   for _ in $(seq 1 120); do
     if ! kill -0 "$pid" 2>/dev/null; then
@@ -1002,11 +1003,47 @@ validate_dsh_core_plugin_tree() {
     sleep 0.25
   done
 
+  if [ "$ok" = "1" ]; then
+    if env LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/node" - "$port" <<'NODE'
+const port = Number(process.argv[2])
+const base = `http://127.0.0.1:${port}/`
+const page = await fetch(base)
+if (!page.ok) throw new Error(`index HTTP ${page.status}`)
+const html = await page.text()
+const marker = 'globalThis["__DSH_BOOT__"] = '
+const start = html.indexOf(marker)
+if (start < 0) throw new Error('window.__DSH_BOOT__ injection missing')
+const scriptEnd = html.indexOf('</script>', start)
+if (scriptEnd < 0) throw new Error('window.__DSH_BOOT__ script terminator missing')
+const raw = html.slice(start + marker.length, scriptEnd).trim().replace(/;\s*$/, '')
+const graph = JSON.parse(raw)
+if (!Array.isArray(graph.entries) || graph.entries.length === 0) {
+  throw new Error('client boot graph has no entries')
+}
+for (const row of graph.entries) {
+  if (!row || typeof row.id !== 'string' || typeof row.url !== 'string') {
+    throw new Error('malformed client boot row')
+  }
+  const url = new URL(row.url, base)
+  const response = await fetch(url, { cache: 'no-store' })
+  if (!response.ok) throw new Error(`${row.id}: HTTP ${response.status} for ${url.pathname}${url.search}`)
+  const body = await response.text()
+  if (body.length < 32 || !body.includes('__ModuleLoader__')) {
+    throw new Error(`${row.id}: client bundle response is empty/truncated/invalid`)
+  }
+}
+console.log(`[DSH] Web client bundles: OK (${graph.entries.length} single-resource scripts)`)
+NODE
+    then
+      client_ok=1
+    fi
+  fi
+
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
 
-  if [ "$ok" != "1" ] || grep -Eqi 'plugin tree failed to load|plugin\(s\) failed to load|Cordis startup failed because these plugin\(s\) could not be resolved' "$smoke_log"; then
-    echo '[DSH] Core plugin-tree smoke test failed; refusing to package a boot-broken APK.'
+  if [ "$ok" != "1" ] || [ "$client_ok" != "1" ] || grep -Eqi 'plugin tree failed to load|plugin\(s\) failed to load|Cordis startup failed because these plugin\(s\) could not be resolved' "$smoke_log"; then
+    echo '[DSH] Core/Web client smoke test failed; refusing to package a boot-broken APK.'
     tail -n 160 "$smoke_log" || true
     exit 8
   fi
@@ -1100,7 +1137,9 @@ refresh_dsh_runtime() {
   "npmNpxRuntime": true,
   "pnpmBuildApproval": true,
   "pluginProfileValidation": true,
-  "corePluginTreeSmokeTest": true
+  "corePluginTreeSmokeTest": true,
+  "webClientBundleSmokeTest": true,
+  "singleResourceClientBootstrap": true
 }
 EOF
 

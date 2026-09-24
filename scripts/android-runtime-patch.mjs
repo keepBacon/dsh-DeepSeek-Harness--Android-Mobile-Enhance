@@ -78,6 +78,7 @@ const wanted = new Set([
   '@deepseek-ai/dsh-settings',
   '@deepseek-ai/dsh-permission-presets',
   '@deepseek-ai/dsh-llm-pi-ai',
+  '@deepseek-ai/dsh-client-modules',
 ])
 const dirs = packageDirsByName(wanted)
 const byName = new Map()
@@ -147,6 +148,39 @@ eachPackage('@deepseek-ai/dsh-llm-pi-ai', 'lib/index.js', (file) => {
       : { kind: "stop" };
   }`
   txt = txt.replace(functionAnchor, injection)
+  write(file, txt)
+  return 'patched'
+}, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })
+
+// DSH 0.1.5-rc.2 initially schedules many Web client entries through a shared
+// application combo URL. A single script transport failure then fans out into
+// dozens of "failed to import loader entry" failures. Upstream later added
+// retry + per-row fallback. On Android rc.2 we take the stricter path and make
+// every parsed row use its already-advertised single-resource URL immediately.
+// This touches only browser delivery; profile/HOME/session data is never read or
+// rewritten by this compatibility patch.
+eachPackage('@deepseek-ai/dsh-client-modules', 'lib/client.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: single-resource client bootstrap'
+  if (txt.includes(marker)) return 'already'
+
+  if (txt.includes('failedBundleUrls') && txt.includes('executedBundleUrls')) {
+    return 'upstream-safe'
+  }
+
+  const compactReturn = /return\s*\{\s*\.\.\.row\s*,\s*initialUrl\s*\}\s*;?/
+  const explicitReturn = /return\s*\{\s*\.\.\.row\s*,\s*initialUrl\s*:\s*initialUrl\s*\}\s*;?/
+  const compactMatches = txt.match(new RegExp(compactReturn.source, 'g')) ?? []
+  const explicitMatches = txt.match(new RegExp(explicitReturn.source, 'g')) ?? []
+  const total = compactMatches.length + explicitMatches.length
+  if (total !== 1) {
+    throw new Error(`client-modules initialUrl anchor changed (${total} matches): ${file}`)
+  }
+  const anchor = compactMatches.length === 1 ? compactReturn : explicitReturn
+  txt = txt.replace(
+    anchor,
+    'return { ...row, initialUrl: row.url }; /* ' + marker + ' */',
+  )
   write(file, txt)
   return 'patched'
 }, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })
