@@ -1566,6 +1566,27 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * compositions inside dsh-permission-presets itself, so recovery must never
    * disable, remove, or rewrite a plugin merely to make the Host boot.
    */
+  /**
+   * Multiple first-party plugin resolution failures mean the embedded /usr
+   * graph is damaged/incomplete rather than a normal single-plugin error.
+   */
+  fun bootFailureNeedsRuntimeRepair(): Boolean {
+    val diag = engineDiagnostics(24_000)
+    val pluginTreeFailure =
+      diag.contains("plugin tree failed to load", ignoreCase = true) ||
+      diag.contains("plugin(s) failed to load", ignoreCase = true) ||
+      diag.contains("Cordis startup failed because these plugin(s) could not be resolved", ignoreCase = true)
+    if (!pluginTreeFailure) return false
+
+    val firstPartyFailures = Regex("""@deepseek-ai/dsh-[a-z0-9-]+""", RegexOption.IGNORE_CASE)
+      .findAll(diag)
+      .map { it.value.lowercase() }
+      .distinct()
+      .take(3)
+      .count()
+    return firstPartyFailures >= 2
+  }
+
   fun recoverFromBootFailure(profile: String = "web"): PluginCommandResult {
     val diag = engineDiagnostics(20_000)
     val permissionMismatch =

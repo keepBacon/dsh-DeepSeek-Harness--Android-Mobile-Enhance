@@ -1,3 +1,4 @@
+- 杜绝“APK 能构建但 DSH 核心插件树启动即崩”的假健康 Runtime：恢复 DSH 必需 peerDependencies 的正常安装，仅通过 npm 日志级别抑制 ERESOLVE 刷屏；打包前新增真实 `dsh web` 启动级 Cordis/core plugin tree smoke test，核心插件无法 resolve 时直接拒绝生成 APK；设备端若检测到多个 `@deepseek-ai/dsh-*` 核心插件同时加载失败，会自动事务式重建内置 `/usr` 一次，HOME/会话/配置/API Key/插件清单均不删除。
 - 修复 StepFun Plan 兼容补丁再次因 `supportsFinishReason` 在实际 pi-ai 发布包中不存在而阻断构建：删除对 `@earendil-works/pi-ai` 内部实现的脆弱改写，改在 DSH 自有 `dsh-llm-pi-ai` 适配层仅对 `stepfun-plan` 的已产生内容 + 已知 EOF 诊断归一化为正常 stop/tool-calls；其他 Provider 与真实网络中断仍按原逻辑失败/重试。
 - 优化 Runtime npm 源回退：主源安装失败后不再对同一源固定等待 3 秒并重复一次，而是直接切换已配置备用源；解决 `ETARGET` 这类确定性缺包错误产生重复失败输出和无意义等待。
 - 修复 StepFun Plan Android Runtime 补丁在 `pi-ai 0.85.1` 上因全文件重复 compat 字段误判锚点变化而中止构建：锚点与替换现严格限定在 `detectCompat(model)` 函数内部，仍保持上游结构变化时 fail-closed。

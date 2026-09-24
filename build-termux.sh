@@ -948,6 +948,73 @@ apply_android_runtime_patches() {
   DSH_TARGET_VERSION="$DSH_VERSION" node "$ROOT/scripts/android-runtime-patch.mjs" "$stage/usr"
 }
 
+validate_dsh_core_plugin_tree() {
+  local stage="$1"
+  local smoke_home="$CACHE_DIR/core-plugin-tree-smoke-home"
+  local smoke_log="$CACHE_DIR/core-plugin-tree-smoke.log"
+  local port=$((39000 + RANDOM % 1500))
+  local preload=""
+
+  rm -rf "$smoke_home"
+  mkdir -p "$smoke_home/tmp"
+  if [ -d "$stage/home" ]; then
+    cp -a "$stage/home/." "$smoke_home/"
+  fi
+  rm -rf "$smoke_home/.dsh/profiles/node_modules" \
+         "$smoke_home/.dsh/profiles/web/node_modules" \
+         "$smoke_home/.dsh/profiles/headless/node_modules"
+  mkdir -p "$smoke_home/tmp"
+  : > "$smoke_log"
+  [ -f "$stage/usr/lib/libtermux-exec-ld-preload.so" ] && preload="$stage/usr/lib/libtermux-exec-ld-preload.so"
+
+  echo '[DSH] Validating complete Cordis/core plugin tree with a real web boot…'
+  env \
+    PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" \
+    LD_LIBRARY_PATH="$stage/usr/lib" \
+    LD_PRELOAD="$preload" \
+    HOME="$smoke_home" \
+    DSH_HOME="$smoke_home/.dsh" \
+    TMPDIR="$smoke_home/tmp" \
+    SHELL="$stage/usr/bin/bash" \
+    DSH_SIDEBAR_SHELL="$stage/usr/bin/bash" \
+    TERMUX__ROOTFS="$stage" \
+    TERMUX__PREFIX="$stage/usr" \
+    TERMUX_PREFIX="$stage/usr" \
+    PREFIX="$stage/usr" \
+    TERMUX_HOME="$smoke_home" \
+    TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force \
+    TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1 \
+    DSH_ANDROID_STANDALONE=1 \
+    "$stage/usr/bin/node" --expose-internals \
+      "$stage/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" \
+      web --port "$port" --no-open >"$smoke_log" 2>&1 &
+  local pid=$!
+  local ok=0
+
+  for _ in $(seq 1 120); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      break
+    fi
+    if curl -sS --max-time 1 -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null; then
+      ok=1
+      break
+    fi
+    sleep 0.25
+  done
+
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+
+  if [ "$ok" != "1" ] || grep -Eqi 'plugin tree failed to load|plugin\(s\) failed to load|Cordis startup failed because these plugin\(s\) could not be resolved' "$smoke_log"; then
+    echo '[DSH] Core plugin-tree smoke test failed; refusing to package a boot-broken APK.'
+    tail -n 160 "$smoke_log" || true
+    exit 8
+  fi
+
+  echo '[DSH] Core plugin tree: OK (real web boot)'
+  rm -rf "$smoke_home"
+}
+
 refresh_dsh_runtime() {
   [ "$DSH_REFRESH_RUNTIME" = "1" ] || return 0
   check_host_node
@@ -978,12 +1045,12 @@ refresh_dsh_runtime() {
   npm_runtime_install() {
     local registry="$1"
     echo "[DSH] npm registry: $registry"
-    # DSH is installed as one already-published runtime graph. npm's modern
-    # peer auto-resolution can repeatedly backtrack across DSH prerelease peers,
-    # producing an ERESOLVE warning storm on Termux. pnpm profiles intentionally
-    # use autoInstallPeers=false as well, so keep the bootstrap policy aligned.
+    # DSH core plugins intentionally declare runtime services in peerDependencies.
+    # Do not disable peer installation here: that can produce a package tree
+    # which passes npm install but cannot resolve Cordis plugins at boot.
+    # Preserve peer semantics, tolerate compatible overrides, and hide warning spam.
     npm install --global --prefix "$stage/usr" --ignore-scripts --no-audit --no-fund --prefer-offline \
-      --legacy-peer-deps \
+      --include=peer --strict-peer-deps=false --loglevel=error \
       --registry="$registry" --fetch-retries=5 --fetch-retry-factor=2 \
       --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 --fetch-timeout=300000 \
       "@deepseek-ai/dsh@$DSH_VERSION" "pnpm@$PNPM_VERSION"
@@ -1013,6 +1080,7 @@ refresh_dsh_runtime() {
   write_runtime_pnpm_wrappers "$stage"
   validate_pnpm_runtime "$stage"
   copy_native_module_deps "$stage"
+  validate_dsh_core_plugin_tree "$stage"
   mkdir -p "$stage/usr/etc"
   local embedded_node
   embedded_node="$(LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/node" -p 'process.versions.node' 2>/dev/null || true)"
@@ -1031,7 +1099,8 @@ refresh_dsh_runtime() {
   "caBundle": true,
   "npmNpxRuntime": true,
   "pnpmBuildApproval": true,
-  "pluginProfileValidation": true
+  "pluginProfileValidation": true,
+  "corePluginTreeSmokeTest": true
 }
 EOF
 

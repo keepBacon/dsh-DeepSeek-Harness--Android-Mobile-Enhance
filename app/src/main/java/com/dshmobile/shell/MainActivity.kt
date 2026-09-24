@@ -3770,6 +3770,28 @@ class MainActivity : ComponentActivity() {
         var started = engineManager.startEngine(runtimeAlreadyChecked = true)
         var running = started && waitForEngineReady()
 
+        // A first-party plugin-tree collapse means /usr itself is incomplete.
+        // Repair it transactionally once before touching any user profile state.
+        if (!running && engineManager.bootFailureNeedsRuntimeRepair()) {
+          runOnUiThread {
+            showStartingState(
+              "检测到核心运行时依赖损坏，正在自动修复…",
+              "保留会话、配置、API Key 与插件清单，仅重建 APK 内置 /usr。",
+            )
+          }
+          engineManager.stopEngine()
+          engineManager.clearBrokenRuntime()
+          val repaired = engineManager.extractSnapshot { done, _ ->
+            runOnUiThread {
+              engineStatus.text = "正在自动修复运行时… " + done / 1024 / 1024 + " MB"
+            }
+          }
+          if (repaired) {
+            started = engineManager.startEngine(runtimeAlreadyChecked = true)
+            running = started && waitForEngineReady(60_000L)
+          }
+        }
+
         // A broken plugin/config must not permanently lock the user out of
         // sessions, settings or credentials. Recover only after the Host has
         // produced a recognized plugin-tree failure, then retry once.
