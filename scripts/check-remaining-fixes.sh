@@ -233,8 +233,11 @@ must "$ROOT/scripts/android-runtime-patch.mjs" 'approval: ctx.approval.config.po
 forbid "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: explicit permission default preset'
 must "$ROOT/scripts/android-runtime-patch.mjs" "'@deepseek-ai/dsh-llm-pi-ai'"
 must "$ROOT/scripts/android-runtime-patch.mjs" "'@deepseek-ai/dsh-client-modules'"
-must "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: single-resource client bootstrap'
-must "$ROOT/scripts/android-runtime-patch.mjs" 'initialUrl: row.url'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: direct single-resource client routes'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'function\\s+comboUrl'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'function\\s+partitionComboRecords'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'return "/plugins/" + resource + "?rev=" + rev'
+forbid "$ROOT/scripts/android-runtime-patch.mjs" "'lib/client.js'"
 must "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: StepFun Plan incomplete-terminal normalization'
 must "$ROOT/scripts/android-runtime-patch.mjs" 'function\\s+mapStopReason'
 must "$ROOT/scripts/android-runtime-patch.mjs" 'message.provider === "stepfun-plan"'
@@ -263,7 +266,9 @@ must "$BT" 'Core plugin tree: OK (real web boot)'
 must "$BT" 'Web client bundles: OK ('
 must "$BT" 'globalThis["__DSH_BOOT__"] = '
 must "$BT" '"webClientBundleSmokeTest": true'
-must "$BT" '"singleResourceClientBootstrap": true'
+must "$BT" '"directSingleResourceClientRoutes": true'
+must "$BT" "batch.url.includes('/??')"
+must "$BT" "row.url.includes('/??')"
 must "$BT" '"corePluginTreeSmokeTest": true'
 must "$BT" 'npm 主源失败，直接切换备用源'
 forbid "$BT" 'npm 主源失败，3 秒后重试一次'

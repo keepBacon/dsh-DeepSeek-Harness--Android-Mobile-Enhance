@@ -152,35 +152,43 @@ eachPackage('@deepseek-ai/dsh-llm-pi-ai', 'lib/index.js', (file) => {
   return 'patched'
 }, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })
 
-// DSH 0.1.5-rc.2 initially schedules many Web client entries through a shared
-// application combo URL. A single script transport failure then fans out into
-// dozens of "failed to import loader entry" failures. Upstream later added
-// retry + per-row fallback. On Android rc.2 we take the stricter path and make
-// every parsed row use its already-advertised single-resource URL immediately.
-// This touches only browser delivery; profile/HOME/session data is never read or
-// rewritten by this compatibility patch.
-eachPackage('@deepseek-ai/dsh-client-modules', 'lib/client.js', (file) => {
+// DSH 0.1.5-rc.2's /plugins/?? combo route is unreliable when the package
+// graph is installed under a non-default prefix (the Android runtime always is).
+// Patch the published HOST artifact, not the browser bundle: npm lib/client.js is
+// bundled/transformed and is intentionally not used as a source-shape anchor.
+// Android publishes one direct /plugins/<package>/client.js?rev=... response per
+// startup row and schedules one row per batch. The response table is built from
+// the same rewritten URLs, so serving and advertising stay internally consistent.
+// HOME/profile/session/workspace data are not touched.
+eachPackage('@deepseek-ai/dsh-client-modules', 'lib/index.js', (file) => {
   let txt = read(file)
-  const marker = 'DSH Android compat: single-resource client bootstrap'
+  const marker = 'DSH Android compat: direct single-resource client routes'
   if (txt.includes(marker)) return 'already'
 
-  if (txt.includes('failedBundleUrls') && txt.includes('executedBundleUrls')) {
-    return 'upstream-safe'
+  const comboAnchor = /function\s+comboUrl\s*\(\s*ids\s*,\s*rev\s*,\s*sourceMap\s*=\s*false\s*\)\s*\{/
+  const comboMatches = txt.match(new RegExp(comboAnchor.source, 'g')) ?? []
+  if (comboMatches.length !== 1) {
+    throw new Error(`client-modules comboUrl anchor changed (${comboMatches.length} matches): ${file}`)
   }
+  const comboInjection = `${comboMatches[0]}
+  // ${marker}
+  if (process.env.DSH_ANDROID_STANDALONE === "1" && ids.length === 1) {
+    const resource = ids[0] + "/client.js" + (sourceMap ? ".map" : "");
+    return "/plugins/" + resource + "?rev=" + rev;
+  }`
+  txt = txt.replace(comboAnchor, comboInjection)
 
-  const compactReturn = /return\s*\{\s*\.\.\.row\s*,\s*initialUrl\s*\}\s*;?/
-  const explicitReturn = /return\s*\{\s*\.\.\.row\s*,\s*initialUrl\s*:\s*initialUrl\s*\}\s*;?/
-  const compactMatches = txt.match(new RegExp(compactReturn.source, 'g')) ?? []
-  const explicitMatches = txt.match(new RegExp(explicitReturn.source, 'g')) ?? []
-  const total = compactMatches.length + explicitMatches.length
-  if (total !== 1) {
-    throw new Error(`client-modules initialUrl anchor changed (${total} matches): ${file}`)
+  const partitionAnchor = /function\s+partitionComboRecords\s*\(\s*records\s*\)\s*\{/
+  const partitionMatches = txt.match(new RegExp(partitionAnchor.source, 'g')) ?? []
+  if (partitionMatches.length !== 1) {
+    throw new Error(`client-modules partition anchor changed (${partitionMatches.length} matches): ${file}`)
   }
-  const anchor = compactMatches.length === 1 ? compactReturn : explicitReturn
-  txt = txt.replace(
-    anchor,
-    'return { ...row, initialUrl: row.url }; /* ' + marker + ' */',
-  )
+  const partitionInjection = `${partitionMatches[0]}
+  if (process.env.DSH_ANDROID_STANDALONE === "1") {
+    return records.map((record) => [record]);
+  }`
+  txt = txt.replace(partitionAnchor, partitionInjection)
+
   write(file, txt)
   return 'patched'
 }, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })

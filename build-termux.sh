@@ -1020,9 +1020,20 @@ const graph = JSON.parse(raw)
 if (!Array.isArray(graph.entries) || graph.entries.length === 0) {
   throw new Error('client boot graph has no entries')
 }
+if (!Array.isArray(graph.batches) || graph.batches.length === 0) {
+  throw new Error('client boot graph has no batches')
+}
+for (const batch of graph.batches) {
+  if (!batch || typeof batch.url !== 'string' || batch.url.includes('/??')) {
+    throw new Error('Android client bootstrap still advertises a combo URL: ' + JSON.stringify(batch?.url))
+  }
+}
 for (const row of graph.entries) {
   if (!row || typeof row.id !== 'string' || typeof row.url !== 'string') {
     throw new Error('malformed client boot row')
+  }
+  if (row.url.includes('/??')) {
+    throw new Error(row.id + ': Android single-resource URL unexpectedly contains /??')
   }
   const url = new URL(row.url, base)
   const response = await fetch(url, { cache: 'no-store' })
@@ -1139,7 +1150,7 @@ refresh_dsh_runtime() {
   "pluginProfileValidation": true,
   "corePluginTreeSmokeTest": true,
   "webClientBundleSmokeTest": true,
-  "singleResourceClientBootstrap": true
+  "directSingleResourceClientRoutes": true
 }
 EOF
 
