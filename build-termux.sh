@@ -1168,6 +1168,8 @@ refresh_dsh_runtime() {
   "dsh": "$DSH_VERSION",
   "dshSourceCommit": "$DSH_RELEASE_SOURCE_COMMIT",
   "dshReleaseFamilyLocked": true,
+  "cordisVendorLocked": true,
+  "cordisSingletonValidated": true,
   "dshNpmLockSha256": "$runtime_npm_lock_sha",
   "dshRegistry": "$used_registry",
   "node": "$embedded_node",

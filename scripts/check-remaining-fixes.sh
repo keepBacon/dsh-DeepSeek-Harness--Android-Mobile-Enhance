@@ -285,6 +285,17 @@ must "$DFL" '"version": "0.1.5-rc.2"'
 must "$DFL" '"sourceCommit": "a30530342297e6006623a775166fee1d14fd413a"'
 must "$DFL" '"@deepseek-ai/dsh-sdk-protocol"'
 must "$DFL" '"@deepseek-ai/dsh-session-format-v0-to-v1"'
+must "$DFL" '"vendorPackages": {'
+must "$DFL" '"@deepseek-ai/cordis": "4.0.2"'
+must "$DFL" '"@deepseek-ai/cordis-plugin-hmr": "1.0.17"'
+must "$DFL" '"@deepseek-ai/cordis-plugin-loader": "1.0.3"'
+must "$DFL" '"@deepseek-ai/cordis-plugin-timer": "1.1.4"'
+must "$DFT" 'vendor version skew'
+must "$DFT" 'cordisEntries.length !== 1'
+must "$DFT" 'cordisRealpaths.size !== 1'
+must "$DFT" 'Cordis singleton: OK'
+must "$BT" '"cordisVendorLocked": true'
+must "$BT" '"cordisSingletonValidated": true'
 must "$DFT" "mode==='manifest'"
 must "$DFT" "mode==='verify-lock'"
 must "$DFT" "mode==='verify-installed'"
