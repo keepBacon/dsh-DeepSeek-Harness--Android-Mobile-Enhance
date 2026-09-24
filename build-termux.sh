@@ -990,16 +990,12 @@ refresh_dsh_runtime() {
   }
   local used_registry="$primary_registry"
   if ! npm_runtime_install "$primary_registry"; then
-    echo '[DSH] npm 主源失败，3 秒后重试一次…'
-    sleep 3
-    if ! npm_runtime_install "$primary_registry"; then
-      if [ "$fallback_registry" = "$primary_registry" ]; then
-        echo '[DSH] npm runtime 刷新失败。'; exit 6
-      fi
-      used_registry="$fallback_registry"
-      echo "[DSH] 切换备用源: $fallback_registry"
-      npm_runtime_install "$fallback_registry" || { echo '[DSH] npm 主源和备用源均失败。'; exit 6; }
+    if [ "$fallback_registry" = "$primary_registry" ]; then
+      echo '[DSH] npm runtime 刷新失败。'; exit 6
     fi
+    used_registry="$fallback_registry"
+    echo "[DSH] npm 主源失败，直接切换备用源: $fallback_registry"
+    npm_runtime_install "$fallback_registry" || { echo '[DSH] npm 主源和备用源均失败。'; exit 6; }
   fi
 
   # Build only the native packages DSH actually needs.  The rest of the graph

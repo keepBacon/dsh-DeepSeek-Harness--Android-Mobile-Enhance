@@ -77,7 +77,7 @@ const wanted = new Set([
   '@vscode/ripgrep',
   '@deepseek-ai/dsh-settings',
   '@deepseek-ai/dsh-permission-presets',
-  '@earendil-works/pi-ai',
+  '@deepseek-ai/dsh-llm-pi-ai',
 ])
 const dirs = packageDirsByName(wanted)
 const byName = new Map()
@@ -115,46 +115,38 @@ function eachPackage(name, relFile, fn, { mandatory = false, requiredIfPresent =
   }
 }
 
-// StepFun Plan uses an OpenAI-compatible Chat Completions surface but its
-// Step Plan route can terminate a successful SSE response without the
-// finish_reason shape pi-ai normally requires. Keep this exception scoped to
-// provider=stepfun-plan or the /step_plan/ endpoint; every other provider keeps
-// pi-ai's strict stream-completion contract.
-eachPackage('@earendil-works/pi-ai', 'dist/api/openai-completions.js', (file) => {
+// StepFun Plan can emit an in-band EOF diagnostic after already streaming
+// usable assistant content. DSH 0.1.5-rc.2 classifies every such pi-ai error as
+// TRANSPORT, so llm-retry repeats the entire request up to its retry budget.
+// Normalize only this provider + these known terminal wordings at the DSH-owned
+// adapter seam. Real socket/network failures and every other provider remain
+// errors and keep the normal retry behavior.
+eachPackage('@deepseek-ai/dsh-llm-pi-ai', 'lib/index.js', (file) => {
   let txt = read(file)
-  const marker = 'DSH Android compat: StepFun Plan stream contract'
+  const marker = 'DSH Android compat: StepFun Plan incomplete-terminal normalization'
   if (txt.includes(marker)) return 'already'
 
-  // Scope every anchor to detectCompat(). The published pi-ai bundle repeats
-  // several compat field names elsewhere, so whole-file uniqueness checks are
-  // intentionally invalid and caused healthy 0.85.1 builds to fail closed.
-  const compatStart = txt.indexOf('function detectCompat(model) {')
-  const compatEnd = txt.indexOf('\nfunction getCompat(model)', compatStart)
-  if (compatStart < 0 || compatEnd <= compatStart) {
-    throw new Error(`StepFun Plan detectCompat anchor changed: ${file}`)
+  const functionAnchor = /function\s+mapStopReason\s*\(\s*message\s*,\s*contextWindow\s*\)\s*\{/
+  const matches = txt.match(new RegExp(functionAnchor.source, 'g')) ?? []
+  if (matches.length !== 1) {
+    throw new Error(`StepFun Plan mapStopReason anchor changed (${matches.length} matches): ${file}`)
   }
-  let compat = txt.slice(compatStart, compatEnd)
-  const replaceCompatOnce = (needle, replacement, label) => {
-    const count = compat.split(needle).length - 1
-    if (count !== 1) {
-      throw new Error(`StepFun Plan ${label} anchor changed (${count} matches): ${file}`)
-    }
-    compat = compat.replace(needle, replacement)
-  }
-
-  const baseUrlAnchor = 'const baseUrl = model.baseUrl;'
-  replaceCompatOnce(
-    baseUrlAnchor,
-    `${baseUrlAnchor}\n\tconst isStepFunPlan = provider === "stepfun-plan" || /\\/step_plan(?:\\/|$)/i.test(baseUrl); // ${marker}`,
-    'baseUrl',
-  )
-  replaceCompatOnce('const isNonStandard =', 'const isNonStandard =\n\t\tisStepFunPlan ||', 'non-standard provider')
-  replaceCompatOnce('const useMaxTokens =', 'const useMaxTokens =\n\t\tisStepFunPlan ||', 'max_tokens provider')
-  replaceCompatOnce('supportsUsageInStreaming: true,', 'supportsUsageInStreaming: !isStepFunPlan,', 'stream usage')
-  replaceCompatOnce('supportsFinishReason: true,', 'supportsFinishReason: !isStepFunPlan,', 'finish_reason')
-  replaceCompatOnce('supportsStrictMode: !isMoonshot', 'supportsStrictMode: !isStepFunPlan && !isMoonshot', 'strict mode')
-
-  txt = txt.slice(0, compatStart) + compat + txt.slice(compatEnd)
+  const injection = `${matches[0]}
+  // ${marker}.
+  const stepFunPlanProvider = typeof message.provider === "string"
+    && (message.provider === "stepfun-plan" || message.provider.startsWith("stepfun-plan:"));
+  const stepFunPlanTerminalText = typeof message.errorMessage === "string"
+    && /(?:upstream\\s+)?stream ended before a completion event|stream ended without finish_reason/i.test(message.errorMessage);
+  if (message.stopReason === "error"
+    && stepFunPlanProvider
+    && Array.isArray(message.content)
+    && message.content.length > 0
+    && stepFunPlanTerminalText) {
+    return message.content.some((block) => block?.type === "toolCall")
+      ? { kind: "tool-calls" }
+      : { kind: "stop" };
+  }`
+  txt = txt.replace(functionAnchor, injection)
   write(file, txt)
   return 'patched'
 }, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })

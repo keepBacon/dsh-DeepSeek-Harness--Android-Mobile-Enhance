@@ -1,3 +1,5 @@
+- 修复 StepFun Plan 兼容补丁再次因 `supportsFinishReason` 在实际 pi-ai 发布包中不存在而阻断构建：删除对 `@earendil-works/pi-ai` 内部实现的脆弱改写，改在 DSH 自有 `dsh-llm-pi-ai` 适配层仅对 `stepfun-plan` 的已产生内容 + 已知 EOF 诊断归一化为正常 stop/tool-calls；其他 Provider 与真实网络中断仍按原逻辑失败/重试。
+- 优化 Runtime npm 源回退：主源安装失败后不再对同一源固定等待 3 秒并重复一次，而是直接切换已配置备用源；解决 `ETARGET` 这类确定性缺包错误产生重复失败输出和无意义等待。
 - 修复 StepFun Plan Android Runtime 补丁在 `pi-ai 0.85.1` 上因全文件重复 compat 字段误判锚点变化而中止构建：锚点与替换现严格限定在 `detectCompat(model)` 函数内部，仍保持上游结构变化时 fail-closed。
 - 修复 Termux 完整构建期间 npm 持续刷 `ERESOLVE overriding peer dependency`：Runtime bootstrap 的全局 npm 安装改用 `--legacy-peer-deps`，与 Android profile 的 `autoInstallPeers=false` 策略保持一致，避免 DSH 预发布 peer 依赖触发反复回溯解析。
 - 修复 StepFun Plan 流式请求反复出现 `upstream stream ended before a completion event` 并重试到 5/5：Android Runtime 仅对 `stepfun-plan` / `/step_plan/` 端点启用 OpenAI-compatible 专用兼容默认值（`max_tokens`、禁用 store/developer role/stream usage/strict schema，并允许缺少 `finish_reason` 时由流结束推断完成）；其他 Provider 继续保持严格的流完整性检查。
