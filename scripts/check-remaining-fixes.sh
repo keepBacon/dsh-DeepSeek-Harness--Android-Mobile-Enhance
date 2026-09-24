@@ -227,6 +227,13 @@ must "$ROOT/scripts/android-runtime-patch.mjs" '__dsh_android_composed_default__
 must "$ROOT/scripts/android-runtime-patch.mjs" 'sandbox: ctx.shell.sandboxMode'
 must "$ROOT/scripts/android-runtime-patch.mjs" 'approval: ctx.approval.config.policy ?? "ask"'
 forbid "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: explicit permission default preset'
+must "$ROOT/scripts/android-runtime-patch.mjs" "'@earendil-works/pi-ai'"
+must "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: StepFun Plan stream contract'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'provider === "stepfun-plan"'
+must "$ROOT/scripts/android-runtime-patch.mjs" '/\\/step_plan(?:\\/|$)/i'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'supportsUsageInStreaming: !isStepFunPlan'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'supportsFinishReason: !isStepFunPlan'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'supportsStrictMode: !isStepFunPlan && !isMoonshot'
 
 # V0.1.1 runtime extraction / engine-start performance.
 must "$SE" 'COPY_BUFFER_SIZE = 256 * 1024'

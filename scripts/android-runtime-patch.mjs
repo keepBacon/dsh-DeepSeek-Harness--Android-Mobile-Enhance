@@ -77,6 +77,7 @@ const wanted = new Set([
   '@vscode/ripgrep',
   '@deepseek-ai/dsh-settings',
   '@deepseek-ai/dsh-permission-presets',
+  '@earendil-works/pi-ai',
 ])
 const dirs = packageDirsByName(wanted)
 const byName = new Map()
@@ -113,6 +114,47 @@ function eachPackage(name, relFile, fn, { mandatory = false, requiredIfPresent =
     throw new Error(`required Android compatibility patch incomplete: ${name} (${ok}/${packages.length})`)
   }
 }
+
+// StepFun Plan uses an OpenAI-compatible Chat Completions surface but its
+// Step Plan route can terminate a successful SSE response without the
+// finish_reason shape pi-ai normally requires. Keep this exception scoped to
+// provider=stepfun-plan or the /step_plan/ endpoint; every other provider keeps
+// pi-ai's strict stream-completion contract.
+eachPackage('@earendil-works/pi-ai', 'dist/api/openai-completions.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: StepFun Plan stream contract'
+  if (txt.includes(marker)) return 'already'
+
+  const baseUrlAnchor = 'const baseUrl = model.baseUrl;'
+  if (txt.split(baseUrlAnchor).length !== 2) {
+    throw new Error(`StepFun Plan baseUrl anchor changed: ${file}`)
+  }
+  txt = txt.replace(
+    baseUrlAnchor,
+    `${baseUrlAnchor}\n\tconst isStepFunPlan = provider === "stepfun-plan" || /\\/step_plan(?:\\/|$)/i.test(baseUrl); // ${marker}`,
+  )
+
+  const nonStandardAnchor = 'const isNonStandard ='
+  const maxTokensAnchor = 'const useMaxTokens ='
+  if (txt.split(nonStandardAnchor).length !== 2 || txt.split(maxTokensAnchor).length !== 2) {
+    throw new Error(`StepFun Plan provider-shape anchor changed: ${file}`)
+  }
+  txt = txt.replace(nonStandardAnchor, 'const isNonStandard =\n\t\tisStepFunPlan ||')
+  txt = txt.replace(maxTokensAnchor, 'const useMaxTokens =\n\t\tisStepFunPlan ||')
+
+  const usageAnchor = 'supportsUsageInStreaming: true,'
+  const finishAnchor = 'supportsFinishReason: true,'
+  const strictAnchor = 'supportsStrictMode: !isMoonshot'
+  if (txt.split(usageAnchor).length !== 2 || txt.split(finishAnchor).length !== 2 || txt.split(strictAnchor).length !== 2) {
+    throw new Error(`StepFun Plan compat-field anchor changed: ${file}`)
+  }
+  txt = txt.replace(usageAnchor, 'supportsUsageInStreaming: !isStepFunPlan,')
+  txt = txt.replace(finishAnchor, 'supportsFinishReason: !isStepFunPlan,')
+  txt = txt.replace(strictAnchor, 'supportsStrictMode: !isStepFunPlan && !isMoonshot')
+
+  write(file, txt)
+  return 'patched'
+}, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })
 
 // Preserve the exact permission defaults composed by the active plugin stack.
   // Upstream 0.1.5-rc.2 deliberately throws when sandbox + approval form a valid
