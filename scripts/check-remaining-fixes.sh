@@ -66,6 +66,16 @@ must "$EM" 'GIT_ASKPASS'
 must "$EM" 'DSH_GIT_AUTH_HOST" ] || exit 1'
 must "$MA" '.id_dsh-import-${java.util.UUID.randomUUID()}.tmp'
 
+# TypeScript run_code Android compatibility.
+must "$BT" 'validate_android_typescript_code_runtime()'
+must "$BT" 'android-runtime-patch.mjs" --self-test'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'resilient run_code TypeScript syntax'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'unwrapAndroidRunCodeFence'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'repairAndroidMarkdownTemplateLiteral'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android syntax guard'
+node --check "$ROOT/scripts/android-runtime-patch.mjs" >/dev/null
+node "$ROOT/scripts/android-runtime-patch.mjs" --self-test >/dev/null
+
 # MCP / protocol / reverse-engineering tool surface.
 must "$MA" 'text = "工具与 MCP"'
 must "$MA" 'private fun showMcpManager()'
