@@ -109,7 +109,11 @@ class McpConfigManager(
     "    transport: stdio",
     "    command: ${JSONObject.quote(File(usrDir,"bin/node").absolutePath)}",
     "    args: [${JSONObject.quote(toolboxFile.absolutePath)}]",
-    "    env: {}",
+    "    env:",
+    "      TERMUX__PREFIX: ${JSONObject.quote(usrDir.absolutePath)}",
+    "      PREFIX: ${JSONObject.quote(usrDir.absolutePath)}",
+    "      LD_LIBRARY_PATH: ${JSONObject.quote(File(usrDir,\"lib\").absolutePath)}",
+    "      PATH: ${JSONObject.quote(File(usrDir,\"bin\").absolutePath + \":/system/bin\")}",
     "    cwd: ${JSONObject.quote(homeDir.absolutePath)}",
     "    toolCallTimeoutMs: 60000",
     "    failOnStartupError: false",
@@ -125,7 +129,7 @@ class McpConfigManager(
       append("    env: {}\n    cwd: ").append(JSONObject.quote(s.cwd.ifBlank { homeDir.absolutePath })).append('\n')
     } else {
       append("    url: ").append(JSONObject.quote(s.url)).append('\n')
-      if (s.bearerAuth) append("    headers:\n      Authorization: !!js '`Bearer ${process.env.").append(tokenEnvName(s.id)).append(" ?? \"\"}`'\n") else append("    headers: {}\n")
+      if (s.bearerAuth) append("    headers:\n      Authorization: !!js '`Bearer \\${process.env.").append(tokenEnvName(s.id)).append(" ?? \"\"}`'\n") else append("    headers: {}\n")
     }
     append("    toolCallTimeoutMs: 60000\n    failOnStartupError: false")
   }
