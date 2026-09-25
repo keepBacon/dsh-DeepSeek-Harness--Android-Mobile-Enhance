@@ -188,7 +188,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   fun setMcpToolboxEnabled(enabled: Boolean): PluginCommandResult = try {
     mcpConfigManager.setToolboxEnabled(enabled)
     mcpConfigManager.ensureRuntimePatch()
-    PluginCommandResult(true, 0, if (enabled) "已启用内置 mobile_tools MCP。" else "已关闭内置 mobile_tools MCP。")
+    PluginCommandResult(true, 0, if (enabled) "已启用内置 mobile_tools + basic_tools MCP。" else "已关闭内置 MCP 工具箱。")
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
   }
