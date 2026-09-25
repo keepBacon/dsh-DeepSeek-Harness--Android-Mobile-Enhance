@@ -249,25 +249,12 @@ dsh_copy_python_distribution_closure() {
   "$host_python" - "$host_prefix" "$@" > "$list" <<'PY_DSH_DIST'
 import importlib.metadata as md
 import pathlib
-import re
 import sys
 
 prefix = pathlib.Path(sys.argv[1]).resolve()
-queue = list(sys.argv[2:])
-seen = set()
 files = []
 
-try:
-    from packaging.requirements import Requirement
-except Exception:
-    Requirement = None
-
-while queue:
-    name = queue.pop(0)
-    key = re.sub(r"[-_.]+", "-", name).lower()
-    if key in seen:
-        continue
-    seen.add(key)
+for name in sys.argv[2:]:
     try:
         dist = md.distribution(name)
     except md.PackageNotFoundError:
@@ -283,24 +270,8 @@ while queue:
         if path.is_file():
             files.append(path)
 
-    for raw in dist.requires or ():
-        dep = None
-        if Requirement is not None:
-            try:
-                req = Requirement(raw)
-                if req.marker is not None and not req.marker.evaluate():
-                    continue
-                dep = req.name
-            except Exception:
-                pass
-        if dep is None:
-            m = re.match(r"s*([A-Za-z0-9_.-]+)", raw)
-            dep = m.group(1) if m else None
-        if dep:
-            queue.append(dep)
-
 for path in dict.fromkeys(files):
-    sys.stdout.buffer.write(str(path).encode("utf-8") + b" ")
+    sys.stdout.buffer.write(str(path).encode("utf-8") + b"\0")
 PY_DSH_DIST
 
   local src rel dest
@@ -422,7 +393,7 @@ install_termux_tool_runtime() {
   # postinst. They are not listed by dpkg-query -L, so a pure package overlay
   # can contain the CLI scripts but still fail when Python imports their deps.
   if [ -x "${PREFIX:-/data/data/com.termux/files/usr}/bin/frida" ]; then
-    dsh_copy_python_distribution_closure "$stage" prompt-toolkit colorama pygments websockets || {
+    dsh_copy_python_distribution_closure "$stage" prompt-toolkit colorama pygments websockets wcwidth || {
       echo "[DSH] Failed to stage Frida Python runtime dependencies." >&2
       return 7
     }
@@ -550,6 +521,7 @@ validate_termux_tool_runtime() {
   "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/dpkg-query" -W python >/dev/null 2>&1 || { echo "[DSH] Embedded dpkg database smoke test failed."; return 7; }
+  "${common_env[@]}" "$wrappers/dpkg-query" -W frida frida-python >/dev/null 2>&1 || { echo "[DSH] Embedded Frida package metadata missing from dpkg database."; return 7; }
   local binutils_log="$CACHE_DIR/embedded-binutils-smoke.log"
   for cmd in readelf objdump nm strings; do
     if ! "${common_env[@]}" "$wrappers/$cmd" --version >"$binutils_log" 2>&1; then
