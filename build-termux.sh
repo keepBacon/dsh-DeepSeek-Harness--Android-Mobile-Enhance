@@ -2,12 +2,9 @@
 set -Eeuo pipefail
 
 dsh_build_error_trap() {
-  local rc="$1"
-  if [ "${DSH_ERR_REPORTED:-0}" = "1" ]; then
-    return "$rc"
-  fi
-  DSH_ERR_REPORTED=1
-  echo "[DSH] BUILD FAILED: exit=$rc, command=$BASH_COMMAND" >&2
+  local rc="$1" failed_command="$2"
+  trap - ERR
+  echo "[DSH] BUILD FAILED: exit=$rc, command=$failed_command" >&2
   local i source line func
   for ((i=1; i<${#FUNCNAME[@]}; i++)); do
     func="${FUNCNAME[$i]:-main}"
@@ -15,9 +12,9 @@ dsh_build_error_trap() {
     line="${BASH_LINENO[$((i-1))]:-$LINENO}"
     echo "[DSH]   at $func ($source:$line)" >&2
   done
-  return "$rc"
+  exit "$rc"
 }
-trap 'dsh_build_error_trap $?' ERR
+trap 'dsh_build_error_trap $? "$BASH_COMMAND"' ERR
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
