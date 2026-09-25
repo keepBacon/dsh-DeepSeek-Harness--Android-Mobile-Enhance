@@ -102,6 +102,7 @@ validate_staged_termux_payload_contract() {
   require_exact_tool ffmpeg ffmpeg
   require_exact_tool ffprobe ffmpeg
   require_exact_tool pdfinfo poppler
+  require_exact_tool adb android-tools
   # Termux splits Frida: the server is in "frida", while Python CLI tools
   # (frida/frida-ps/frida-trace) are in the "frida-python" subpackage.
   require_exact_tool frida frida-python
@@ -115,7 +116,7 @@ validate_staged_termux_payload_contract() {
   if [ "$fail" -ne 0 ]; then
     echo "[DSH] Embedded Termux payload contract failed before native-module compilation." >&2
     echo "[DSH] Host package ownership diagnostics:" >&2
-    for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo readelf greadelf objdump gobjdump nm gnm strings gstrings; do
+    for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb readelf greadelf objdump gobjdump nm gnm strings gstrings; do
       local host_path="${PREFIX:-/data/data/com.termux/files/usr}/bin/$cmd"
       if [ -e "$host_path" ]; then
         dpkg-query -S "$host_path" 2>/dev/null | head -n 1 >&2 || true
@@ -697,7 +698,7 @@ EOF_TERMUX_WRAPPER
   # binary is fully relocatable when copied into the app-private runtime.
   for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3 \
     openssl file curl jq aapt2 rizin rz-asm rz-bin rz-find frida frida-ps frida-trace \
-    7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo \
+    7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb \
     ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip; do
     rm -f "$stage/usr/libexec/dsh/wrappers/$cmd"
     ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$cmd"
@@ -799,7 +800,7 @@ validate_termux_tool_runtime() {
     return 7
   fi
   local basic_log="$CACHE_DIR/basic-tools-smoke.log"
-  for cmd in 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo; do
+  for cmd in 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
     : > "$basic_log"
     local smoke_rc=0
     case "$cmd" in
@@ -809,6 +810,7 @@ validate_termux_tool_runtime() {
       dig) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 || smoke_rc=$? ;;
       magick) "${common_env[@]}" "$wrappers/$cmd" -version >"$basic_log" 2>&1 || smoke_rc=$? ;;
       pdfinfo) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 || smoke_rc=$? ;;
+      adb) "${common_env[@]}" "$wrappers/$cmd" version >"$basic_log" 2>&1 || smoke_rc=$? ;;
     esac
     if [ "$smoke_rc" -ne 0 ]; then
       echo "[DSH] Embedded basic tool smoke failed: $cmd (exit=$smoke_rc)" >&2
