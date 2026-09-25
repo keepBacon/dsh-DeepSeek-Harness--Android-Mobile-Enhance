@@ -171,6 +171,21 @@ prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
 [ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
 case "$name" in
   python) command_name="python3" ;;
+  # Termux's GNU binutils package deliberately installs the tools that conflict
+  # with LLVM under g-prefixed names (greadelf, gobjdump, gnm, ...). The DSH
+  # tool surface keeps conventional names so agents/plugins do not need
+  # Termux-specific knowledge. Prefer an unprefixed implementation when one is
+  # present, otherwise dispatch to the GNU g-prefixed binary.
+  ar|addr2line|c++filt|nm|objcopy|objdump|ranlib|readelf|size|strings|strip)
+    if [ -x "$prefix/bin/$name" ]; then
+      command_name="$name"
+    elif [ -x "$prefix/bin/g$name" ]; then
+      command_name="g$name"
+    else
+      echo "embedded binary-analysis command not found: $name (also tried g$name)" >&2
+      exit 127
+    fi
+    ;;
   *) command_name="$name" ;;
 esac
 if [ "${DSH_TERMUX_INNER:-0}" = "1" ]; then
@@ -183,7 +198,8 @@ EOF_TERMUX_WRAPPER
   # Keep package-owned files under usr/bin intact so apt/pkg upgrades can
   # replace them normally. DSH prepends this wrapper directory to PATH, which
   # keeps relocation/proot entry stable even after package-manager self-updates.
-  for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3; do
+  for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3 \
+    ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip; do
     rm -f "$stage/usr/libexec/dsh/wrappers/$cmd"
     ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$cmd"
   done
@@ -207,10 +223,14 @@ validate_termux_tool_runtime() {
   "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/dpkg-query" -W python >/dev/null 2>&1 || { echo "[DSH] Embedded dpkg database smoke test failed."; return 7; }
+  local binutils_log="$CACHE_DIR/embedded-binutils-smoke.log"
   for cmd in readelf objdump nm strings; do
-    "${common_env[@]}" "$stage/usr/bin/$cmd" --version >/dev/null 2>&1 || {
-      echo "[DSH] Embedded binary-analysis tool failed: $cmd"; return 7;
-    }
+    if ! "${common_env[@]}" "$wrappers/$cmd" --version >"$binutils_log" 2>&1; then
+      echo "[DSH] Embedded binary-analysis tool failed: $cmd" >&2
+      echo "[DSH] Tried conventional $cmd with GNU g$cmd fallback through the runtime wrapper." >&2
+      sed -n '1,80p' "$binutils_log" >&2 || true
+      return 7
+    fi
   done
   "${common_env[@]}" "$stage/usr/bin/openssl" version >/dev/null 2>&1 || {
     echo "[DSH] Embedded OpenSSL smoke test failed."; return 7;
