@@ -40,7 +40,7 @@ DSH_NATIVE_COMPAT="${DSH_NATIVE_COMPAT:-1}"
 DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
 DSH_ALLOW_DEGRADED="${DSH_ALLOW_DEGRADED:-0}"
 DSH_TERMUX_TOOLS="${DSH_TERMUX_TOOLS:-1}"
-DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 gdb strace rizin}"
+DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 gdb gdbserver strace rizin}"
 DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-frida frida-python}"
 DSH_TERMUX_PRIMARY_APT_BASE="${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
 DSH_TERMUX_FALLBACK_APT_BASE="${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
@@ -51,6 +51,28 @@ DSH_EXTRA_TERMUX_PACKAGES="${DSH_EXTRA_TERMUX_PACKAGES:-}"
 DSH_XZ_PRESET="${DSH_XZ_PRESET:-0}"
 PNPM_TGZ="$CACHE_DIR/pnpm-$PNPM_VERSION.tgz"
 PNPM_URL="https://registry.npmjs.org/pnpm/-/pnpm-$PNPM_VERSION.tgz"
+
+dsh_static_build_preflight() {
+  local fail=0
+  bash -n "$ROOT/build-termux.sh" || fail=1
+  bash -n "$ROOT/scripts/embed-termux-tools.sh" || fail=1
+  if command -v node >/dev/null 2>&1; then
+    node --check "$MOBILE_MCP_TOOLBOX" >/dev/null || fail=1
+  else
+    echo "[DSH] Host node is missing; cannot syntax-check mobile MCP toolbox." >&2
+    fail=1
+  fi
+  [ -f "$ROOT/scripts/android-runtime-patch.mjs" ] || { echo "[DSH] Missing android-runtime-patch.mjs" >&2; fail=1; }
+  [ -f "$ROOT/scripts/dsh-runtime-family.mjs" ] || { echo "[DSH] Missing dsh-runtime-family.mjs" >&2; fail=1; }
+  [ -f "$ROOT/scripts/dsh-release-family-lock.json" ] || { echo "[DSH] Missing dsh-release-family-lock.json" >&2; fail=1; }
+  [ "$fail" -eq 0 ] || {
+    echo "[DSH] Static build preflight failed before runtime extraction." >&2
+    return 7
+  }
+  echo "[DSH] Static build preflight: OK"
+}
+
+dsh_static_build_preflight
 
 printf '[DSH] Java: '
 java -version 2>&1 | head -n 1 || true
