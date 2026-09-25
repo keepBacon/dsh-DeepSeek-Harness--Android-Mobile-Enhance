@@ -221,7 +221,7 @@ class McpConfigManager(
       append("    url: ").append(JSONObject.quote(server.url)).append('\n')
       if (server.bearerAuth) {
         append("    headers:\n")
-        append("      Authorization: !!js '`Bearer \\${process.env.")
+        append("      Authorization: !!js '`Bearer \${process.env.")
         append(tokenEnvName(server.id))
         append(" ?? \"\"}`'\n")
       } else {
