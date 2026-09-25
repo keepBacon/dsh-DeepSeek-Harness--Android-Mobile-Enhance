@@ -974,7 +974,7 @@ install_mobile_mcp_toolbox() {
   cp "$MOBILE_MCP_TOOLBOX" "$dest"
   chmod 0755 "$dest"
   "$stage/usr/bin/node" --check "$dest" >/dev/null
-  env PATH="$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Mobile MCP toolbox self-test failed.'; exit 8; }
+  env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Mobile MCP toolbox self-test failed.'; exit 8; }
   echo '[DSH] Mobile MCP toolbox: OK'
 }
 
