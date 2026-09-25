@@ -58,26 +58,92 @@ copy_termux_package_payload() {
   done < <(dpkg-query -L "$pkg" 2>/dev/null || true)
 }
 
+validate_staged_termux_payload_contract() {
+  local stage="$1"
+  local fail=0 cmd owner
+
+  require_exact_tool() {
+    cmd="$1"; owner="$2"
+    if [ ! -x "$stage/usr/bin/$cmd" ]; then
+      echo "[DSH] Embedded payload contract missing usr/bin/$cmd (expected from package: $owner)" >&2
+      fail=1
+    fi
+  }
+
+  require_binutils_tool() {
+    cmd="$1"
+    if [ ! -x "$stage/usr/bin/$cmd" ] && [ ! -x "$stage/usr/bin/g$cmd" ]; then
+      echo "[DSH] Embedded payload contract missing $cmd/g$cmd (expected from package: binutils)" >&2
+      fail=1
+    fi
+  }
+
+  # OpenSSL deliberately splits the command-line binary into openssl-tool.
+  # The openssl package alone contains libraries/config and is not sufficient.
+  require_exact_tool openssl openssl-tool
+  require_exact_tool file file
+  require_exact_tool curl curl
+  require_exact_tool jq jq
+  require_exact_tool proot proot
+  require_exact_tool python3 python
+  for cmd in readelf objdump nm strings; do
+    require_binutils_tool "$cmd"
+  done
+
+  if [ "$fail" -ne 0 ]; then
+    echo "[DSH] Embedded Termux payload contract failed before native-module compilation." >&2
+    echo "[DSH] Host package ownership diagnostics:" >&2
+    for cmd in openssl file curl jq proot python3 readelf greadelf objdump gobjdump nm gnm strings gstrings; do
+      local host_path="${PREFIX:-/data/data/com.termux/files/usr}/bin/$cmd"
+      if [ -e "$host_path" ]; then
+        dpkg-query -S "$host_path" 2>/dev/null | head -n 1 >&2 || true
+      fi
+    done
+    return 7
+  fi
+  echo "[DSH] Embedded Termux payload contract: OK"
+}
+
 install_termux_tool_runtime() {
   local stage="$1"
   [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || { echo "[DSH] Embedded Termux tool runtime disabled."; return 0; }
-  for cmd in apt-cache dpkg-query proot python3 file; do
+  for cmd in pkg apt-cache dpkg-query proot python3 file; do
     command -v "$cmd" >/dev/null 2>&1 || {
       echo "[DSH] 缺少 Termux 工具 $cmd。" >&2
-      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file binutils openssl -y" >&2
+      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file binutils openssl openssl-tool -y" >&2
       return 7
     }
   done
 
   local roots=() pkg
   read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
+  local missing_roots=()
   for pkg in "${roots[@]}"; do
     [ -n "$pkg" ] || continue
     if [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" != "installed" ]; then
-      echo "[DSH] Termux 工具包未安装: $pkg" >&2
-      echo "[DSH] 请先执行: pkg install $pkg -y" >&2
+      missing_roots+=("$pkg")
+    fi
+  done
+  if [ "${#missing_roots[@]}" -gt 0 ]; then
+    if [ "${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}" = "1" ]; then
+      echo "[DSH] Installing missing Termux tool packages: ${missing_roots[*]}"
+      pkg install -y "${missing_roots[@]}" || {
+        echo "[DSH] 自动安装 Termux 工具包失败: ${missing_roots[*]}" >&2
+        echo "[DSH] 可手动执行: pkg install -y ${missing_roots[*]}" >&2
+        return 7
+      }
+    else
+      echo "[DSH] Termux 工具包未安装: ${missing_roots[*]}" >&2
+      echo "[DSH] 请执行: pkg install -y ${missing_roots[*]}" >&2
       return 7
     fi
+  fi
+  for pkg in "${roots[@]}"; do
+    [ -n "$pkg" ] || continue
+    [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" = "installed" ] || {
+      echo "[DSH] Termux 工具包安装后仍不可用: $pkg" >&2
+      return 7
+    }
   done
 
   local package_list="$CACHE_DIR/dsh-termux-tool-packages.txt"
@@ -214,6 +280,11 @@ EOF_TERMUX_WRAPPER
   while IFS= read -r -d '' elf; do
     case "$(file -b "$elf" 2>/dev/null || true)" in *ELF*) copy_link_deps "$elf" "$stage/usr/lib" ;; esac
   done < <(find "$stage/usr/bin" "$stage/usr/libexec/dsh/pm-bin" -maxdepth 1 -type f -print0 2>/dev/null)
+
+  # Validate package contents immediately. Do not spend minutes compiling
+  # node-pty only to discover that a requested Termux subpackage did not
+  # actually contribute its executable to the staged runtime.
+  validate_staged_termux_payload_contract "$stage" || return 7
 
   echo "[DSH] Embedded Termux package manager + Python tool runtime staged."
 }
