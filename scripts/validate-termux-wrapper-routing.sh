@@ -29,13 +29,13 @@ done
 : > "$PREFIX_DIR/bin/openssl"; chmod 0755 "$PREFIX_DIR/bin/openssl"
 : > "$PREFIX_DIR/bin/file"; chmod 0755 "$PREFIX_DIR/bin/file"
 
-out="$(TERMUX__PREFIX="$PREFIX_DIR" "$PREFIX_DIR/libexec/dsh/wrappers/readelf" --version)"
+out="$(TERMUX__PREFIX="$PREFIX_DIR" /bin/sh "$PREFIX_DIR/libexec/dsh/wrappers/readelf" --version)"
 [ "$out" = "greadelf" ] || { echo "[FAIL] readelf did not route to greadelf: $out" >&2; exit 1; }
 
-out="$(TERMUX__PREFIX="$PREFIX_DIR" "$PREFIX_DIR/libexec/dsh/wrappers/openssl" version)"
+out="$(TERMUX__PREFIX="$PREFIX_DIR" /bin/sh "$PREFIX_DIR/libexec/dsh/wrappers/openssl" version)"
 [ "$out" = "openssl" ] || { echo "[FAIL] openssl did not route through termux-run: $out" >&2; exit 1; }
 
-out="$(TERMUX__PREFIX="$PREFIX_DIR" "$PREFIX_DIR/libexec/dsh/wrappers/file" --version)"
+out="$(TERMUX__PREFIX="$PREFIX_DIR" /bin/sh "$PREFIX_DIR/libexec/dsh/wrappers/file" --version)"
 [ "$out" = "file" ] || { echo "[FAIL] file did not route through termux-run: $out" >&2; exit 1; }
 
 echo '[OK] Termux relocation-wrapper routing'
