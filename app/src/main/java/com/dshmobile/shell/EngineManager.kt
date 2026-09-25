@@ -82,6 +82,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private val caBundleFile = File(usrDir, "etc/tls/cert.pem")
   private val nodeCacheDir = File(homeDir, ".cache").apply { mkdirs() }
   private val nodeCompileCacheDir = File(nodeCacheDir, "node-compile").apply { mkdirs() }
+  private val mcpConfigManager by lazy { McpConfigManager(context, dshDataDir, usrDir, homeDir) }
 
   private fun bundledRuntimeId(): String = try {
     context.assets.open("runtime-version.txt").bufferedReader().use { it.readText().trim() }
@@ -176,6 +177,47 @@ class EngineManager(private val context: Context, private val pickToken: String?
       if (SecureCredentialStore.gitCredential(context) != null) append(" · 私有 Git HTTPS 凭据已配置")
       if (pending > 0) append(" · 待授权构建 ").append(pending)
     }
+  }
+
+  fun mcpRuntimeSummary(): String = mcpConfigManager.runtimeSummary()
+  fun listMcpServers(): List<McpServerConfig> = mcpConfigManager.listServers()
+  fun mcpToolboxEnabled(): Boolean = mcpConfigManager.toolboxEnabled()
+  fun mcpConfigurationIssue(): String? = mcpConfigManager.configurationIssue()
+  fun hasMcpBearerToken(id: String): Boolean = try { SecureCredentialStore.hasMcpBearerToken(context, id) } catch (_: Throwable) { false }
+
+  fun setMcpToolboxEnabled(enabled: Boolean): PluginCommandResult = try {
+    mcpConfigManager.setToolboxEnabled(enabled)
+    mcpConfigManager.ensureRuntimePatch()
+    PluginCommandResult(true, 0, if (enabled) "已启用内置 mobile_tools MCP。" else "已关闭内置 mobile_tools MCP。")
+  } catch (t: Throwable) {
+    PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
+  }
+
+  fun saveMcpServer(server: McpServerConfig, bearerToken: String? = null): PluginCommandResult = try {
+    if (!bearerToken.isNullOrBlank()) SecureCredentialStore.saveMcpBearerToken(context, server.id, bearerToken)
+    mcpConfigManager.upsert(server)
+    if (!server.bearerAuth) SecureCredentialStore.clearMcpBearerToken(context, server.id)
+    mcpConfigManager.ensureRuntimePatch()
+    PluginCommandResult(true, 0, "已保存 MCP：" + server.serverName)
+  } catch (t: Throwable) {
+    PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
+  }
+
+  fun setMcpServerEnabled(id: String, enabled: Boolean): PluginCommandResult = try {
+    mcpConfigManager.setServerEnabled(id, enabled)
+    mcpConfigManager.ensureRuntimePatch()
+    PluginCommandResult(true, 0, if (enabled) "MCP 已启用" else "MCP 已停用")
+  } catch (t: Throwable) {
+    PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
+  }
+
+  fun removeMcpServer(id: String): PluginCommandResult = try {
+    mcpConfigManager.remove(id)
+    SecureCredentialStore.clearMcpBearerToken(context, id)
+    mcpConfigManager.ensureRuntimePatch()
+    PluginCommandResult(true, 0, "MCP 已删除")
+  } catch (t: Throwable) {
+    PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
   }
 
   private fun compatibilityHint(text: String): String? = when {
@@ -673,9 +715,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
       ensurePluginWorkspaceCompat("web")
+      val mcpPatch = mcpConfigManager.ensureRuntimePatch()
       val args = arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
-        "web", "--port", port.toString(), "--no-open",
+        "web", "--patch", mcpPatch.absolutePath, "--port", port.toString(), "--no-open",
       )
       engineLogFile.parentFile?.mkdirs()
       engineLogFile.writeText("")
@@ -804,6 +847,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       env["GIT_SSH_VARIANT"] = "ssh"
       env["GIT_SSH_COMMAND"] = sshCommand(batchMode = true)
     }
+    env.putAll(mcpConfigManager.secretEnvironment())
     return env
   }
 
@@ -1654,9 +1698,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
     return try {
       profileCheckLogFile.writeText("")
+      val mcpPatch = mcpConfigManager.ensureRuntimePatch()
       val args = arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
-        "--profile", profile, "--dump-config",
+        "--profile", profile, "--patch", mcpPatch.absolutePath, "--dump-config",
       )
       val process = startWithArgsToFile(args, engineEnv(preloadBin), profileCheckLogFile)
       val finished = process.waitFor(45, TimeUnit.SECONDS)
