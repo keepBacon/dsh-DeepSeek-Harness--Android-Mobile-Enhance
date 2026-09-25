@@ -9,6 +9,124 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { stripTypeScriptTypes } from 'node:module'
+
+const STRIP_WRAP = { prefix: 'async function __dsh_program__() {\n', suffix: '\n}' }
+
+function unwrapAndroidRunCodeFence(program) {
+  const source = String(program)
+  const match = /^\s*```(?:ts|typescript|js|javascript)?[ \t]*\r?\n([\s\S]*?)\r?\n```\s*$/i.exec(source)
+  return match ? match[1] : source
+}
+
+function androidBacktickEscaped(source, index) {
+  let slashes = 0
+  for (let i = index - 1; i >= 0 && source[i] === '\\'; i--) slashes++
+  return slashes % 2 === 1
+}
+
+function androidStripCandidate(program) {
+  const stripped = stripTypeScriptTypes(STRIP_WRAP.prefix + program + STRIP_WRAP.suffix)
+  return stripped.slice(STRIP_WRAP.prefix.length, stripped.length - STRIP_WRAP.suffix.length)
+}
+
+function repairAndroidMarkdownTemplateLiteral(program) {
+  if (program.length > 1024 * 1024) return program
+  const anchor = /(?:\b(?:content|text|body|plan|prompt|markdown|message|patch|html|xml|sql|script|data)\s*:\s*|\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*)`/g
+  let found = 0
+  for (let match; (match = anchor.exec(program)) !== null && found < 16;) {
+    found++
+    const open = match.index + match[0].lastIndexOf('`')
+    const ticks = []
+    for (let i = open + 1; i < program.length && ticks.length < 128; i++) {
+      if (program[i] === '`' && !androidBacktickEscaped(program, i)) ticks.push(i)
+    }
+    if (ticks.length < 3) continue
+    for (let k = 2; k < ticks.length; k++) {
+      const close = ticks[k]
+      const tail = program.slice(close + 1).match(/^\s*/)?.[0].length ?? 0
+      const next = program[close + 1 + tail] ?? ''
+      if (next && !',;)}].'.includes(next)) continue
+      const span = program.slice(open + 1, close)
+      if (span.length < 80 && !span.includes('\n')) continue
+      const interior = new Set(ticks.slice(0, k))
+      let candidate = ''
+      for (let i = 0; i < program.length; i++) {
+        if (interior.has(i)) candidate += '\\'
+        candidate += program[i]
+      }
+      try {
+        androidStripCandidate(candidate)
+        return candidate
+      } catch {}
+    }
+  }
+  return program
+}
+
+function formatAndroidRunCodeSyntaxError(error, program) {
+  const raw = error instanceof Error ? error.message : String(error)
+  const message = raw.length > 3500 ? raw.slice(0, 3500) + '…' : raw
+  const location = /\[(\d+):(\d+)\]/.exec(raw)
+  let excerpt = ''
+  if (location) {
+    const bodyLine = Math.max(1, Number(location[1]) - 1)
+    const column = Number(location[2])
+    const lines = String(program).split(/\r?\n/)
+    const start = Math.max(0, bodyLine - 3)
+    const end = Math.min(lines.length, bodyLine + 2)
+    const shown = []
+    for (let i = start; i < end; i++) shown.push(`${i + 1} | ${lines[i]}`)
+    excerpt = `\nProgram location: line ${bodyLine}, column ${column}\n${shown.join('\n')}`
+  }
+  return `${message}${excerpt}\nDSH Android syntax guard: run_code accepts TypeScript source, not Markdown. Do not wrap Markdown, code fences, HTML, JSON, shell scripts, or arbitrary long text in JavaScript backtick template literals; embedded backticks can terminate the literal and cause Expression expected. Keep the program small and pass text with JSON-safe quoted strings or content-oriented tool calls.`
+}
+
+function androidStripRunCodeProgram(program) {
+  const source = unwrapAndroidRunCodeFence(program)
+  try {
+    return androidStripCandidate(source)
+  } catch (firstError) {
+    const repaired = repairAndroidMarkdownTemplateLiteral(source)
+    if (repaired !== source) {
+      try { return androidStripCandidate(repaired) } catch {}
+    }
+    throw new SyntaxError(formatAndroidRunCodeSyntaxError(firstError, source))
+  }
+}
+
+function runAndroidCodeModeCompatSelfTest() {
+  const valid = 'const value: number = 7; return value'
+  if (!androidStripRunCodeProgram(valid).includes('return value')) throw new Error('valid TypeScript strip failed')
+  const fenced = ['```ts', 'const value: number = 9; return value', '```'].join('\n')
+  if (!androidStripRunCodeProgram(fenced).includes('return value')) throw new Error('fenced TypeScript unwrap failed')
+  const broken = [
+    'const payload = { plan: `# Build plan',
+    'Use `*.xmf` and `mesh.h` in the generated Markdown.',
+    '` };',
+    'return payload.plan;',
+  ].join('\n')
+  let rejected = false
+  try { androidStripCandidate(broken) } catch { rejected = true }
+  if (!rejected) throw new Error('broken Markdown template unexpectedly parsed')
+  const repaired = androidStripRunCodeProgram(broken)
+  if (!repaired.includes('\\`*.xmf\\`')) throw new Error('Markdown backtick repair did not run')
+  const safe = 'const a = `x`; const b = `y`; return a + b'
+  if (!androidStripRunCodeProgram(safe).includes('const a')) throw new Error('valid template literals changed')
+  try {
+    androidStripRunCodeProgram('const value = { a: 1 b: 2 }; return value')
+    throw new Error('invalid object unexpectedly parsed')
+  } catch (error) {
+    if (!String(error).includes('syntax guard')) throw error
+  }
+  console.log('[DSH] Android run_code TypeScript compatibility self-test: OK')
+}
+
+if (process.argv[2] === '--self-test') {
+  runAndroidCodeModeCompatSelfTest()
+  process.exit(0)
+}
 
 const prefix = path.resolve(process.argv[2] || '')
 if (!prefix || prefix === path.resolve('.')) {
@@ -37,6 +155,7 @@ const requireBuiltinMandatory = versionAtLeast(targetVersion, '0.1.6-alpha.2')
 const androidStableStorageMandatory = versionAtLeast(targetVersion, '0.1.5-rc.1')
 const androidFlockMandatory = versionAtLeast(targetVersion, '0.1.5-rc.1')
 const androidPermissionPresetGuardMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2')
+const androidCodeModeCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2') && !versionAtLeast(targetVersion, '0.1.6-alpha.0')
 const warn = (msg) => console.error(`[DSH Android compat] WARN: ${msg}`)
 const info = (name, status, file = '') => report.push({ name, status, file: file ? path.relative(prefix, file) : '' })
 
@@ -79,6 +198,8 @@ const wanted = new Set([
   '@deepseek-ai/dsh-permission-presets',
   '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-client-modules',
+  '@deepseek-ai/dsh-code-runtime-worker-thread',
+  '@deepseek-ai/dsh-tools',
 ])
 const dirs = packageDirsByName(wanted)
 const byName = new Map()
@@ -115,6 +236,83 @@ function eachPackage(name, relFile, fn, { mandatory = false, requiredIfPresent =
     throw new Error(`required Android compatibility patch incomplete: ${name} (${ok}/${packages.length})`)
   }
 }
+
+
+function checkPatchedJavaScript(file) {
+  const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' })
+  if (result.status !== 0) throw new Error(`patched JavaScript failed syntax check: ${file}\n${result.stderr || result.stdout}`)
+}
+
+function patchCodeRuntimeWorker(indexFile) {
+  let txt = read(indexFile)
+  const marker = 'DSH Android compat: resilient run_code TypeScript syntax'
+  if (txt.includes(marker)) return 'already'
+  if (!txt.includes('stripTypeScriptTypes') || !txt.includes('request.program')) {
+    warn(`code-runtime worker strip target changed: ${indexFile}`)
+    return 'anchor-missing'
+  }
+  const insertionAnchor = /function\s+waitForPipeDrain\s*\(/
+  const insertionMatches = txt.match(new RegExp(insertionAnchor.source, 'g')) ?? []
+  if (insertionMatches.length !== 1) {
+    warn(`code-runtime worker helper anchor changed (${insertionMatches.length}): ${indexFile}`)
+    return 'anchor-missing'
+  }
+  const helpers = [
+    `// ${marker}.`,
+    unwrapAndroidRunCodeFence.toString(),
+    androidBacktickEscaped.toString(),
+    repairAndroidMarkdownTemplateLiteral.toString(),
+    formatAndroidRunCodeSyntaxError.toString(),
+    `function androidStripCandidate(program) {\n  const stripped = stripTypeScriptTypes(STRIP_WRAP.prefix + program + STRIP_WRAP.suffix);\n  return stripped.slice(STRIP_WRAP.prefix.length, stripped.length - STRIP_WRAP.suffix.length);\n}`,
+    `function androidStripRunCodeProgram(program) {\n  const source = unwrapAndroidRunCodeFence(program);\n  try { return androidStripCandidate(source); } catch (firstError) {\n    const repaired = repairAndroidMarkdownTemplateLiteral(source);\n    if (repaired !== source) { try { return androidStripCandidate(repaired); } catch {} }\n    throw new SyntaxError(formatAndroidRunCodeSyntaxError(firstError, source));\n  }\n}`,
+  ].join('\n\n') + '\n\n'
+  txt = txt.replace(insertionAnchor, helpers + insertionMatches[0])
+
+  const stripBlock = /const\s+stripped\s*=\s*stripTypeScriptTypes\(\s*STRIP_WRAP\.prefix\s*\+\s*request\.program\s*\+\s*STRIP_WRAP\.suffix\s*\)\s*;?\s*code\s*=\s*stripped\.slice\(\s*STRIP_WRAP\.prefix\.length\s*,\s*stripped\.length\s*-\s*STRIP_WRAP\.suffix\.length\s*\)\s*;?/
+  const stripMatches = txt.match(new RegExp(stripBlock.source, 'g')) ?? []
+  if (stripMatches.length !== 1) {
+    warn(`code-runtime worker strip block changed (${stripMatches.length}): ${indexFile}`)
+    return 'anchor-missing'
+  }
+  txt = txt.replace(stripBlock, 'code = androidStripRunCodeProgram(request.program);')
+  write(indexFile, txt)
+  checkPatchedJavaScript(indexFile)
+  return 'patched'
+}
+
+function patchCodeModeGuidance(indexFile) {
+  const packageDir = path.resolve(path.dirname(indexFile), '..')
+  const files = walkJavaScriptFiles(path.join(packageDir, 'lib'))
+  const guidance = ' Keep run_code programs small. Never embed Markdown, code fences, HTML, JSON, shell scripts, or arbitrary user text inside JavaScript template literals; those payloads may contain backticks and make the TypeScript invalid. Prefer JSON-safe quoted strings or a content-oriented tool call.'
+  let changed = 0
+  let already = false
+  for (const file of files) {
+    let txt = read(file)
+    if (!txt) continue
+    if (txt.includes('Never embed Markdown, code fences, HTML, JSON, shell scripts')) { already = true; continue }
+    const anchor = 'Tool arguments must be lossless JSON.'
+    if (!txt.includes(anchor)) continue
+    txt = txt.replace(anchor, anchor + guidance)
+    write(file, txt)
+    checkPatchedJavaScript(file)
+    changed++
+  }
+  if (changed > 0) return 'patched'
+  if (already) return 'already'
+  warn(`dsh-tools Code Mode guidance anchor changed under: ${packageDir}`)
+  return 'anchor-missing'
+}
+
+// Android-specific hardening for Code Mode syntax failures. The runtime first
+// accepts accidental outer Markdown fences, then repairs only the narrow,
+// parser-verified case where a long text/template literal contains Markdown
+// backticks. All other syntax failures stay failures, but now include a useful
+// location/excerpt and an explicit recovery instruction instead of the bare
+// "Expression expected" loop.
+eachPackage('@deepseek-ai/dsh-code-runtime-worker-thread', 'lib/index.js', patchCodeRuntimeWorker, {
+  requiredIfPresent: androidCodeModeCompatMandatory,
+})
+eachPackage('@deepseek-ai/dsh-tools', 'lib/index.js', patchCodeModeGuidance)
 
 // StepFun Plan can emit an in-band EOF diagnostic after already streaming
 // usable assistant content. DSH 0.1.5-rc.2 classifies every such pi-ai error as
