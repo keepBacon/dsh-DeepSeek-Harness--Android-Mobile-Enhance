@@ -26,7 +26,9 @@ jobs:
           bash -n build-termux.sh
           bash -n scripts/embed-termux-tools.sh
           node --check scripts/dsh-mobile-toolbox-mcp.mjs
-          bash scripts/check-remaining-fixes.sh
+          grep -Fq 'class McpConfigManager(' app/src/main/java/com/dshmobile/shell/McpConfigManager.kt
+          grep -Fq 'private fun showMcpManager()' app/src/main/java/com/dshmobile/shell/MainActivity.kt
+          grep -Fq 'install_mobile_mcp_toolbox()' build-termux.sh
       - name: Kotlin compile
         run: |
           chmod +x gradlew
