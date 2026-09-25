@@ -198,7 +198,12 @@ EOF_TERMUX_WRAPPER
   # Keep package-owned files under usr/bin intact so apt/pkg upgrades can
   # replace them normally. DSH prepends this wrapper directory to PATH, which
   # keeps relocation/proot entry stable even after package-manager self-updates.
+  # Any tool in this list is always launched through termux-run. This gives it
+  # the legacy /data/data/com.termux/files/usr view that upstream Termux
+  # packages were compiled/configured for, rather than hoping that every
+  # binary is fully relocatable when copied into the app-private runtime.
   for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3 \
+    openssl file curl jq \
     ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip; do
     rm -f "$stage/usr/libexec/dsh/wrappers/$cmd"
     ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$cmd"
@@ -232,9 +237,20 @@ validate_termux_tool_runtime() {
       return 7
     fi
   done
-  "${common_env[@]}" "$stage/usr/bin/openssl" version >/dev/null 2>&1 || {
-    echo "[DSH] Embedded OpenSSL smoke test failed."; return 7;
-  }
+  local openssl_log="$CACHE_DIR/embedded-openssl-smoke.log"
+  if ! "${common_env[@]}" "$wrappers/openssl" version >"$openssl_log" 2>&1; then
+    echo "[DSH] Embedded OpenSSL smoke test failed through relocation wrapper." >&2
+    echo "[DSH] This usually means the staged Termux payload or one of its shared libraries/config paths is incomplete." >&2
+    sed -n '1,120p' "$openssl_log" >&2 || true
+    return 7
+  fi
+
+  local file_log="$CACHE_DIR/embedded-file-smoke.log"
+  if ! "${common_env[@]}" "$wrappers/file" --version >"$file_log" 2>&1; then
+    echo "[DSH] Embedded file(1) smoke test failed through relocation wrapper." >&2
+    sed -n '1,120p' "$file_log" >&2 || true
+    return 7
+  fi
 
   local apt_log="$CACHE_DIR/embedded-apt-smoke.log"
   if ! "${common_env[@]}" "$wrappers/apt" --version >"$apt_log" 2>&1; then
