@@ -969,9 +969,11 @@ validate_dsh_core_plugin_tree() {
   local smoke_home="$CACHE_DIR/core-plugin-tree-smoke-home"
   local smoke_log="$CACHE_DIR/core-plugin-tree-smoke.log"
   local smoke_validator="$ROOT/scripts/validate-web-runtime-smoke.mjs"
+  local mcp_patch="$CACHE_DIR/core-plugin-tree-mcp.patch.yml"
   local preload=""
 
   [ -f "$smoke_validator" ] || { echo "[DSH] Missing Web runtime smoke validator: $smoke_validator"; exit 8; }
+  [ -f "$stage/usr/libexec/dsh-mobile/toolbox-mcp.mjs" ] || { echo "[DSH] Missing mobile MCP toolbox"; exit 8; }
 
   rm -rf "$smoke_home"
   mkdir -p "$smoke_home/tmp"
@@ -984,8 +986,26 @@ validate_dsh_core_plugin_tree() {
   mkdir -p "$smoke_home/tmp"
   : > "$smoke_log"
   [ -f "$stage/usr/lib/libtermux-exec-ld-preload.so" ] && preload="$stage/usr/lib/libtermux-exec-ld-preload.so"
+  cat > "$mcp_patch" <<EOF_MCP
+- insert:
+    - id: android-mcp-mobile-tools-smoke
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: mobile_tools
+        transport: stdio
+        command: "$stage/usr/bin/node"
+        args: ["$stage/usr/libexec/dsh-mobile/toolbox-mcp.mjs"]
+        env:
+          TERMUX__PREFIX: "$stage/usr"
+          PREFIX: "$stage/usr"
+          LD_LIBRARY_PATH: "$stage/usr/lib"
+          PATH: "$stage/usr/bin:/system/bin"
+        cwd: "$smoke_home"
+        toolCallTimeoutMs: 10000
+        failOnStartupError: true
+EOF_MCP
 
-  echo '[DSH] Validating complete Cordis/core plugin tree with a real web boot…'
+  echo '[DSH] Validating complete Cordis/core plugin tree + MCP toolbox with a real web boot…'
   env \
     PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" \
     LD_LIBRARY_PATH="$stage/usr/lib" \
@@ -1005,7 +1025,7 @@ validate_dsh_core_plugin_tree() {
     DSH_ANDROID_STANDALONE=1 \
     "$stage/usr/bin/node" --expose-internals \
       "$stage/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-      web --port 0 --no-open >"$smoke_log" 2>&1 &
+      web --patch "$mcp_patch" --port 0 --no-open >"$smoke_log" 2>&1 &
   local pid=$!
   local ok=0
   local client_ok=0
@@ -1039,8 +1059,8 @@ validate_dsh_core_plugin_tree() {
     exit 8
   fi
 
-  echo '[DSH] Core plugin tree: OK (real web boot)'
-  rm -rf "$smoke_home"
+  echo '[DSH] Core plugin tree + MCP toolbox: OK (real web boot)'
+  rm -rf "$smoke_home" "$mcp_patch"
 }
 
 refresh_dsh_runtime() {
