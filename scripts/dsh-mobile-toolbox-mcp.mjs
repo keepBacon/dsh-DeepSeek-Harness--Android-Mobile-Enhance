@@ -191,6 +191,44 @@ function metadataHeader(data,fileSize){
  return{magic:'0x'+magic.toString(16),magicOk:magic===0xfab11baf,version,sections}
 }
 
+
+const RUNTIME_SNAPSHOTS=new Map()
+let SNAPSHOT_SEQ=0
+function snapshotGet(id){const s=RUNTIME_SNAPSHOTS.get(text(id,'snapshotId',128));if(!s)throw new Error('unknown runtime snapshot');return s}
+function trimSnapshotStore(){while(RUNTIME_SNAPSHOTS.size>32){const first=RUNTIME_SNAPSHOTS.keys().next().value;RUNTIME_SNAPSHOTS.delete(first)}}
+async function procFds(pid,maxEntries=1000){
+ const dir=procFile(pid,'fd'),entries=await readdir(dir,{withFileTypes:true}),fds=[]
+ for(const e of entries){if(fds.length>=maxEntries)break;if(!/^\d+$/.test(e.name))continue;let target=null;try{target=await readlink(resolve(dir,e.name))}catch{continue};const socket=target.match(/^socket:\[(\d+)\]$/);fds.push({fd:Number(e.name),target,socketInode:socket?socket[1]:null})}
+ fds.sort((a,b)=>a.fd-b.fd);return fds
+}
+function decodeIpv4Hex(hex){if(!/^[0-9A-Fa-f]{8}$/.test(hex))return null;const b=[];for(let i=0;i<8;i+=2)b.push(parseInt(hex.slice(i,i+2),16));return b.reverse().join('.')}
+function parseNetEndpoint(raw,family){const i=raw.lastIndexOf(':');if(i<0)return{raw};const addressHex=raw.slice(0,i),portHex=raw.slice(i+1),port=parseInt(portHex,16);if(family==='ipv4')return{raw,address:decodeIpv4Hex(addressHex),port};return{raw,addressHex:addressHex.toLowerCase(),port}}
+async function procNetRows(pid,maxEntries=5000){
+ const specs=[['tcp','ipv4'],['tcp6','ipv6'],['udp','ipv4'],['udp6','ipv6']],rows=[]
+ for(const [proto,family] of specs){const raw=await optionalRead(procFile(pid,'net/'+proto));if(raw==null)continue;for(const line of raw.split(/\r?\n/).slice(1)){if(rows.length>=maxEntries)break;const cols=line.trim().split(/\s+/);if(cols.length<10)continue;rows.push({protocol:proto,family,local:parseNetEndpoint(cols[1],family),remote:parseNetEndpoint(cols[2],family),state:cols[3],uid:Number(cols[7]||0),inode:cols[9]||null})}}
+ return rows
+}
+async function procNetwork(pid,maxEntries=1000){
+ const fds=await procFds(pid,maxEntries),wanted=new Set(fds.map(x=>x.socketInode).filter(Boolean)),rows=await procNetRows(pid,Math.max(maxEntries*4,1000)),socketFds=new Map()
+ for(const fd of fds){if(fd.socketInode){const list=socketFds.get(fd.socketInode)||[];list.push(fd.fd);socketFds.set(fd.socketInode,list)}}
+ return rows.filter(x=>x.inode&&wanted.has(x.inode)).slice(0,maxEntries).map(x=>({...x,fds:socketFds.get(x.inode)||[]}))
+}
+async function captureRuntimeSnapshot(pid,maxEntries=1000){
+ const status=parseProcStatus(await readFile(procFile(pid,'status'),'utf8')),maps=await mapsFor(pid),task=await readdir(procFile(pid,'task'),{withFileTypes:true}),threads=[]
+ for(const e of task){if(threads.length>=maxEntries)break;if(!/^\d+$/.test(e.name))continue;const raw=await optionalRead(procFile(pid,'task/'+e.name+'/status'));if(raw==null)continue;const s=parseProcStatus(raw);threads.push({tid:Number(e.name),name:s.Name||'',state:s.State||''})}
+ const fds=await procFds(pid,maxEntries),network=await procNetwork(pid,maxEntries),groups=new Map()
+ for(const m of maps){if(!m.path||m.path.startsWith('['))continue;const g=groups.get(m.path)||{path:m.path,base:m.start,end:m.end};if(hexBig(m.start)<hexBig(g.base))g.base=m.start;if(hexBig(m.end)>hexBig(g.end))g.end=m.end;groups.set(m.path,g)}
+ const id='snap-'+Date.now().toString(36)+'-'+(++SNAPSHOT_SEQ).toString(36),snapshot={id,timestamp:new Date().toISOString(),pid,name:status.Name||'',uid:Number((status.Uid||'0').split(/\s+/)[0]),modules:[...groups.values()],threads,fds,network}
+ RUNTIME_SNAPSHOTS.set(id,snapshot);trimSnapshotStore();return snapshot
+}
+function diffByKey(before,after,keyFn){const a=new Map(before.map(x=>[keyFn(x),x])),b=new Map(after.map(x=>[keyFn(x),x]));return{added:[...b].filter(([k])=>!a.has(k)).map(([,v])=>v),removed:[...a].filter(([k])=>!b.has(k)).map(([,v])=>v)}}
+function adbEndpoint(v){const s=text(v,'endpoint',1024);if(!s||/^-/ .test(s)||/\s/.test(s)||!/:\d{1,5}$/.test(s))throw new Error('endpoint must be host:port without whitespace');return s}
+function adbPackage(v){const s=text(v,'package',512);if(!/^[A-Za-z][A-Za-z0-9_.]*$/.test(s))throw new Error('invalid Android package name');return s}
+function adbPrefix(serial){const args=[];if(serial!=null)args.push('-s',text(serial,'serial',1024));return args}
+async function adbRun(args,{serial,timeoutMs=15000,maxOutputBytes=MAX_COMMAND_OUTPUT}={}){
+ const argv=[...adbPrefix(serial),...args],r=await runProcess(toolWrapped('adb'),argv,{timeoutMs,maxOutputBytes});if(r.exitCode!==0)throw new Error('adb failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));return r
+}
+
 const FRIDA_SESSIONS=new Map()
 let FRIDA_SEQ=0
 function fridaSession(id){const s=FRIDA_SESSIONS.get(text(id,'sessionId',128));if(!s||s.closed)throw new Error('unknown or closed Frida session');return s}
@@ -271,6 +309,58 @@ async function call(name,a={}){
   }
   case 'apk_inspect': {
    const f=await checkedPath(a.path),badging=await runStrict('aapt2',['dump','badging',f.path],{timeoutMs:15000,maxOutputBytes:MAX_COMMAND_OUTPUT}),meta=parseBadging(badging);let manifestTree='';try{manifestTree=await runStrict('aapt2',['dump','xmltree',f.path,'--file','AndroidManifest.xml'],{timeoutMs:15000,maxOutputBytes:MAX_COMMAND_OUTPUT})}catch(error){manifestTree='[xmltree unavailable] '+error.message}let archive='';try{archive=await runStrict('unzip',['-Z1',f.path],{timeoutMs:10000,maxOutputBytes:MAX_COMMAND_OUTPUT})}catch{}const entries=archive.split(/\r?\n/).filter(Boolean),abis=[...new Set(entries.map(x=>x.match(/^lib\/([^/]+)\//)?.[1]).filter(Boolean))],signatureFiles=entries.filter(x=>/^META-INF\/.*\.(?:RSA|DSA|EC|SF)$/i.test(x)).slice(0,100);return{...f,...meta,abis,signatureFiles,archiveEntries:entries.length,manifestTree:trimLines(manifestTree,500),badging:trimLines(badging,500)}
+  }
+
+
+  case 'no_root_capabilities': {
+   let selfMaps=false,selfFd=false,selfNet=false;try{await readFile('/proc/self/maps','utf8');selfMaps=true}catch{};try{await readdir('/proc/self/fd');selfFd=true}catch{};try{await readFile('/proc/self/net/tcp','utf8');selfNet=true}catch{}
+   const adbPath=toolWrapped('adb'),adbAvailable=await executableAvailable(adbPath);let adbProbe=null;if(bool(a.probeAdb,false)&&adbAvailable){const q=await runProcess(adbPath,['devices','-l'],{timeoutMs:5000,maxOutputBytes:65536});adbProbe={ok:q.exitCode===0,output:q.stdout.trim(),stderr:q.stderr.trim()||undefined}}
+   return{mode:'no-root-first',uid:typeof process.getuid==='function'?process.getuid():null,root:false,direct:{selfProcMaps:selfMaps,selfFd,selfNetworkTables:selfNet,childStrace:await executableAvailable(toolDirect('strace'))},wirelessAdb:{clientAvailable:adbAvailable,probe:adbProbe,requiresUserAction:'Enable Android Developer options > Wireless debugging, pair this app client, then connect.'},restrictedWithoutAuthorization:['other-app /proc details','ptrace attach','other-app memory','debuggerd on non-debuggable targets','Frida attach without a reachable authorized backend']}
+  }
+  case 'self_runtime_snapshot': {
+   const snap=await captureRuntimeSnapshot(process.pid,int(a.maxEntries,1000,1,5000));return{...snap,self:true}
+  }
+  case 'runtime_snapshot': {
+   const snap=await captureRuntimeSnapshot(pidValue(a.pid),int(a.maxEntries,1000,1,5000));return snap
+  }
+  case 'runtime_diff': {
+   const before=snapshotGet(a.before),after=snapshotGet(a.after);if(before.pid!==after.pid)throw new Error('snapshots belong to different PIDs')
+   return{before:before.id,after:after.id,pid:before.pid,durationMs:Math.max(0,new Date(after.timestamp)-new Date(before.timestamp)),modules:diffByKey(before.modules,after.modules,x=>x.path+'@'+x.base),threads:diffByKey(before.threads,after.threads,x=>String(x.tid)),fds:diffByKey(before.fds,after.fds,x=>String(x.fd)+':'+x.target),network:diffByKey(before.network,after.network,x=>x.protocol+':'+x.inode+':'+x.local.raw+':'+x.remote.raw)}
+  }
+  case 'process_fds': {
+   const pid=pidValue(a.pid),fds=await procFds(pid,int(a.maxEntries,1000,1,5000));return{pid,fds,count:fds.length}
+  }
+  case 'process_network': {
+   const pid=pidValue(a.pid),connections=await procNetwork(pid,int(a.maxEntries,1000,1,5000));return{pid,connections,count:connections.length}
+  }
+  case 'child_strace': {
+   const command=text(a.command,'command',4096),args=Array.isArray(a.args)?a.args:[],cwd=a.cwd?(await checkedDir(a.cwd)).path:process.cwd(),duration=int(a.durationMs,5000,100,30000),cats=Array.isArray(a.categories)&&a.categories.length?a.categories:['file','network','memory','process'],trace=cats.map(x=>'%'+x).join(','),argv=['-f','-tt','-T','-s','256','-e','trace='+trace,'--',command,...args],r=await runProcess(toolDirect('strace'),argv,{cwd,timeoutMs:duration,maxOutputBytes:MAX_COMMAND_OUTPUT});return{command,args,cwd,durationMs:duration,categories:cats,...trimLines((r.stderr||r.stdout),int(a.maxLines,1200,1,4000)),endedByTimeout:r.timedOut,exitCode:r.exitCode}
+  }
+  case 'adb_devices': {
+   const r=await adbRun(['devices','-l'],{timeoutMs:8000,maxOutputBytes:65536}),devices=[];for(const line of r.stdout.split(/\r?\n/).slice(1)){if(!line.trim())continue;const parts=line.trim().split(/\s+/),serial=parts.shift(),state=parts.shift();devices.push({serial,state,details:parts})}return{devices}
+  }
+  case 'adb_pair': {
+   const endpoint=adbEndpoint(a.endpoint),code=text(a.code,'code',64);if(!/^\d{6}$/.test(code))throw new Error('pairing code must be 6 digits');const r=await runProcess(toolWrapped('adb'),['pair',endpoint,code],{timeoutMs:15000,maxOutputBytes:65536});if(r.exitCode!==0)throw new Error('adb pair failed: '+(r.stderr||r.stdout).replace(code,'******').slice(0,MAX_OUTPUT));return{endpoint,paired:true,output:r.stdout.replace(code,'******').trim()}
+  }
+  case 'adb_connect': {
+   const endpoint=adbEndpoint(a.endpoint),r=await adbRun(['connect',endpoint],{timeoutMs:12000,maxOutputBytes:65536});return{endpoint,connected:/connected to|already connected to/i.test(r.stdout+r.stderr),output:(r.stdout+r.stderr).trim()}
+  }
+  case 'adb_package_info': {
+   const pkg=adbPackage(a.package),serial=a.serial,[paths,dump,pid]=await Promise.all([adbRun(['shell','pm','path',pkg],{serial,timeoutMs:8000,maxOutputBytes:65536}),adbRun(['shell','dumpsys','package',pkg],{serial,timeoutMs:12000,maxOutputBytes:MAX_COMMAND_OUTPUT}),adbRun(['shell','pidof',pkg],{serial,timeoutMs:5000,maxOutputBytes:65536}).catch(()=>({stdout:''}))]),raw=dump.stdout,flags=raw.match(/\bflags=\[([^\]]*)\]/)?.[1]||''
+   return{package:pkg,serial:serial||null,pids:String(pid.stdout||'').trim().split(/\s+/).filter(x=>/^\d+$/.test(x)).map(Number),apkPaths:paths.stdout.split(/\r?\n/).map(x=>x.replace(/^package:/,'').trim()).filter(Boolean),uid:Number(raw.match(/\buserId=(\d+)/)?.[1]||0)||null,dataDir:raw.match(/\bdataDir=([^\s]+)/)?.[1]||null,primaryCpuAbi:raw.match(/\bprimaryCpuAbi=([^\s]+)/)?.[1]||null,debuggable:/\bDEBUGGABLE\b/.test(flags)}
+  }
+  case 'adb_process_info': {
+   const serial=a.serial,probe=await adbRun(['shell','ps','-A','-o','USER,PID,PPID,NAME,ARGS'],{serial,timeoutMs:8000,maxOutputBytes:MAX_COMMAND_OUTPUT}).catch(async()=>await adbRun(['shell','ps','-A'],{serial,timeoutMs:8000,maxOutputBytes:MAX_COMMAND_OUTPUT})),needle=a.package!=null?adbPackage(a.package):null,pid=a.pid==null?null:pidValue(a.pid),limit=int(a.maxLines,500,1,2000),lines=probe.stdout.split(/\r?\n/),header=lines.shift()||'',matches=lines.filter(line=>(pid==null||new RegExp('(^|\\s)'+pid+'(\\s|$)').test(line))&&(needle==null||line.includes(needle))).slice(0,limit);return{serial:serial||null,header,lines:matches,truncated:matches.length>=limit}
+  }
+  case 'adb_logcat': {
+   const serial=a.serial,limit=int(a.maxLines,1000,1,4000),args=['logcat','-d','-v','threadtime'];let pid=null;if(a.package!=null){const pkg=adbPackage(a.package),p=await adbRun(['shell','pidof',pkg],{serial,timeoutMs:5000,maxOutputBytes:65536});pid=p.stdout.trim().split(/\s+/).find(x=>/^\d+$/.test(x))||null;if(pid)args.push('--pid='+pid)}const r=await adbRun(args,{serial,timeoutMs:12000,maxOutputBytes:MAX_COMMAND_OUTPUT});return{serial:serial||null,pid,package:a.package||null,...trimLines(r.stdout,limit)}
+  }
+  case 'adb_jdwp_list': {
+   const r=await adbRun(['jdwp'],{serial:a.serial,timeoutMs:8000,maxOutputBytes:65536});return{serial:a.serial||null,pids:r.stdout.split(/\r?\n/).filter(x=>/^\d+$/.test(x)).map(Number)}
+  }
+  case 'adb_pull_apk': {
+   const pkg=adbPackage(a.package),serial=a.serial,dest=userPath(a.destination);await mkdir(dest,{recursive:true});const paths=await adbRun(['shell','pm','path',pkg],{serial,timeoutMs:8000,maxOutputBytes:65536}),remote=paths.stdout.split(/\r?\n/).map(x=>x.replace(/^package:/,'').trim()).filter(Boolean);if(!remote.length)throw new Error('package has no APK paths');const files=[]
+   for(const source of remote){const target=resolve(dest,basename(source));if(await existsPathForTool(target)&&!bool(a.overwrite,false))throw new Error('destination exists: '+target);const r=await adbRun(['pull',source,target],{serial,timeoutMs:60000,maxOutputBytes:MAX_COMMAND_OUTPUT});files.push({source,target,output:r.stdout.trim()})}return{package:pkg,serial:serial||null,destination:dest,files}
   }
 
   case 'reverse_capabilities': {
@@ -422,10 +512,12 @@ async function call(name,a={}){
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const [{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
 async function selfTest(){
  await sdk()
- const names=new Set(tools.map(x=>x.name));for(const name of ['fs_read','fs_list','fs_search','fs_write','fs_patch','command_run','git_status','git_diff','git_log','http_request','android_logcat','apk_inspect','process_list','process_info','process_maps','process_threads','module_list','memory_regions','memory_read','memory_search','syscall_trace','frida_processes','frida_attach','frida_spawn','frida_script','frida_trace','debug_session_start','debug_attach','debug_breakpoint_set','debug_continue','debug_registers','debug_backtrace','debug_memory_read','debug_session_close','binary_functions','binary_xrefs','jni_map_java_native','reverse_capabilities','package_process_info','native_backtrace','frida_detach','symbol_resolve','address_rebase','il2cpp_detect','il2cpp_metadata_info','il2cpp_find_class','il2cpp_find_method'])if(!names.has(name))throw new Error('missing tool '+name)
+ const names=new Set(tools.map(x=>x.name));for(const name of ['fs_read','fs_list','fs_search','fs_write','fs_patch','command_run','git_status','git_diff','git_log','http_request','android_logcat','apk_inspect','process_list','process_info','process_maps','process_threads','module_list','memory_regions','memory_read','memory_search','syscall_trace','frida_processes','frida_attach','frida_spawn','frida_script','frida_trace','debug_session_start','debug_attach','debug_breakpoint_set','debug_continue','debug_registers','debug_backtrace','debug_memory_read','debug_session_close','binary_functions','binary_xrefs','jni_map_java_native','no_root_capabilities','self_runtime_snapshot','runtime_snapshot','runtime_diff','process_fds','process_network','child_strace','adb_devices','adb_pair','adb_connect','adb_package_info','adb_process_info','adb_logcat','adb_jdwp_list','adb_pull_apk','reverse_capabilities','package_process_info','native_backtrace','frida_detach','symbol_resolve','address_rebase','il2cpp_detect','il2cpp_metadata_info','il2cpp_find_class','il2cpp_find_method'])if(!names.has(name))throw new Error('missing tool '+name)
  if((await call('protocol_decode',{data:'414243',encoding:'hex'})).utf8!=='ABC')throw new Error('decode self-test failed')
  const rebased=await call('address_rebase',{base:'0x1000',rva:'0x20'});if(rebased.runtimeAddress!=='0x1020')throw new Error('address_rebase self-test failed')
  const caps=await call('reverse_capabilities',{});if(!caps.proc?.maps)throw new Error('reverse_capabilities self-test failed')
+ const noRoot=await call('no_root_capabilities',{});if(!noRoot.direct?.selfProcMaps)throw new Error('no_root_capabilities self-test failed')
+ const snap1=await call('self_runtime_snapshot',{maxEntries:256}),snap2=await call('runtime_snapshot',{pid:process.pid,maxEntries:256}),diff=await call('runtime_diff',{before:snap1.id,after:snap2.id});if(diff.pid!==process.pid)throw new Error('runtime snapshot self-test failed')
  for(const b of ['file','readelf','objdump','nm','strings','rg','git'])await runStrict(b,['--version'])
  await runStrict('openssl',['version'])
  await runStrict('aapt2',['version'])
@@ -447,5 +539,5 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.1.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments||{});return{content:[{type:'text',text:JSON.stringify(value,null,2)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
+async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments||{});return{content:[{type:'text',text:JSON.stringify(value,null,2)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
