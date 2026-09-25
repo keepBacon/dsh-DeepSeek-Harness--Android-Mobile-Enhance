@@ -91,9 +91,11 @@ validate_staged_termux_payload_contract() {
   require_exact_tool gdbserver gdb
   require_exact_tool strace strace
   require_exact_tool rizin rizin
-  require_exact_tool frida frida
-  require_exact_tool frida-ps frida
-  require_exact_tool frida-trace frida
+  # Termux splits Frida: the server is in "frida", while Python CLI tools
+  # (frida/frida-ps/frida-trace) are in the "frida-python" subpackage.
+  require_exact_tool frida frida-python
+  require_exact_tool frida-ps frida-python
+  require_exact_tool frida-trace frida-python
   require_exact_tool frida-server frida
   for cmd in readelf objdump nm strings; do
     require_binutils_tool "$cmd"
@@ -189,6 +191,133 @@ EOF_DSH_ROOT_SOURCE
   fi
 }
 
+
+dsh_host_tool_owner() {
+  local cmd="$1"
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local path="$host_prefix/bin/$cmd"
+  [ -e "$path" ] || return 1
+  dpkg-query -S "$path" 2>/dev/null     | head -n 1     | sed -E 's/: .*//; s/:([^:]*)$//'
+}
+
+dsh_validate_host_tool_contract() {
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local fail=0 cmd owner
+
+  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server; do
+    if [ ! -x "$host_prefix/bin/$cmd" ]; then
+      echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd" >&2
+      fail=1
+      continue
+    fi
+    owner="$(dsh_host_tool_owner "$cmd" || true)"
+    [ -n "$owner" ] && echo "[DSH] Tool owner: $cmd <- $owner"
+  done
+
+  for cmd in readelf objdump nm strings; do
+    if [ ! -x "$host_prefix/bin/$cmd" ] && [ ! -x "$host_prefix/bin/g$cmd" ]; then
+      echo "[DSH] Host tool contract missing: $cmd/g$cmd" >&2
+      fail=1
+    fi
+  done
+
+  [ "$fail" -eq 0 ] || {
+    echo "[DSH] Host tool preflight failed before staging. No APK files were modified." >&2
+    return 7
+  }
+}
+
+dsh_required_tool_owner_packages() {
+  local cmd owner
+  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server; do
+    owner="$(dsh_host_tool_owner "$cmd" || true)"
+    [ -n "$owner" ] && printf '%s
+' "$owner"
+  done
+}
+
+dsh_copy_python_distribution_closure() {
+  local stage="$1"
+  shift
+  [ "$#" -gt 0 ] || return 0
+
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local host_python="$host_prefix/bin/python3"
+  local list="$CACHE_DIR/dsh-python-runtime-files.bin"
+  : > "$list"
+
+  "$host_python" - "$host_prefix" "$@" > "$list" <<'PY_DSH_DIST'
+import importlib.metadata as md
+import pathlib
+import re
+import sys
+
+prefix = pathlib.Path(sys.argv[1]).resolve()
+queue = list(sys.argv[2:])
+seen = set()
+files = []
+
+try:
+    from packaging.requirements import Requirement
+except Exception:
+    Requirement = None
+
+while queue:
+    name = queue.pop(0)
+    key = re.sub(r"[-_.]+", "-", name).lower()
+    if key in seen:
+        continue
+    seen.add(key)
+    try:
+        dist = md.distribution(name)
+    except md.PackageNotFoundError:
+        print(f"[DSH] Missing Python runtime distribution: {name}", file=sys.stderr)
+        sys.exit(7)
+
+    for item in dist.files or ():
+        try:
+            path = pathlib.Path(dist.locate_file(item)).resolve(strict=True)
+            path.relative_to(prefix)
+        except (OSError, ValueError):
+            continue
+        if path.is_file():
+            files.append(path)
+
+    for raw in dist.requires or ():
+        dep = None
+        if Requirement is not None:
+            try:
+                req = Requirement(raw)
+                if req.marker is not None and not req.marker.evaluate():
+                    continue
+                dep = req.name
+            except Exception:
+                pass
+        if dep is None:
+            m = re.match(r"s*([A-Za-z0-9_.-]+)", raw)
+            dep = m.group(1) if m else None
+        if dep:
+            queue.append(dep)
+
+for path in dict.fromkeys(files):
+    sys.stdout.buffer.write(str(path).encode("utf-8") + b" ")
+PY_DSH_DIST
+
+  local src rel dest
+  while IFS= read -r -d '' src; do
+    case "$src" in
+      "$host_prefix"/*) rel="${src#"$host_prefix"/}" ;;
+      *) continue ;;
+    esac
+    dest="$stage/usr/$rel"
+    mkdir -p "$(dirname "$dest")"
+    cp -p -- "$src" "$dest"
+    case "$src" in
+      *.so|*.so.*) copy_link_deps "$src" "$stage/usr/lib" ;;
+    esac
+  done < "$list"
+}
+
 install_termux_tool_runtime() {
   local stage="$1"
   [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || { echo "[DSH] Embedded Termux tool runtime disabled."; return 0; }
@@ -237,6 +366,26 @@ install_termux_tool_runtime() {
     }
   done
 
+  dsh_validate_host_tool_contract || return 7
+
+  # Do not assume that a command is owned by the package name we seeded.
+  # Termux frequently splits commands into subpackages (Frida is one example).
+  # Discover the actual dpkg owner of every required executable and append it
+  # to the staging roots so package-layout changes cannot silently omit tools.
+  declare -A dsh_root_seen=()
+  for pkg in "${roots[@]}"; do
+    [ -n "$pkg" ] && dsh_root_seen["$pkg"]=1
+  done
+  local owner
+  while IFS= read -r owner; do
+    [ -n "$owner" ] || continue
+    if [ -z "${dsh_root_seen[$owner]+x}" ]; then
+      echo "[DSH] Adding actual tool-owner package to staging roots: $owner"
+      roots+=("$owner")
+      dsh_root_seen["$owner"]=1
+    fi
+  done < <(dsh_required_tool_owner_packages)
+
   local package_list="$CACHE_DIR/dsh-termux-tool-packages.txt"
   resolve_termux_package_closure "${roots[@]}" > "$package_list"
   [ -s "$package_list" ] || { echo "[DSH] Termux 工具依赖闭包为空。" >&2; return 7; }
@@ -268,6 +417,16 @@ install_termux_tool_runtime() {
     done
   done < "$package_list"
   touch "$stage/usr/var/lib/dpkg/available"
+
+  # frida-python installs several runtime dependencies through pip in its
+  # postinst. They are not listed by dpkg-query -L, so a pure package overlay
+  # can contain the CLI scripts but still fail when Python imports their deps.
+  if [ -x "${PREFIX:-/data/data/com.termux/files/usr}/bin/frida" ]; then
+    dsh_copy_python_distribution_closure "$stage" prompt-toolkit colorama pygments websockets || {
+      echo "[DSH] Failed to stage Frida Python runtime dependencies." >&2
+      return 7
+    }
+  fi
 
   [ -d "${PREFIX:-/data/data/com.termux/files/usr}/var/lib/dpkg/alternatives" ] && cp -a "${PREFIX:-/data/data/com.termux/files/usr}/var/lib/dpkg/alternatives" "$stage/usr/var/lib/dpkg/" || true
   [ -d "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt" ] && cp -a "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt" "$stage/usr/etc/" || true
@@ -434,6 +593,15 @@ validate_termux_tool_runtime() {
   fi
   if ! "${common_env[@]}" "$wrappers/frida" --version >"$dynamic_log" 2>&1; then
     echo '[DSH] Embedded Frida client smoke test failed.' >&2; sed -n '1,120p' "$dynamic_log" >&2 || true; return 7
+  fi
+  if ! "${common_env[@]}" "$wrappers/frida-ps" --help >"$dynamic_log" 2>&1; then
+    echo '[DSH] Embedded frida-ps smoke test failed (Python dependency closure incomplete).' >&2; sed -n '1,160p' "$dynamic_log" >&2 || true; return 7
+  fi
+  if ! "${common_env[@]}" "$wrappers/frida-trace" --help >"$dynamic_log" 2>&1; then
+    echo '[DSH] Embedded frida-trace smoke test failed (Python dependency closure incomplete).' >&2; sed -n '1,160p' "$dynamic_log" >&2 || true; return 7
+  fi
+  if ! "${common_env[@]}" "$stage/usr/bin/gdbserver" --version >"$dynamic_log" 2>&1; then
+    echo '[DSH] Embedded gdbserver smoke test failed.' >&2; sed -n '1,120p' "$dynamic_log" >&2 || true; return 7
   fi
 
   local apt_log="$CACHE_DIR/embedded-apt-smoke.log"

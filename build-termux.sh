@@ -1,6 +1,23 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -Eeuo pipefail
-trap 'rc=$?; echo "[DSH] BUILD FAILED: line ${BASH_LINENO[0]:-$LINENO}, exit=$rc, command=$BASH_COMMAND" >&2' ERR
+
+dsh_build_error_trap() {
+  local rc="$1"
+  if [ "${DSH_ERR_REPORTED:-0}" = "1" ]; then
+    return "$rc"
+  fi
+  DSH_ERR_REPORTED=1
+  echo "[DSH] BUILD FAILED: exit=$rc, command=$BASH_COMMAND" >&2
+  local i source line func
+  for ((i=1; i<${#FUNCNAME[@]}; i++)); do
+    func="${FUNCNAME[$i]:-main}"
+    source="${BASH_SOURCE[$i]:-${BASH_SOURCE[0]}}"
+    line="${BASH_LINENO[$((i-1))]:-$LINENO}"
+    echo "[DSH]   at $func ($source:$line)" >&2
+  done
+  return "$rc"
+}
+trap 'dsh_build_error_trap $?' ERR
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -27,7 +44,7 @@ DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
 DSH_ALLOW_DEGRADED="${DSH_ALLOW_DEGRADED:-0}"
 DSH_TERMUX_TOOLS="${DSH_TERMUX_TOOLS:-1}"
 DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 gdb strace rizin}"
-DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-frida}"
+DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-frida frida-python}"
 DSH_TERMUX_PRIMARY_APT_BASE="${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
 DSH_TERMUX_FALLBACK_APT_BASE="${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
 DSH_AUTO_INSTALL_TERMUX_TOOLS="${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}"

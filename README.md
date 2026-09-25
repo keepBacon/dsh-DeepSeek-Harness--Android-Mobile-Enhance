@@ -248,7 +248,7 @@ process_list → module_list/process_maps → binary_functions/binary_xrefs
 → frida_script 或 debug_session_start → debug_backtrace/debug_registers
 ```
 
-动态工具默认不会绕过 Android 的进程隔离。分析其他应用时，目标必须是可调试/同 UID，或设备已由用户自行提供允许 ptrace/Frida 的 root/debug 环境。Frida 客户端与 server 二进制会随 Runtime 打包，但不会由应用静默提权或自动启动 root 服务。
+动态工具默认不会绕过 Android 的进程隔离。分析其他应用时，目标必须是可调试/同 UID，或设备已由用户自行提供允许 ptrace/Frida 的 root/debug 环境。Frida 客户端与 server 二进制会随 Runtime 打包，但不会由应用静默提权或自动启动 root 服务。Termux 当前把 Frida 拆成 `frida`（server）与 `frida-python`（CLI）两个包；构建器会同时安装这两部分，并在 staging 前根据每个可执行文件的真实 dpkg owner 自动扩充包闭包。Frida CLI 的 pip 运行时依赖也会显式复制并通过 `frida-ps --help` / `frida-trace --help` smoke test 验证。
 
 构建动态工具链时不会再无条件刷新宿主 Termux 软件源：只有缺少 GDB/strace/Rizin/Frida 等包时才联网，且使用隔离的临时 APT source/list；默认先访问 `https://packages.termux.dev/apt`，失败再回退 `https://packages-cf.termux.dev/apt`。这不会改写用户 Termux 的 `sources.list`。如果所需包已经安装，构建可直接离线进入 staging。可通过 `DSH_TERMUX_PRIMARY_APT_BASE` / `DSH_TERMUX_FALLBACK_APT_BASE` 覆盖两个构建期镜像。
 
