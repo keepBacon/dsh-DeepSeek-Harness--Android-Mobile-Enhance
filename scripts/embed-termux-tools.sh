@@ -221,6 +221,28 @@ dsh_validate_host_tool_contract() {
     fi
   done
 
+  if [ "$fail" -eq 0 ] && [ -x "$host_prefix/bin/frida" ]; then
+    if ! "$host_prefix/bin/python3" - <<'PY_DSH_FRIDA_DEPS'
+import importlib.metadata as md
+import sys
+
+required = ("prompt-toolkit", "colorama", "pygments", "websockets", "wcwidth")
+missing = []
+for name in required:
+    try:
+        md.distribution(name)
+    except md.PackageNotFoundError:
+        missing.append(name)
+
+if missing:
+    print("[DSH] Missing Frida Python runtime distributions: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(7)
+PY_DSH_FRIDA_DEPS
+    then
+      fail=1
+    fi
+  fi
+
   [ "$fail" -eq 0 ] || {
     echo "[DSH] Host tool preflight failed before staging. No APK files were modified." >&2
     return 7
@@ -295,7 +317,7 @@ install_termux_tool_runtime() {
   for cmd in pkg apt-get apt-cache dpkg-query proot python3 file; do
     command -v "$cmd" >/dev/null 2>&1 || {
       echo "[DSH] 缺少 Termux 工具 $cmd。" >&2
-      echo "[DSH] 建议先执行: pkg install apt proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file binutils openssl openssl-tool aapt2 -y" >&2
+      echo "[DSH] 基础环境缺失。构建器可自动补齐 gdb/strace/rizin/frida/frida-python；请先确保 pkg/apt/python/proot 可用。" >&2
       return 7
     }
   done
