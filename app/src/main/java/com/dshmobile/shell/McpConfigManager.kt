@@ -178,7 +178,7 @@ class McpConfigManager(
 
   private fun validate(server: McpServerConfig) {
     UUID.fromString(server.id)
-    require(Regex("^[A-Za-z0-9_-]{1,32}$").matches(server.serverName) && server.serverName != BUILTIN) { "MCP 命名空间无效" }
+    require(Regex("^[A-Za-z0-9_-]{1,32}$").matches(server.serverName) && server.serverName !in BUILTIN_NAMES) { "MCP 命名空间无效" }
     when (server.transport) {
       STDIO -> {
         require(server.command.isNotBlank() && !server.command.contains('\n') && server.args.size <= 64) { "stdio 配置无效" }
@@ -277,6 +277,8 @@ class McpConfigManager(
     const val STDIO = "stdio"
     const val HTTP = "streamable-http"
     const val BUILTIN = "mobile_tools"
+    const val BUILTIN_BASIC = "basic_tools"
+    val BUILTIN_NAMES = setOf(BUILTIN, BUILTIN_BASIC)
     fun tokenEnvName(id: String): String = "DSH_ANDROID_MCP_TOKEN_" + id.uppercase().replace(Regex("[^A-Z0-9]"), "_")
   }
 }
