@@ -87,6 +87,14 @@ validate_staged_termux_payload_contract() {
   require_exact_tool proot proot
   require_exact_tool python3 python
   require_exact_tool aapt2 aapt2
+  require_exact_tool gdb gdb
+  require_exact_tool gdbserver gdb
+  require_exact_tool strace strace
+  require_exact_tool rizin rizin
+  require_exact_tool frida frida
+  require_exact_tool frida-ps frida
+  require_exact_tool frida-trace frida
+  require_exact_tool frida-server frida
   for cmd in readelf objdump nm strings; do
     require_binutils_tool "$cmd"
   done
@@ -94,7 +102,7 @@ validate_staged_termux_payload_contract() {
   if [ "$fail" -ne 0 ]; then
     echo "[DSH] Embedded Termux payload contract failed before native-module compilation." >&2
     echo "[DSH] Host package ownership diagnostics:" >&2
-    for cmd in openssl file curl jq proot python3 aapt2 readelf greadelf objdump gobjdump nm gnm strings gstrings; do
+    for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server readelf greadelf objdump gobjdump nm gnm strings gstrings; do
       local host_path="${PREFIX:-/data/data/com.termux/files/usr}/bin/$cmd"
       if [ -e "$host_path" ]; then
         dpkg-query -S "$host_path" 2>/dev/null | head -n 1 >&2 || true
@@ -116,8 +124,21 @@ install_termux_tool_runtime() {
     }
   done
 
-  local roots=() pkg
-  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
+  local roots=() pkg root_roots=""
+  if [ -n "${DSH_TERMUX_ROOT_TOOL_PACKAGES:-}" ]; then
+    if [ "$(dpkg-query -W -f='${db:Status-Status}' root-repo 2>/dev/null || true)" != "installed" ]; then
+      if [ "${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}" = "1" ]; then
+        echo "[DSH] Enabling Termux root repository for dynamic-analysis packages…"
+        pkg install -y root-repo || { echo '[DSH] Failed to enable Termux root repository.' >&2; return 7; }
+      else
+        echo '[DSH] Dynamic-analysis root packages requested but root-repo is not installed.' >&2
+        return 7
+      fi
+    fi
+    apt update >/dev/null || { echo '[DSH] Failed to refresh Termux root repository metadata.' >&2; return 7; }
+    root_roots="root-repo ${DSH_TERMUX_ROOT_TOOL_PACKAGES}"
+  fi
+  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} $root_roots ${DSH_EXTRA_TERMUX_PACKAGES:-}"
   local missing_roots=()
   for pkg in "${roots[@]}"; do
     [ -n "$pkg" ] || continue
@@ -270,7 +291,7 @@ EOF_TERMUX_WRAPPER
   # packages were compiled/configured for, rather than hoping that every
   # binary is fully relocatable when copied into the app-private runtime.
   for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3 \
-    openssl file curl jq aapt2 \
+    openssl file curl jq aapt2 rizin rz-asm rz-bin rz-find frida frida-ps frida-trace \
     ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip; do
     rm -f "$stage/usr/libexec/dsh/wrappers/$cmd"
     ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$cmd"
@@ -331,6 +352,20 @@ validate_termux_tool_runtime() {
     return 7
   fi
 
+  local dynamic_log="$CACHE_DIR/embedded-dynamic-analysis-smoke.log"
+  if ! "${common_env[@]}" "$stage/usr/bin/gdb" --version >"$dynamic_log" 2>&1; then
+    echo '[DSH] Embedded gdb smoke test failed.' >&2; sed -n '1,100p' "$dynamic_log" >&2 || true; return 7
+  fi
+  if ! "${common_env[@]}" "$stage/usr/bin/strace" -V >"$dynamic_log" 2>&1; then
+    echo '[DSH] Embedded strace smoke test failed.' >&2; sed -n '1,100p' "$dynamic_log" >&2 || true; return 7
+  fi
+  if ! "${common_env[@]}" "$wrappers/rizin" -v >"$dynamic_log" 2>&1; then
+    echo '[DSH] Embedded Rizin smoke test failed.' >&2; sed -n '1,100p' "$dynamic_log" >&2 || true; return 7
+  fi
+  if ! "${common_env[@]}" "$wrappers/frida" --version >"$dynamic_log" 2>&1; then
+    echo '[DSH] Embedded Frida client smoke test failed.' >&2; sed -n '1,120p' "$dynamic_log" >&2 || true; return 7
+  fi
+
   local apt_log="$CACHE_DIR/embedded-apt-smoke.log"
   if ! "${common_env[@]}" "$wrappers/apt" --version >"$apt_log" 2>&1; then
     echo "[DSH] Embedded apt smoke test failed. Diagnostic (host uid=$(id -u 2>/dev/null || echo unknown)):" >&2
@@ -344,5 +379,5 @@ validate_termux_tool_runtime() {
     sed -n '1,80p' "$pkg_log" >&2 || true
     return 7
   fi
-  echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + binutils + openssl + common CLI)"
+  echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + binutils + openssl + gdb/strace/rizin/frida + common CLI)"
 }

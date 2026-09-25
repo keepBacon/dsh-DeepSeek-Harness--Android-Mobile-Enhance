@@ -232,6 +232,10 @@ DSH_EXTRA_TERMUX_PACKAGES="ffmpeg openssl-tool" bash build-termux.sh
 - Git：`git_status`、`git_diff`、`git_log`
 - 网络：`http_request`
 - Android：`android_logcat`、`apk_inspect`
+- 动态分析：`process_list/process_info/process_maps/process_threads/module_list`、`memory_regions/memory_read/memory_search`、`syscall_trace`
+- Frida：`frida_processes/frida_attach/frida_spawn/frida_script/frida_trace`
+- GDB：持久 `debug_session_start` 会话、attach、断点、continue、寄存器、backtrace、内存读取
+- Rizin/JNI/IL2CPP：`binary_functions`、`binary_xrefs`、`jni_map_java_native`、`il2cpp_detect`、`il2cpp_find_method`
 - 协议：decode / encode / hash / HTTP / URL
 - ELF：信息、Section、Symbol、Strings、反汇编
 
@@ -239,9 +243,14 @@ DSH_EXTRA_TERMUX_PACKAGES="ffmpeg openssl-tool" bash build-termux.sh
 
 ```text
 fs_search → fs_read → fs_patch → git_diff → command_run(构建/测试)
+
+process_list → module_list/process_maps → binary_functions/binary_xrefs
+→ frida_script 或 debug_session_start → debug_backtrace/debug_registers
 ```
 
-这样模型可以完成“定位 → 阅读 → 修改 → 审查 diff → 构建验证”的闭环，而不需要为高频操作反复生成脆弱的 Shell 文本。
+动态工具默认不会绕过 Android 的进程隔离。分析其他应用时，目标必须是可调试/同 UID，或设备已由用户自行提供允许 ptrace/Frida 的 root/debug 环境。Frida 客户端与 server 二进制会随 Runtime 打包，但不会由应用静默提权或自动启动 root 服务。
+
+这样模型可以完成“定位 → 阅读 → 修改 → 审查 diff → 构建验证”，以及“静态定位 → 运行时模块基址 → 动态观察 → 回到静态 XREF”的闭环。
 
 ## Shell / Terminal 兼容
 

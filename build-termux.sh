@@ -26,7 +26,8 @@ DSH_NATIVE_COMPAT="${DSH_NATIVE_COMPAT:-1}"
 DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
 DSH_ALLOW_DEGRADED="${DSH_ALLOW_DEGRADED:-0}"
 DSH_TERMUX_TOOLS="${DSH_TERMUX_TOOLS:-1}"
-DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2}"
+DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 gdb strace rizin}"
+DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-frida}"
 DSH_AUTO_INSTALL_TERMUX_TOOLS="${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}"
 MOBILE_MCP_TOOLBOX="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
 DSH_EXTRA_TERMUX_PACKAGES="${DSH_EXTRA_TERMUX_PACKAGES:-}"
@@ -1207,7 +1208,12 @@ refresh_dsh_runtime() {
   "mobileToolboxMcp": true,
   "binutilsRuntime": true,
   "opensslRuntime": true,
-  "aapt2Runtime": true
+  "aapt2Runtime": true,
+  "dynamicAnalysisRuntime": true,
+  "gdbRuntime": true,
+  "straceRuntime": true,
+  "rizinRuntime": true,
+  "fridaRuntime": true
 }
 EOF
 

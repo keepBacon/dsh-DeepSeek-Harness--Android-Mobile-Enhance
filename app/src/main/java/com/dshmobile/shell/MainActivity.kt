@@ -721,7 +721,7 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { showMcpManager() }
     })
     wrap.addView(TextView(this).apply {
-      text = "内置 mobile_tools 现直接提供文件读取/搜索/安全修改、命令执行、Git、HTTP、Android logcat、APK/aapt2、协议解析和 ELF 逆向工具；IDA / Ghidra / Binary Ninja 继续通过远程 MCP 连接。"
+      text = "内置 mobile_tools 现覆盖源码、Git、HTTP、APK/ELF、进程/模块/内存只读分析、strace、Frida、GDB 动态调试、Rizin XREF/函数、JNI 与 IL2CPP 辅助分析；外部进程仍受 Android root/debuggable/ptrace 权限约束。IDA / Ghidra / Binary Ninja 继续通过远程 MCP 连接。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
