@@ -94,6 +94,10 @@ must "$BT" 'install_mobile_mcp_toolbox()'
 must "$BT" '"mobileToolboxMcp": true'
 must "$BT" 'binutils openssl'
 must "$ETT" 'for cmd in readelf objdump nm strings'
+must "$ETT" 'ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip'
+must "$ETT" 'elif [ -x "$prefix/bin/g$name" ]; then'
+must "$ETT" 'command_name="g$name"'
+must "$ETT" '"${common_env[@]}" "$wrappers/$cmd" --version'
 must "$ETT" '"$stage/usr/bin/openssl" version'
 node --check "$MTB" >/dev/null
 
