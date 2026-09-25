@@ -102,7 +102,7 @@ class McpConfigManager(
   fun runtimeSummary(): String {
     val servers = listServers()
     val builtIn = if (toolboxEnabled() && toolboxFile.isFile) "已启用" else if (toolboxFile.isFile) "已关闭" else "未内置"
-    val binary = if (File(usrDir, "bin/readelf").isFile && File(usrDir, "bin/objdump").isFile) " · Binutils" else ""
+    val binary = if (File(usrDir, "libexec/dsh/wrappers/readelf").exists() && File(usrDir, "libexec/dsh/wrappers/objdump").exists()) " · Binutils" else ""
     return "内置 MCP " + builtIn + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary
   }
 
