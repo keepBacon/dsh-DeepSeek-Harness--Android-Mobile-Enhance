@@ -185,6 +185,7 @@ V0.1.1 的 runtime 不再只是“Termux 风格目录”。完整构建会把一
 - coreutils / findutils / grep / sed / gawk
 - tar / gzip / xz / unzip / zip
 - curl / jq / less / which / procps / make
+- aapt2（供 APK 清单/权限/ABI 等结构分析）
 - 以及上述工具的实际运行依赖
 
 由于官方 Termux 包通常编译时绑定 `/data/data/com.termux/files/usr`，应用不会假装自己的私有前缀就是原版 Termux。对需要该固定前缀的命令，runtime 通过 PRoot 兼容命名空间把：
@@ -219,6 +220,28 @@ apt install <package>
 ```bash
 DSH_EXTRA_TERMUX_PACKAGES="ffmpeg openssl-tool" bash build-termux.sh
 ```
+
+## 内置 mobile_tools MCP
+
+内置 MCP 工具箱面向模型直接调用，参数尽量统一：路径既可使用绝对路径，也可相对 MCP 当前工作目录；目录/仓库类工具默认使用当前目录；超时和输出上限均有安全默认值。常规源码修改优先使用结构化文件工具，不要求模型自己拼 Shell 命令。
+
+当前直接提供：
+
+- 文件/源码：`fs_read`、`fs_list`、`fs_search`、`fs_write`、`fs_patch`
+- 命令：`command_run`（直接 argv，`shell=false`，返回 exitCode/stdout/stderr/耗时）
+- Git：`git_status`、`git_diff`、`git_log`
+- 网络：`http_request`
+- Android：`android_logcat`、`apk_inspect`
+- 协议：decode / encode / hash / HTTP / URL
+- ELF：信息、Section、Symbol、Strings、反汇编
+
+推荐模型调用链：
+
+```text
+fs_search → fs_read → fs_patch → git_diff → command_run(构建/测试)
+```
+
+这样模型可以完成“定位 → 阅读 → 修改 → 审查 diff → 构建验证”的闭环，而不需要为高频操作反复生成脆弱的 Shell 文本。
 
 ## Shell / Terminal 兼容
 

@@ -86,6 +86,7 @@ validate_staged_termux_payload_contract() {
   require_exact_tool jq jq
   require_exact_tool proot proot
   require_exact_tool python3 python
+  require_exact_tool aapt2 aapt2
   for cmd in readelf objdump nm strings; do
     require_binutils_tool "$cmd"
   done
@@ -93,7 +94,7 @@ validate_staged_termux_payload_contract() {
   if [ "$fail" -ne 0 ]; then
     echo "[DSH] Embedded Termux payload contract failed before native-module compilation." >&2
     echo "[DSH] Host package ownership diagnostics:" >&2
-    for cmd in openssl file curl jq proot python3 readelf greadelf objdump gobjdump nm gnm strings gstrings; do
+    for cmd in openssl file curl jq proot python3 aapt2 readelf greadelf objdump gobjdump nm gnm strings gstrings; do
       local host_path="${PREFIX:-/data/data/com.termux/files/usr}/bin/$cmd"
       if [ -e "$host_path" ]; then
         dpkg-query -S "$host_path" 2>/dev/null | head -n 1 >&2 || true
@@ -110,7 +111,7 @@ install_termux_tool_runtime() {
   for cmd in pkg apt-cache dpkg-query proot python3 file; do
     command -v "$cmd" >/dev/null 2>&1 || {
       echo "[DSH] 缺少 Termux 工具 $cmd。" >&2
-      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file binutils openssl openssl-tool -y" >&2
+      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file binutils openssl openssl-tool aapt2 -y" >&2
       return 7
     }
   done
@@ -269,7 +270,7 @@ EOF_TERMUX_WRAPPER
   # packages were compiled/configured for, rather than hoping that every
   # binary is fully relocatable when copied into the app-private runtime.
   for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3 \
-    openssl file curl jq \
+    openssl file curl jq aapt2 \
     ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip; do
     rm -f "$stage/usr/libexec/dsh/wrappers/$cmd"
     ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$cmd"
@@ -320,6 +321,13 @@ validate_termux_tool_runtime() {
   if ! "${common_env[@]}" "$wrappers/file" --version >"$file_log" 2>&1; then
     echo "[DSH] Embedded file(1) smoke test failed through relocation wrapper." >&2
     sed -n '1,120p' "$file_log" >&2 || true
+    return 7
+  fi
+
+  local aapt2_log="$CACHE_DIR/embedded-aapt2-smoke.log"
+  if ! "${common_env[@]}" "$wrappers/aapt2" version >"$aapt2_log" 2>&1; then
+    echo "[DSH] Embedded aapt2 smoke test failed through relocation wrapper." >&2
+    sed -n '1,120p' "$aapt2_log" >&2 || true
     return 7
   fi
 

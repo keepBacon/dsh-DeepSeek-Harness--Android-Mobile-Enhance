@@ -721,7 +721,7 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { showMcpManager() }
     })
     wrap.addView(TextView(this).apply {
-      text = "内置 mobile_tools 直接提供协议解析、Hash、ELF 信息、符号、Strings 和反汇编；IDA / Ghidra / Binary Ninja 通过远程 MCP 连接。"
+      text = "内置 mobile_tools 现直接提供文件读取/搜索/安全修改、命令执行、Git、HTTP、Android logcat、APK/aapt2、协议解析和 ELF 逆向工具；IDA / Ghidra / Binary Ninja 继续通过远程 MCP 连接。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
