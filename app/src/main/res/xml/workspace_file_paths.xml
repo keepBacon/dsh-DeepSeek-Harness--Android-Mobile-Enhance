@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- FileProvider path breadth is not the access policy. MainActivity
+       canonicalizes every returned file and enforces active-workspace
+       containment before constructing a content URI. -->
+  <external-path name="external-workspace" path="." />
+  <files-path name="private-workspace" path="." />
+</paths>
