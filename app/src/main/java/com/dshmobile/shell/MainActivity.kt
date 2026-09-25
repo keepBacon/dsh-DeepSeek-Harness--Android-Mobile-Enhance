@@ -671,7 +671,7 @@ class MainActivity : ComponentActivity() {
     wrap.addView(group)
 
     wrap.addView(TextView(this).apply {
-      text = "工作区导入"
+      text = "从手机复制到工作区（维护）"
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
     })
@@ -688,12 +688,12 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { showWorkspaceImportDialog() }
     })
     wrap.addView(Button(this).apply {
-      text = "批量导入文件 / 文件夹"
-      contentDescription = "多选文件和文件夹并递归复制到当前 DSH 工作区"
+      text = "复制手机文件 / 文件夹"
+      contentDescription = "从手机共享存储多选文件和文件夹并递归复制到当前 DSH 工作区"
       setOnClickListener { showWorkspaceBulkImportPicker() }
     })
     wrap.addView(TextView(this).apply {
-      text = "文件可一次多选；文件夹可在目录浏览器中跨目录勾选多个。没有当前工作区时会先让你选择导入目标目录，选定后自动继续。"
+      text = "这是把外部手机文件复制进工作区的维护入口。DSH 对话中的文件选择与所有 Web 导出都只浏览当前工作目录，不会打开系统全局文件选择器。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
@@ -2344,7 +2344,7 @@ class MainActivity : ComponentActivity() {
     }
     if (Build.VERSION.SDK_INT < 30 && !hasLegacyStoragePermission()) {
       requestLegacyStoragePermission()
-      showSimpleMessage("需要存储权限", "授权后请重新打开“批量导入文件 / 文件夹”。")
+      showSimpleMessage("需要存储权限", "授权后请重新打开“复制手机文件 / 文件夹”。")
       return
     }
 
@@ -4175,7 +4175,7 @@ class MainActivity : ComponentActivity() {
       val candidate = java.io.File(root, if (index == 0) clean else "$stem ($index)$ext")
       if (candidate.createNewFile()) return candidate
     }
-    throw java.io.IOException("同名下载文件过多：$clean")
+    throw java.io.IOException("同名导出文件过多：$clean")
   }
 
   private fun queryDisplayName(uri: Uri): String? {
@@ -4291,7 +4291,7 @@ class MainActivity : ComponentActivity() {
   /**
    * 原子防重放的外部浏览器打开（非导出外链）。尽力而为：启动失败时
    * 静默（调用方不读返回值），不再有系统 Downloads 回退契约——导出仅
-   * 存在于导出路径（downloadToDownloads 内）。
+   * 存在于导出路径（downloadToWorkspace 内）。
    */
   private val exportLaunching = java.util.concurrent.atomic.AtomicBoolean(false)
 
