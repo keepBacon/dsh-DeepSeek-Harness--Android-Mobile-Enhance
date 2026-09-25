@@ -40,12 +40,13 @@ DSH_NATIVE_COMPAT="${DSH_NATIVE_COMPAT:-1}"
 DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
 DSH_ALLOW_DEGRADED="${DSH_ALLOW_DEGRADED:-0}"
 DSH_TERMUX_TOOLS="${DSH_TERMUX_TOOLS:-1}"
-DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 libc++ gdb gdbserver strace rizin}"
+DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 libc++ gdb gdbserver strace rizin 7zip yq libsqlite cmake ninja iproute2 dnsutils imagemagick ffmpeg poppler}"
 DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-frida frida-python}"
 DSH_TERMUX_PRIMARY_APT_BASE="${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
 DSH_TERMUX_FALLBACK_APT_BASE="${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
 DSH_AUTO_INSTALL_TERMUX_TOOLS="${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}"
 MOBILE_MCP_TOOLBOX="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
+BASIC_MCP_TOOLBOX="$ROOT/scripts/dsh-basic-toolbox-mcp.mjs"
 DSH_EXTRA_TERMUX_PACKAGES="${DSH_EXTRA_TERMUX_PACKAGES:-}"
 # Favor faster first-launch extraction over maximum APK compression.
 DSH_XZ_PRESET="${DSH_XZ_PRESET:-0}"
@@ -58,6 +59,7 @@ dsh_static_build_preflight() {
   bash -n "$ROOT/scripts/embed-termux-tools.sh" || fail=1
   if command -v node >/dev/null 2>&1; then
     node --check "$MOBILE_MCP_TOOLBOX" >/dev/null || fail=1
+    node --check "$BASIC_MCP_TOOLBOX" >/dev/null || fail=1
   else
     echo "[DSH] Host node is missing; cannot syntax-check mobile MCP toolbox." >&2
     fail=1
@@ -1018,6 +1020,18 @@ install_mobile_mcp_toolbox() {
   echo '[DSH] Mobile MCP toolbox: OK'
 }
 
+install_basic_mcp_toolbox() {
+  local stage="$1"
+  local dest="$stage/usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
+  [ -f "$BASIC_MCP_TOOLBOX" ] || { echo "[DSH] Missing basic MCP toolbox source"; exit 8; }
+  mkdir -p "$(dirname "$dest")"
+  cp "$BASIC_MCP_TOOLBOX" "$dest"
+  chmod 0755 "$dest"
+  "$stage/usr/bin/node" --check "$dest" >/dev/null
+  env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Basic MCP toolbox self-test failed.'; exit 8; }
+  echo '[DSH] Basic MCP toolbox: OK'
+}
+
 validate_dsh_core_plugin_tree() {
   local stage="$1"
   local smoke_home="$CACHE_DIR/core-plugin-tree-smoke-home"
@@ -1028,6 +1042,7 @@ validate_dsh_core_plugin_tree() {
 
   [ -f "$smoke_validator" ] || { echo "[DSH] Missing Web runtime smoke validator: $smoke_validator"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/toolbox-mcp.mjs" ] || { echo "[DSH] Missing mobile MCP toolbox"; exit 8; }
+  [ -f "$stage/usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs" ] || { echo "[DSH] Missing basic MCP toolbox"; exit 8; }
 
   rm -rf "$smoke_home"
   mkdir -p "$smoke_home/tmp"
@@ -1056,6 +1071,21 @@ validate_dsh_core_plugin_tree() {
           PATH: "$stage/usr/bin:/system/bin"
         cwd: "$smoke_home"
         toolCallTimeoutMs: 10000
+        failOnStartupError: true
+    - id: android-mcp-basic-tools-smoke
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: basic_tools
+        transport: stdio
+        command: "$stage/usr/bin/node"
+        args: ["$stage/usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs"]
+        env:
+          TERMUX__PREFIX: "$stage/usr"
+          PREFIX: "$stage/usr"
+          LD_LIBRARY_PATH: "$stage/usr/lib"
+          PATH: "$stage/usr/bin:/system/bin"
+        cwd: "$smoke_home"
+        toolCallTimeoutMs: 60000
         failOnStartupError: true
 EOF_MCP
 
@@ -1211,6 +1241,7 @@ refresh_dsh_runtime() {
   validate_pnpm_runtime "$stage"
   copy_native_module_deps "$stage"
   install_mobile_mcp_toolbox "$stage"
+  install_basic_mcp_toolbox "$stage"
   validate_android_typescript_code_runtime "$stage"
   validate_dsh_core_plugin_tree "$stage"
   mkdir -p "$stage/usr/etc"
@@ -1246,6 +1277,7 @@ refresh_dsh_runtime() {
   "directSingleResourceClientRoutes": true,
   "mcpClientRuntime": true,
   "mobileToolboxMcp": true,
+  "basicToolboxMcp": true,
   "binutilsRuntime": true,
   "opensslRuntime": true,
   "aapt2Runtime": true,
