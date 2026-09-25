@@ -24,6 +24,7 @@ object SecureCredentialStore {
   private const val GIT_USER = "git-user"
   private const val GIT_TOKEN = "git-token"
   private const val SSH_PASSPHRASE = "ssh-passphrase"
+  private const val MCP_TOKEN_PREFIX = "mcp-bearer:"
 
   private fun prefs(context: Context) = context.applicationContext
     .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -124,5 +125,27 @@ object SecureCredentialStore {
 
   fun clearSshPassphrase(context: Context) {
     prefs(context).edit().remove(SSH_PASSPHRASE).apply()
+  }
+
+  private fun mcpTokenKey(id: String): String {
+    require(id.matches(Regex("""^[A-Za-z0-9_-]{1,128}$"""))) { "MCP credential id 无效" }
+    return MCP_TOKEN_PREFIX + id
+  }
+
+  fun saveMcpBearerToken(context: Context, id: String, token: String) {
+    require(token.isNotBlank() && token.length <= 32 * 1024 && !token.contains('\u0000') && !token.contains('\n') && !token.contains('\r')) {
+      "MCP Bearer Token 无效"
+    }
+    prefs(context).edit().putString(mcpTokenKey(id), encrypt(token)).apply()
+  }
+
+  fun mcpBearerToken(context: Context, id: String): String? =
+    decrypt(prefs(context).getString(mcpTokenKey(id), null))
+
+  fun hasMcpBearerToken(context: Context, id: String): Boolean =
+    !mcpBearerToken(context, id).isNullOrBlank()
+
+  fun clearMcpBearerToken(context: Context, id: String) {
+    prefs(context).edit().remove(mcpTokenKey(id)).apply()
   }
 }
