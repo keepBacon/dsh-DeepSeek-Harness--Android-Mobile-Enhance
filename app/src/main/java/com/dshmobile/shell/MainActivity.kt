@@ -1479,6 +1479,120 @@ class MainActivity : ComponentActivity() {
                   max(4px, env(safe-area-inset-left)) !important;
               }
 
+              /*
+               * The upstream browse Workspace picker is a desktop Miller view:
+               * each pane has a 256px floor and the row scrolls horizontally.
+               * On a phone that leaves a clipped "previous" pane at the left
+               * and a visible horizontal scrollbar (the broken layout shown
+               * on Android). Keep upstream navigation/state intact, but render
+               * only the active/rightmost pane at phone widths. Breadcrumbs
+               * remain the back-navigation surface, so no workspace semantics
+               * or filesystem state are changed by this presentation patch.
+               */
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) {
+                overflow: hidden !important;
+              }
+
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> [role="list"]) {
+                width: 100% !important;
+                min-width: 0 !important;
+                max-width: 100% !important;
+                gap: 0 !important;
+                overflow-x: hidden !important;
+                overscroll-behavior-x: none !important;
+              }
+
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> [role="list"]) > [role="list"] {
+                flex: 1 1 100% !important;
+                width: 100% !important;
+                min-width: 0 !important;
+                max-width: 100% !important;
+                padding-right: 4px !important;
+              }
+
+              /* One pane => show it. Two panes => hide the previous/left pane. */
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> [role="list"]) > [role="list"]:not(:last-child) {
+                display: none !important;
+              }
+
+              /* Hide the Miller divider after collapsing to a single pane. */
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> [role="list"]) > span:not([role]) {
+                display: none !important;
+              }
+
+              /*
+               * Upstream's five-item flex footer wraps "打开" onto a lone
+               * second line at phone width. Reflow utilities on row one and
+               * keep Cancel/Open as equal, stable actions on row two.
+               */
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> button[aria-pressed]) {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+                align-items: center !important;
+                gap: 8px !important;
+                padding: 12px 16px max(16px, env(safe-area-inset-bottom)) !important;
+              }
+
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> button[aria-pressed]) > span {
+                display: none !important;
+              }
+
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> button[aria-pressed]) > button {
+                min-width: 0 !important;
+                max-width: 100% !important;
+              }
+
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> button[aria-pressed]) > button:nth-of-type(1) {
+                grid-column: 1;
+                justify-self: start;
+              }
+
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> button[aria-pressed]) > button:nth-of-type(2) {
+                grid-column: 2;
+                justify-self: end;
+              }
+
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> button[aria-pressed]) > button:nth-of-type(3),
+              :root[data-dsh-android="mobile"] :is(
+                [role="dialog"][aria-modal="true"][aria-label="选择工作区目录"],
+                [role="dialog"][aria-modal="true"][aria-label="Select Workspace Directory"]
+              ) div:has(> button[aria-pressed]) > button:nth-of-type(4) {
+                width: 100% !important;
+              }
+
               [data-dsh-mobile-settings-dialog] {
                 width: calc(100vw - 8px) !important;
                 height: calc(100dvh - 8px) !important;
