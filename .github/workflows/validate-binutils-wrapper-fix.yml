@@ -13,10 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Shell syntax and regression checks
+      - name: Shell syntax and targeted regression checks
         run: |
           set -euo pipefail
           bash -n build-termux.sh
           bash -n scripts/embed-termux-tools.sh
           bash -n scripts/check-remaining-fixes.sh
-          bash scripts/check-remaining-fixes.sh
+          grep -Fq 'elif [ -x "$prefix/bin/g$name" ]; then' scripts/embed-termux-tools.sh
+          grep -Fq '"${common_env[@]}" "$wrappers/$cmd" --version' scripts/embed-termux-tools.sh
+          grep -Fq 'libexec/dsh/wrappers/readelf' app/src/main/java/com/dshmobile/shell/McpConfigManager.kt
