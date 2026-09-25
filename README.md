@@ -250,6 +250,8 @@ process_list → module_list/process_maps → binary_functions/binary_xrefs
 
 动态工具默认不会绕过 Android 的进程隔离。分析其他应用时，目标必须是可调试/同 UID，或设备已由用户自行提供允许 ptrace/Frida 的 root/debug 环境。Frida 客户端与 server 二进制会随 Runtime 打包，但不会由应用静默提权或自动启动 root 服务。
 
+构建动态工具链时不会再无条件刷新宿主 Termux 软件源：只有缺少 GDB/strace/Rizin/Frida 等包时才联网，且使用隔离的临时 APT source/list；默认先访问 `https://packages.termux.dev/apt`，失败再回退 `https://packages-cf.termux.dev/apt`。这不会改写用户 Termux 的 `sources.list`。如果所需包已经安装，构建可直接离线进入 staging。可通过 `DSH_TERMUX_PRIMARY_APT_BASE` / `DSH_TERMUX_FALLBACK_APT_BASE` 覆盖两个构建期镜像。
+
 这样模型可以完成“定位 → 阅读 → 修改 → 审查 diff → 构建验证”，以及“静态定位 → 运行时模块基址 → 动态观察 → 回到静态 XREF”的闭环。
 
 ## Shell / Terminal 兼容

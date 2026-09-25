@@ -113,32 +113,95 @@ validate_staged_termux_payload_contract() {
   echo "[DSH] Embedded Termux payload contract: OK"
 }
 
+dsh_write_build_sources() {
+  local file="$1" base="$2"
+  mkdir -p "$(dirname "$file")"
+  {
+    printf 'deb %s/termux-main stable main\n' "$base"
+    if [ -n "${DSH_TERMUX_ROOT_TOOL_PACKAGES:-}" ]; then
+      printf 'deb %s/termux-root root stable\n' "$base"
+    fi
+  } > "$file"
+}
+
+dsh_apt_with_isolated_sources() {
+  local source_file="$1" lists_dir="$2"
+  shift 2
+  mkdir -p "$lists_dir/partial"
+  apt-get \
+    -o "Dir::Etc::sourcelist=$source_file" \
+    -o "Dir::Etc::sourceparts=-" \
+    -o "Dir::State::lists=$lists_dir" \
+    -o "Acquire::Retries=3" \
+    -o "Acquire::http::Timeout=30" \
+    -o "Acquire::https::Timeout=30" \
+    -o "APT::Get::List-Cleanup=0" \
+    "$@"
+}
+
+dsh_install_missing_termux_packages() {
+  local packages=("$@")
+  [ "${#packages[@]}" -gt 0 ] || return 0
+
+  local attempt=0 base label source_file lists_dir
+  local bases=(
+    "${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
+    "${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
+  )
+
+  for base in "${bases[@]}"; do
+    [ -n "$base" ] || continue
+    attempt=$((attempt + 1))
+    label="mirror-$attempt"
+    source_file="$CACHE_DIR/dsh-termux-$label.list"
+    lists_dir="$CACHE_DIR/dsh-termux-apt-lists-$label"
+    rm -rf "$lists_dir"
+    dsh_write_build_sources "$source_file" "$base"
+
+    echo "[DSH] Resolving missing Termux packages via $base"
+    if dsh_apt_with_isolated_sources "$source_file" "$lists_dir" update && \
+       DEBIAN_FRONTEND=noninteractive dsh_apt_with_isolated_sources "$source_file" "$lists_dir" install -y "${packages[@]}"; then
+      return 0
+    fi
+    echo "[DSH] Termux mirror attempt failed: $base" >&2
+  done
+
+  return 7
+}
+
+dsh_normalize_staged_apt_sources() {
+  local stage="$1"
+  local apt_dir="$stage/usr/etc/apt"
+  mkdir -p "$apt_dir/sources.list.d"
+
+  # The embedded runtime must not inherit a transiently broken host mirror.
+  # Use the authoritative direct Termux endpoint in the packaged app while
+  # leaving the user's actual Termux source configuration untouched.
+  cat > "$apt_dir/sources.list" <<'EOF_DSH_MAIN_SOURCE'
+deb https://packages.termux.dev/apt/termux-main stable main
+EOF_DSH_MAIN_SOURCE
+
+  rm -f "$apt_dir/sources.list.d/root.list" "$apt_dir/sources.list.d/dsh-root.list"
+  if [ -n "${DSH_TERMUX_ROOT_TOOL_PACKAGES:-}" ]; then
+    cat > "$apt_dir/sources.list.d/root.list" <<'EOF_DSH_ROOT_SOURCE'
+deb https://packages.termux.dev/apt/termux-root root stable
+EOF_DSH_ROOT_SOURCE
+  fi
+}
+
 install_termux_tool_runtime() {
   local stage="$1"
   [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || { echo "[DSH] Embedded Termux tool runtime disabled."; return 0; }
-  for cmd in pkg apt-cache dpkg-query proot python3 file; do
+  for cmd in pkg apt-get apt-cache dpkg-query proot python3 file; do
     command -v "$cmd" >/dev/null 2>&1 || {
       echo "[DSH] 缺少 Termux 工具 $cmd。" >&2
-      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file binutils openssl openssl-tool aapt2 -y" >&2
+      echo "[DSH] 建议先执行: pkg install apt proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file binutils openssl openssl-tool aapt2 -y" >&2
       return 7
     }
   done
 
-  local roots=() pkg root_roots=""
-  if [ -n "${DSH_TERMUX_ROOT_TOOL_PACKAGES:-}" ]; then
-    if [ "$(dpkg-query -W -f='${db:Status-Status}' root-repo 2>/dev/null || true)" != "installed" ]; then
-      if [ "${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}" = "1" ]; then
-        echo "[DSH] Enabling Termux root repository for dynamic-analysis packages…"
-        pkg install -y root-repo || { echo '[DSH] Failed to enable Termux root repository.' >&2; return 7; }
-      else
-        echo '[DSH] Dynamic-analysis root packages requested but root-repo is not installed.' >&2
-        return 7
-      fi
-    fi
-    apt update >/dev/null || { echo '[DSH] Failed to refresh Termux root repository metadata.' >&2; return 7; }
-    root_roots="root-repo ${DSH_TERMUX_ROOT_TOOL_PACKAGES}"
-  fi
-  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} $root_roots ${DSH_EXTRA_TERMUX_PACKAGES:-}"
+  local roots=() pkg
+  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
   local missing_roots=()
   for pkg in "${roots[@]}"; do
     [ -n "$pkg" ] || continue
@@ -146,19 +209,25 @@ install_termux_tool_runtime() {
       missing_roots+=("$pkg")
     fi
   done
+
+  # Never refresh repositories merely because dynamic tools are enabled.
+  # If everything is already installed, the build remains fully offline.
   if [ "${#missing_roots[@]}" -gt 0 ]; then
     if [ "${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}" = "1" ]; then
       echo "[DSH] Installing missing Termux tool packages: ${missing_roots[*]}"
-      pkg install -y "${missing_roots[@]}" || {
+      dsh_install_missing_termux_packages "${missing_roots[@]}" || {
         echo "[DSH] 自动安装 Termux 工具包失败: ${missing_roots[*]}" >&2
-        echo "[DSH] 可手动执行: pkg install -y ${missing_roots[*]}" >&2
+        echo "[DSH] 已尝试 direct + Cloudflare Termux 官方源，且没有修改宿主 sources.list。" >&2
+        echo "[DSH] 网络恢复后可直接重新执行 build-termux.sh；已安装工具不会重复刷新源。" >&2
         return 7
       }
     else
       echo "[DSH] Termux 工具包未安装: ${missing_roots[*]}" >&2
-      echo "[DSH] 请执行: pkg install -y ${missing_roots[*]}" >&2
+      echo "[DSH] 请安装后重试。Frida 位于 Termux root repository。" >&2
       return 7
     fi
+  else
+    echo "[DSH] Required Termux tool packages already installed; skipping repository refresh."
   fi
   for pkg in "${roots[@]}"; do
     [ -n "$pkg" ] || continue
@@ -202,6 +271,7 @@ install_termux_tool_runtime() {
 
   [ -d "${PREFIX:-/data/data/com.termux/files/usr}/var/lib/dpkg/alternatives" ] && cp -a "${PREFIX:-/data/data/com.termux/files/usr}/var/lib/dpkg/alternatives" "$stage/usr/var/lib/dpkg/" || true
   [ -d "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt" ] && cp -a "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt" "$stage/usr/etc/" || true
+  dsh_normalize_staged_apt_sources "$stage"
 
   local cmd src host_python
   for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg; do
