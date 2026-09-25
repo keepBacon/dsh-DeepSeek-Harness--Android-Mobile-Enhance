@@ -200,7 +200,7 @@ class McpConfigManager(
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      LD_LIBRARY_PATH: ").append(JSONObject.quote(File(usrDir, "lib").absolutePath)).append('\n')
-    append("      PATH: ").append(JSONObject.quote(File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
+    append("      PATH: ").append(JSONObject.quote(File(usrDir, "libexec/dsh/wrappers").absolutePath + ":" + File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
     append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
     append("    toolCallTimeoutMs: 60000\n")
     append("    failOnStartupError: false")
