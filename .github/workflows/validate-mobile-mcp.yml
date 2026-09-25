@@ -1,0 +1,33 @@
+name: Validate mobile MCP branch
+
+on:
+  push:
+    branches:
+      - feature/mobile-mcp-toolbox
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static checks
+        run: |
+          set -euo pipefail
+          bash -n build-termux.sh
+          bash -n scripts/embed-termux-tools.sh
+          node --check scripts/dsh-mobile-toolbox-mcp.mjs
+          bash scripts/check-remaining-fixes.sh
+      - name: Kotlin compile
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileDebugKotlin --no-daemon
