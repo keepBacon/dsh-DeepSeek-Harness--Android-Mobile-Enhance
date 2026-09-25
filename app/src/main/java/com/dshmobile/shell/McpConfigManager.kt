@@ -29,6 +29,7 @@ class McpConfigManager(
   private val configFile = File(dataDir, "mobile/mcp-servers.json")
   private val patchFile = File(context.filesDir, "mcp/android-mcp.patch.yml")
   private val toolboxFile = File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs")
+  private val basicToolboxFile = File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs")
 
   fun toolboxEnabled(): Boolean = readRootSafe().optBoolean("toolboxEnabled", true)
   fun listServers(): List<McpServerConfig> = readServers(readRootSafe())
@@ -83,6 +84,7 @@ class McpConfigManager(
   @Synchronized fun ensureRuntimePatch(): File {
     val rows = mutableListOf<String>()
     if (toolboxEnabled() && toolboxFile.isFile) rows += toolboxRow()
+    if (toolboxEnabled() && basicToolboxFile.isFile) rows += basicToolboxRow()
     listServers().filter { it.enabled }.forEach { rows += serverRow(it) }
     val text = if (rows.isEmpty()) {
       "[]\n"
@@ -102,8 +104,9 @@ class McpConfigManager(
   fun runtimeSummary(): String {
     val servers = listServers()
     val builtIn = if (toolboxEnabled() && toolboxFile.isFile) "已启用" else if (toolboxFile.isFile) "已关闭" else "未内置"
+    val basic = if (toolboxEnabled() && basicToolboxFile.isFile) " · Basic tools" else ""
     val binary = if (File(usrDir, "libexec/dsh/wrappers/readelf").exists() && File(usrDir, "libexec/dsh/wrappers/objdump").exists()) " · Binutils" else ""
-    return "内置 MCP " + builtIn + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary
+    return "内置 MCP " + builtIn + basic + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary
   }
 
   private fun newRoot(): JSONObject = JSONObject().put("schema", 1).put("toolboxEnabled", true).put("servers", JSONArray())
@@ -214,6 +217,33 @@ class McpConfigManager(
     append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
     append("    toolCallTimeoutMs: 60000\n")
+    append("    failOnStartupError: false")
+  }
+
+  private fun basicToolboxRow(): String = buildString {
+    append("- id: android-mcp-basic-tools\n")
+    append("  name: '@deepseek-ai/dsh-mcp-client'\n")
+    append("  config:\n")
+    append("    serverName: basic_tools\n")
+    append("    transport: stdio\n")
+    append("    command: ").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append('\n')
+    append("    args: [").append(JSONObject.quote(basicToolboxFile.absolutePath)).append("]\n")
+    append("    env:\n")
+    append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
+    append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
+    append("      LD_LIBRARY_PATH: ").append(JSONObject.quote(File(usrDir, "lib").absolutePath)).append('\n')
+    append("      PATH: ").append(JSONObject.quote(File(usrDir, "libexec/dsh/wrappers").absolutePath + ":" + File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
+    append("      HOME: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
+    append("      TMPDIR: ").append(JSONObject.quote(File(homeDir, "tmp").absolutePath)).append('\n')
+    append("      GIT_EXEC_PATH: ").append(JSONObject.quote(File(usrDir, "libexec/git-core").absolutePath)).append('\n')
+    append("      GIT_TEMPLATE_DIR: ").append(JSONObject.quote(File(usrDir, "share/git-core/templates").absolutePath)).append('\n')
+    append("      GIT_CONFIG_SYSTEM: ").append(JSONObject.quote(File(usrDir, "etc/gitconfig").absolutePath)).append('\n')
+    append("      GIT_TERMINAL_PROMPT: \"0\"\n")
+    append("      NO_COLOR: \"1\"\n")
+    append("      SSL_CERT_FILE: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
+    append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
+    append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
+    append("    toolCallTimeoutMs: 300000\n")
     append("    failOnStartupError: false")
   }
 
