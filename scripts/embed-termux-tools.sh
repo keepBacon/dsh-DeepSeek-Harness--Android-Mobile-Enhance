@@ -88,7 +88,7 @@ validate_staged_termux_payload_contract() {
   require_exact_tool python3 python
   require_exact_tool aapt2 aapt2
   require_exact_tool gdb gdb
-  require_exact_tool gdbserver gdb
+  require_exact_tool gdbserver gdbserver
   require_exact_tool strace strace
   require_exact_tool rizin rizin
   # Termux splits Frida: the server is in "frida", while Python CLI tools
@@ -116,11 +116,11 @@ validate_staged_termux_payload_contract() {
 }
 
 dsh_write_build_sources() {
-  local file="$1" base="$2"
+  local file="$1" base="$2" include_root="${3:-0}"
   mkdir -p "$(dirname "$file")"
   {
     printf 'deb %s/termux-main stable main\n' "$base"
-    if [ -n "${DSH_TERMUX_ROOT_TOOL_PACKAGES:-}" ]; then
+    if [ "$include_root" = "1" ]; then
       printf 'deb %s/termux-root root stable\n' "$base"
     fi
   } > "$file"
@@ -145,11 +145,20 @@ dsh_install_missing_termux_packages() {
   local packages=("$@")
   [ "${#packages[@]}" -gt 0 ] || return 0
 
-  local attempt=0 base label source_file lists_dir
+  local attempt=0 base label source_file lists_dir pkg root_pkg include_root=0
   local bases=(
     "${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
     "${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
   )
+
+  for pkg in "${packages[@]}"; do
+    for root_pkg in ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-}; do
+      if [ "$pkg" = "$root_pkg" ]; then
+        include_root=1
+        break 2
+      fi
+    done
+  done
 
   for base in "${bases[@]}"; do
     [ -n "$base" ] || continue
@@ -158,7 +167,7 @@ dsh_install_missing_termux_packages() {
     source_file="$CACHE_DIR/dsh-termux-$label.list"
     lists_dir="$CACHE_DIR/dsh-termux-apt-lists-$label"
     rm -rf "$lists_dir"
-    dsh_write_build_sources "$source_file" "$base"
+    dsh_write_build_sources "$source_file" "$base" "$include_root"
 
     echo "[DSH] Resolving missing Termux packages via $base"
     if dsh_apt_with_isolated_sources "$source_file" "$lists_dir" update && \
@@ -206,7 +215,12 @@ dsh_validate_host_tool_contract() {
 
   for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server; do
     if [ ! -x "$host_prefix/bin/$cmd" ]; then
-      echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd" >&2
+      case "$cmd" in
+        gdbserver) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd (install provider: gdbserver)" >&2 ;;
+        frida|frida-ps|frida-trace) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd (install provider: frida-python)" >&2 ;;
+        frida-server) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd (install provider: frida)" >&2 ;;
+        *) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd" >&2 ;;
+      esac
       fail=1
       continue
     fi
