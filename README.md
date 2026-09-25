@@ -240,6 +240,21 @@ Android Runtime 现在除 `mobile_tools` 外，额外内置独立的 `basic_tool
 
 对应 Termux Runtime 会一并打包 `7zip`、`yq`、`libsqlite`、`cmake`、`ninja`、`iproute2`、`dnsutils`、`imagemagick`、`ffmpeg`、`poppler`，构建阶段会检查关键命令实际存在并运行 smoke test。
 
+## Runtime Reverse Analysis Foundation
+
+`mobile_tools` 3.1 在已有进程/内存只读、Frida、GDB、Rizin、JNI 与 IL2CPP 基础能力上补齐运行时分析链路：
+
+- `reverse_capabilities`：检测 /proc、root、Frida、GDB/gdbserver、strace、Rizin、debuggerd、addr2line/nm 等实际可用性。
+- `package_process_info`：包名解析 PID/UID/APK 路径/dataDir/ABI/debuggable。
+- `native_backtrace`：通过 Android `debuggerd -b` 请求授权/可调试进程的 native backtrace。
+- `frida_attach(..., persistent=true)` / `frida_spawn(..., persistent=true)` + `frida_detach`：受管持久 Frida session。
+- `symbol_resolve`：runtime VA → mapping/module/load bias/RVA/addr2line/nearest symbol。
+- `address_rebase`：以 BigInt 做 module base / RVA / runtime VA 精确换算。
+- `il2cpp_metadata_info`：验证 `global-metadata.dat` magic/version，并解析 header section offset/size。
+- `il2cpp_find_class`：只在已验证 metadata string table 中定位 class/namespace 名称，不伪造 class index/RVA。
+
+内存能力仍保持只读：提供 `memory_regions/read/search`，不内置任意 `memory_write`。对其它应用的 /proc、ptrace、debuggerd、Frida 等访问仍受 Android UID/SELinux、debuggable、root 或授权调试后端约束；工具会返回权限/可用性诊断，不假定可以越权访问。
+
 ## 内置 mobile_tools MCP
 
 内置 MCP 工具箱面向模型直接调用，参数尽量统一：路径既可使用绝对路径，也可相对 MCP 当前工作目录；目录/仓库类工具默认使用当前目录；超时和输出上限均有安全默认值。常规源码修改优先使用结构化文件工具，不要求模型自己拼 Shell 命令。
