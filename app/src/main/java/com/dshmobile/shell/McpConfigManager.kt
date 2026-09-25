@@ -129,7 +129,7 @@ class McpConfigManager(
       append("    env: {}\n    cwd: ").append(JSONObject.quote(s.cwd.ifBlank { homeDir.absolutePath })).append('\n')
     } else {
       append("    url: ").append(JSONObject.quote(s.url)).append('\n')
-      if (s.bearerAuth) append("    headers:\n      Authorization: !!js '`Bearer \\${process.env.").append(tokenEnvName(s.id)).append(" ?? \"\"}`'\n") else append("    headers: {}\n")
+      if (s.bearerAuth) append("    headers:\n      Authorization: !!js '`Bearer \${process.env.").append(tokenEnvName(s.id)).append(" ?? \"\"}`'\n") else append("    headers: {}\n")
     }
     append("    toolCallTimeoutMs: 60000\n    failOnStartupError: false")
   }
