@@ -1665,20 +1665,32 @@ class MainActivity : ComponentActivity() {
 
         let lastWorkspaceSyncKey = '';
         let workspaceSyncRunning = false;
-        const activeSessionIdFromUrl = () => {
+        const activeSessionId = () => {
           try {
+            // The Workspace browser exposes the real main-view selection as a
+            // treeitem. Prefer it over URL shape: DSH navigation is client
+            // state and does not require every selection to rewrite history.
+            const selected = document.querySelector(
+              '[data-row-key^="session:"][aria-selected="true"]'
+            );
+            const rowKey = selected && selected.getAttribute('data-row-key');
+            if (rowKey && rowKey.startsWith('session:')) return rowKey.slice('session:'.length);
+
+            // Mount-aware fallback for builds that do publish Session identity
+            // into the route.
             const parts = location.pathname.split('/').filter(Boolean);
             const at = parts.lastIndexOf('session');
             return at >= 0 && at + 1 < parts.length ? decodeURIComponent(parts[at + 1]) : null;
           } catch (_) { return null; }
         };
         const syncActiveWorkspace = async () => {
-          const sessionId = activeSessionIdFromUrl();
+          const sessionId = activeSessionId();
           if (!sessionId || workspaceSyncRunning) return;
           workspaceSyncRunning = true;
           try {
             const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-            const response = await fetch('/api/session/list', {
+            const apiUrl = new URL('api/session/list', document.baseURI).href;
+            const response = await fetch(apiUrl, {
               method: 'POST',
               credentials: 'include',
               headers: { 'content-type': 'application/json' },
