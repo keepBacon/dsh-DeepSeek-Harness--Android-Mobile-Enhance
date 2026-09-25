@@ -325,6 +325,163 @@ PY_DSH_DIST
   done < "$list"
 }
 
+
+dsh_repair_termux_package_family() {
+  local packages=("$@")
+  [ "${#packages[@]}" -gt 0 ] || return 0
+
+  local attempt=0 base label source_file lists_dir pkg root_pkg include_root=0
+  local bases=(
+    "${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
+    "${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
+  )
+
+  for pkg in "${packages[@]}"; do
+    for root_pkg in ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-}; do
+      if [ "$pkg" = "$root_pkg" ]; then
+        include_root=1
+        break 2
+      fi
+    done
+  done
+
+  for base in "${bases[@]}"; do
+    [ -n "$base" ] || continue
+    attempt=$((attempt + 1))
+    label="repair-$attempt"
+    source_file="$CACHE_DIR/dsh-termux-$label.list"
+    lists_dir="$CACHE_DIR/dsh-termux-apt-lists-$label"
+    rm -rf "$lists_dir"
+    dsh_write_build_sources "$source_file" "$base" "$include_root"
+
+    echo "[DSH] Repairing ABI-sensitive Termux packages via $base: ${packages[*]}"
+    if dsh_apt_with_isolated_sources "$source_file" "$lists_dir" update && \
+       DEBIAN_FRONTEND=noninteractive dsh_apt_with_isolated_sources "$source_file" "$lists_dir" install -y --reinstall "${packages[@]}"; then
+      return 0
+    fi
+    echo "[DSH] ABI repair mirror attempt failed: $base" >&2
+  done
+
+  return 7
+}
+
+dsh_host_dynamic_tool_smoke() {
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local log="$CACHE_DIR/host-dynamic-tool-smoke.log"
+  : > "$log"
+
+  "$host_prefix/bin/gdb" --version >>"$log" 2>&1 || return 11
+  "$host_prefix/bin/gdbserver" --version >>"$log" 2>&1 || return 12
+  "$host_prefix/bin/strace" -V >>"$log" 2>&1 || return 13
+  "$host_prefix/bin/rizin" -v >>"$log" 2>&1 || return 14
+  "$host_prefix/bin/frida" --version >>"$log" 2>&1 || return 15
+  "$host_prefix/bin/frida-server" --version >>"$log" 2>&1 || return 16
+  return 0
+}
+
+dsh_repair_broken_host_dynamic_tools() {
+  local rc=0 log="$CACHE_DIR/host-dynamic-tool-smoke.log"
+  if dsh_host_dynamic_tool_smoke; then
+    echo "[DSH] Host dynamic-analysis ABI smoke: OK"
+    return 0
+  else
+    rc=$?
+  fi
+
+  echo "[DSH] Host dynamic-analysis ABI smoke failed (code=$rc)." >&2
+  sed -n '1,120p' "$log" >&2 || true
+
+  [ "${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}" = "1" ] || return 7
+
+  case "$rc" in
+    11|12)
+      dsh_repair_termux_package_family libc++ gdb gdbserver libthread-db python || return 7
+      ;;
+    13)
+      dsh_repair_termux_package_family strace || return 7
+      ;;
+    14)
+      dsh_repair_termux_package_family libc++ rizin || return 7
+      ;;
+    15|16)
+      dsh_repair_termux_package_family frida frida-python || return 7
+      ;;
+    *)
+      dsh_repair_termux_package_family libc++ gdb gdbserver strace rizin frida frida-python || return 7
+      ;;
+  esac
+
+  if ! dsh_host_dynamic_tool_smoke; then
+    echo "[DSH] Host dynamic-analysis tools still fail after package-family repair." >&2
+    sed -n '1,160p' "$log" >&2 || true
+    return 7
+  fi
+  echo "[DSH] Host dynamic-analysis ABI repaired successfully."
+}
+
+dsh_sync_staged_dynamic_abi() {
+  local stage="$1"
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local cmd src host_cpp="$host_prefix/lib/libc++_shared.so"
+
+  [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || return 0
+  mkdir -p "$stage/usr/bin" "$stage/usr/lib"
+
+  if [ -f "$host_cpp" ]; then
+    cp -Lf "$host_cpp" "$stage/usr/lib/libc++_shared.so"
+  fi
+
+  for cmd in gdb gdbserver strace rizin frida-server; do
+    src="$host_prefix/bin/$cmd"
+    [ -x "$src" ] || continue
+    cp -Lf "$src" "$stage/usr/bin/$cmd"
+    chmod 0755 "$stage/usr/bin/$cmd" || true
+    copy_link_deps "$src" "$stage/usr/lib"
+  done
+
+  # copy_link_deps may encounter libc++ through several tools; make the final
+  # file deterministic and identical to the host package that passed smoke.
+  [ -f "$host_cpp" ] && cp -Lf "$host_cpp" "$stage/usr/lib/libc++_shared.so"
+
+  if command -v sha256sum >/dev/null 2>&1 && [ -f "$host_cpp" ] && [ -f "$stage/usr/lib/libc++_shared.so" ]; then
+    local host_sha stage_sha
+    host_sha="$(sha256sum "$host_cpp" | awk '{print $1}')"
+    stage_sha="$(sha256sum "$stage/usr/lib/libc++_shared.so" | awk '{print $1}')"
+    [ "$host_sha" = "$stage_sha" ] || {
+      echo "[DSH] Staged libc++ checksum diverged from host after ABI sync." >&2
+      return 7
+    }
+  fi
+}
+
+dsh_validate_staged_dynamic_abi() {
+  local stage="$1"
+  local log="$CACHE_DIR/embedded-dynamic-abi-preflight.log"
+  local envv=(env LD_LIBRARY_PATH="$stage/usr/lib" PATH="$stage/usr/bin:/system/bin")
+
+  if ! "${envv[@]}" "$stage/usr/bin/gdb" --version >"$log" 2>&1; then
+    echo "[DSH] Early staged GDB ABI preflight failed." >&2
+    sed -n '1,140p' "$log" >&2 || true
+    return 7
+  fi
+  if ! "${envv[@]}" "$stage/usr/bin/gdbserver" --version >"$log" 2>&1; then
+    echo "[DSH] Early staged gdbserver ABI preflight failed." >&2
+    sed -n '1,140p' "$log" >&2 || true
+    return 7
+  fi
+  if ! "${envv[@]}" "$stage/usr/bin/strace" -V >"$log" 2>&1; then
+    echo "[DSH] Early staged strace ABI preflight failed." >&2
+    sed -n '1,140p' "$log" >&2 || true
+    return 7
+  fi
+  if ! "${envv[@]}" "$stage/usr/bin/rizin" -v >"$log" 2>&1; then
+    echo "[DSH] Early staged Rizin ABI preflight failed." >&2
+    sed -n '1,140p' "$log" >&2 || true
+    return 7
+  fi
+  echo "[DSH] Early staged dynamic-analysis ABI preflight: OK"
+}
+
 install_termux_tool_runtime() {
   local stage="$1"
   [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || { echo "[DSH] Embedded Termux tool runtime disabled."; return 0; }
@@ -374,6 +531,7 @@ install_termux_tool_runtime() {
   done
 
   dsh_validate_host_tool_contract || return 7
+  dsh_repair_broken_host_dynamic_tools || return 7
 
   # Do not assume that a command is owned by the package name we seeded.
   # Termux frequently splits commands into subpackages (Frida is one example).
@@ -538,6 +696,9 @@ EOF_TERMUX_WRAPPER
   while IFS= read -r -d '' elf; do
     case "$(file -b "$elf" 2>/dev/null || true)" in *ELF*) copy_link_deps "$elf" "$stage/usr/lib" ;; esac
   done < <(find "$stage/usr/bin" "$stage/usr/libexec/dsh/pm-bin" -maxdepth 1 -type f -print0 2>/dev/null)
+
+  dsh_sync_staged_dynamic_abi "$stage" || return 7
+  dsh_validate_staged_dynamic_abi "$stage" || return 7
 
   # Validate package contents immediately. Do not spend minutes compiling
   # node-pty only to discover that a requested Termux subpackage did not

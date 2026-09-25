@@ -250,7 +250,7 @@ process_list → module_list/process_maps → binary_functions/binary_xrefs
 
 动态工具默认不会绕过 Android 的进程隔离。分析其他应用时，目标必须是可调试/同 UID，或设备已由用户自行提供允许 ptrace/Frida 的 root/debug 环境。Frida 客户端与 server 二进制会随 Runtime 打包，但不会由应用静默提权或自动启动 root 服务。Termux 当前把 Frida 拆成 `frida`（server）与 `frida-python`（CLI）两个包；GDB 的远程后端同样拆成独立 `gdbserver` 子包。构建器会安装这些真实 provider，并在 staging 前根据每个可执行文件的实际 dpkg owner 自动扩充包闭包。Frida CLI 的 pip 运行时依赖也会显式复制并通过 `frida-ps --help` / `frida-trace --help` smoke test 验证。
 
-构建动态工具链时不会再无条件刷新宿主 Termux 软件源：只有缺少 GDB/strace/Rizin/Frida 等包时才联网，且使用隔离的临时 APT source/list；默认先访问 `https://packages.termux.dev/apt`，失败再回退 `https://packages-cf.termux.dev/apt`。这不会改写用户 Termux 的 `sources.list`。如果所需包已经安装，构建可直接离线进入 staging。可通过 `DSH_TERMUX_PRIMARY_APT_BASE` / `DSH_TERMUX_FALLBACK_APT_BASE` 覆盖两个构建期镜像。
+构建动态工具链时会先做宿主 ABI smoke：GDB/gdbserver/strace/Rizin/Frida 即使“已安装”，也必须真正能启动；若检测到类似新 GDB + 旧 libc++ 的部分升级状态，构建器会通过隔离软件源重装对应 ABI 家族，再把同一套 ELF 依赖与 libc++ 同步进 staged Runtime。只有缺包或检测到 ABI 损坏时才联网。除此之外，构建动态工具链时不会再无条件刷新宿主 Termux 软件源：只有缺少 GDB/strace/Rizin/Frida 等包时才联网，且使用隔离的临时 APT source/list；默认先访问 `https://packages.termux.dev/apt`，失败再回退 `https://packages-cf.termux.dev/apt`。这不会改写用户 Termux 的 `sources.list`。如果所需包已经安装，构建可直接离线进入 staging。可通过 `DSH_TERMUX_PRIMARY_APT_BASE` / `DSH_TERMUX_FALLBACK_APT_BASE` 覆盖两个构建期镜像。
 
 这样模型可以完成“定位 → 阅读 → 修改 → 审查 diff → 构建验证”，以及“静态定位 → 运行时模块基址 → 动态观察 → 回到静态 XREF”的闭环。
 

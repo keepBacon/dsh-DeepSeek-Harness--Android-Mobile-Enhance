@@ -40,7 +40,7 @@ DSH_NATIVE_COMPAT="${DSH_NATIVE_COMPAT:-1}"
 DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
 DSH_ALLOW_DEGRADED="${DSH_ALLOW_DEGRADED:-0}"
 DSH_TERMUX_TOOLS="${DSH_TERMUX_TOOLS:-1}"
-DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 gdb gdbserver strace rizin}"
+DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 libc++ gdb gdbserver strace rizin}"
 DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-frida frida-python}"
 DSH_TERMUX_PRIMARY_APT_BASE="${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
 DSH_TERMUX_FALLBACK_APT_BASE="${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
@@ -659,7 +659,7 @@ build_native_modules() {
     echo "[DSH] Building node-pty: $dir"
     rm -rf "$dir/build"
     if ! (cd "$dir" && \
-      env npm_config_nodedir="$node_headers" GYP_DEFINES="android_ndk_path=''" \
+      env npm_package_config_node_gyp_nodedir="$node_headers" GYP_DEFINES="android_ndk_path=''" \
         CC=clang CXX=clang++ CFLAGS="$flags" CXXFLAGS="$flags" \
         npm run install --if-present); then
       pty_failed=1
@@ -1198,6 +1198,8 @@ refresh_dsh_runtime() {
   build_native_modules "$stage" "$node_headers"
   validate_reusable_node_pty "$stage"
   validate_terminal_runtime "$stage"
+  dsh_sync_staged_dynamic_abi "$stage"
+  dsh_validate_staged_dynamic_abi "$stage"
   validate_termux_tool_runtime "$stage"
   install_sharp_wasm "$stage" "$used_registry"
   apply_android_runtime_patches "$stage"
