@@ -707,6 +707,26 @@ class MainActivity : ComponentActivity() {
     })
 
     wrap.addView(TextView(this).apply {
+      text = "工具与 MCP"
+      textSize = 16f
+      setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
+    })
+    wrap.addView(TextView(this).apply {
+      text = engineManager.mcpRuntimeSummary()
+      textSize = 12f
+      setPadding(0, 0, 0, (8 * density).toInt())
+    })
+    wrap.addView(Button(this).apply {
+      text = "管理 MCP / 协议 / 逆向工具"
+      setOnClickListener { showMcpManager() }
+    })
+    wrap.addView(TextView(this).apply {
+      text = "内置 mobile_tools 直接提供协议解析、Hash、ELF 信息、符号、Strings 和反汇编；IDA / Ghidra / Binary Ninja 通过远程 MCP 连接。"
+      textSize = 12f
+      setPadding(0, (6 * density).toInt(), 0, 0)
+    })
+
+    wrap.addView(TextView(this).apply {
       text = "关于"
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
@@ -2763,6 +2783,156 @@ class MainActivity : ComponentActivity() {
       // package metadata diagnostics are handled by DSH/pnpm after selection.
     }
     return packageRoot.absolutePath
+  }
+
+  private fun showMcpManager() {
+    val density = resources.displayMetrics.density
+    val root = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding((16 * density).toInt(), (8 * density).toInt(), (16 * density).toInt(), 0)
+    }
+    root.addView(TextView(this).apply {
+      text = engineManager.mcpRuntimeSummary()
+      textSize = 13f
+      setPadding(0, 0, 0, (10 * density).toInt())
+    })
+    engineManager.mcpConfigurationIssue()?.let { issue ->
+      root.addView(TextView(this).apply { text = issue; textSize = 12f })
+    }
+
+    lateinit var dialog: android.app.AlertDialog
+    root.addView(Button(this).apply {
+      text = if (engineManager.mcpToolboxEnabled()) "关闭内置 mobile_tools" else "启用内置 mobile_tools"
+      setOnClickListener {
+        val target = !engineManager.mcpToolboxEnabled()
+        dialog.dismiss()
+        runProfileMutation("正在应用 MCP 工具箱配置…") { engineManager.setMcpToolboxEnabled(target) }
+      }
+    })
+
+    engineManager.listMcpServers().forEach { server ->
+      val target = if (server.transport == McpConfigManager.HTTP) server.url else server.command + " " + server.args.joinToString(" ")
+      root.addView(TextView(this).apply {
+        text = (if (server.enabled) "● " else "○ ") + server.serverName + "\n" + server.transport + " · " + target
+        textSize = 13f
+        setTextIsSelectable(true)
+        setPadding(0, (12 * density).toInt(), 0, (4 * density).toInt())
+      })
+      val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+      row.addView(Button(this).apply {
+        text = if (server.enabled) "停用" else "启用"
+        setOnClickListener {
+          dialog.dismiss()
+          runProfileMutation("正在更新 MCP…") { engineManager.setMcpServerEnabled(server.id, !server.enabled) }
+        }
+      }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+      row.addView(Button(this).apply {
+        text = "删除"
+        setOnClickListener {
+          dialog.dismiss()
+          runProfileMutation("正在删除 MCP…") { engineManager.removeMcpServer(server.id) }
+        }
+      }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+      root.addView(row)
+    }
+
+    root.addView(Button(this).apply {
+      text = "添加 Streamable HTTP MCP"
+      setOnClickListener { dialog.dismiss(); showMcpEditor(McpConfigManager.HTTP, "generic") }
+    })
+    root.addView(Button(this).apply {
+      text = "添加本地 stdio MCP"
+      setOnClickListener { dialog.dismiss(); showMcpEditor(McpConfigManager.STDIO, "generic") }
+    })
+    root.addView(Button(this).apply {
+      text = "IDA MCP（远程）"
+      setOnClickListener { dialog.dismiss(); showMcpEditor(McpConfigManager.HTTP, "ida") }
+    })
+    root.addView(TextView(this).apply {
+      text = "IDA 本体运行在电脑端；填写电脑局域网 IP 或可达的 HTTPS MCP 地址。手机上的 127.0.0.1 只指向手机本身。"
+      textSize = 12f
+      setPadding(0, (6 * density).toInt(), 0, 0)
+    })
+
+    dialog = android.app.AlertDialog.Builder(this)
+      .setTitle("MCP 工具")
+      .setView(android.widget.ScrollView(this).apply { addView(root) })
+      .setPositiveButton("完成", null)
+      .create()
+    dialog.show()
+  }
+
+  private fun showMcpEditor(transport: String, preset: String) {
+    val isHttp = transport == McpConfigManager.HTTP
+    val density = resources.displayMetrics.density
+    val root = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding((16 * density).toInt(), (8 * density).toInt(), (16 * density).toInt(), 0)
+    }
+    if (preset == "ida") root.addView(TextView(this).apply {
+      text = "连接电脑端 IDA MCP 服务。相同方式也可连接 Ghidra / Binary Ninja MCP bridge。"
+      textSize = 12f
+    })
+    val name = android.widget.EditText(this).apply {
+      hint = "工具命名空间"
+      setSingleLine(true)
+      setText(if (preset == "ida") "mobile_ida" else if (isHttp) "mobile_http" else "mobile_local")
+    }
+    root.addView(name)
+    val primary = android.widget.EditText(this).apply {
+      hint = if (isHttp) "http://192.168.1.100:端口/mcp" else "命令，例如 npx"
+      setSingleLine(true)
+    }
+    root.addView(primary)
+    val args = android.widget.EditText(this).apply {
+      hint = "stdio 参数，每行一个"
+      minLines = 3
+      visibility = if (isHttp) View.GONE else View.VISIBLE
+    }
+    root.addView(args)
+    val bearer = android.widget.CheckBox(this).apply {
+      text = "使用 Bearer Token"
+      visibility = if (isHttp) View.VISIBLE else View.GONE
+    }
+    root.addView(bearer)
+    val token = android.widget.EditText(this).apply {
+      hint = "Bearer Token"
+      inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+      visibility = if (isHttp) View.VISIBLE else View.GONE
+    }
+    root.addView(token)
+
+    val dialog = android.app.AlertDialog.Builder(this)
+      .setTitle(if (preset == "ida") "添加 IDA MCP" else "添加 MCP")
+      .setView(root)
+      .setNegativeButton("取消", null)
+      .setPositiveButton("保存", null)
+      .create()
+    dialog.setOnShowListener {
+      dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+        val serverName = name.text?.toString()?.trim().orEmpty()
+        if (!Regex("""^[A-Za-z0-9_-]{1,32}$""").matches(serverName) || serverName == McpConfigManager.BUILTIN) {
+          name.error = "命名空间无效"; return@setOnClickListener
+        }
+        val value = primary.text?.toString()?.trim().orEmpty()
+        if (value.isBlank()) { primary.error = "不能为空"; return@setOnClickListener }
+        val server = McpServerConfig(
+          id = java.util.UUID.randomUUID().toString(),
+          serverName = serverName,
+          transport = transport,
+          command = if (isHttp) "" else value,
+          args = if (isHttp) emptyList() else args.text?.toString()?.lines()?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty(),
+          url = if (isHttp) value else "",
+          bearerAuth = isHttp && bearer.isChecked,
+          enabled = true,
+          preset = preset,
+        )
+        val bearerToken = token.text?.toString()?.trim().orEmpty().takeIf { it.isNotBlank() }
+        dialog.dismiss()
+        runProfileMutation("正在应用 MCP 配置…") { engineManager.saveMcpServer(server, bearerToken) }
+      }
+    }
+    dialog.show()
   }
 
   /** Native package-spec prompt; installation itself runs in the embedded runtime. */
