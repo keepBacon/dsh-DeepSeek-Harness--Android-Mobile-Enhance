@@ -91,6 +91,18 @@ validate_staged_termux_payload_contract() {
   require_exact_tool gdbserver gdbserver
   require_exact_tool strace strace
   require_exact_tool rizin rizin
+  require_exact_tool 7z 7zip
+  require_exact_tool yq yq
+  require_exact_tool sqlite3 libsqlite
+  require_exact_tool cmake cmake
+  require_exact_tool ninja ninja
+  require_exact_tool ss iproute2
+  require_exact_tool dig dnsutils
+  require_exact_tool identify imagemagick
+  require_exact_tool convert imagemagick
+  require_exact_tool ffmpeg ffmpeg
+  require_exact_tool ffprobe ffmpeg
+  require_exact_tool pdfinfo poppler
   # Termux splits Frida: the server is in "frida", while Python CLI tools
   # (frida/frida-ps/frida-trace) are in the "frida-python" subpackage.
   require_exact_tool frida frida-python
@@ -104,7 +116,7 @@ validate_staged_termux_payload_contract() {
   if [ "$fail" -ne 0 ]; then
     echo "[DSH] Embedded Termux payload contract failed before native-module compilation." >&2
     echo "[DSH] Host package ownership diagnostics:" >&2
-    for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server readelf greadelf objdump gobjdump nm gnm strings gstrings; do
+    for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig identify convert ffmpeg ffprobe pdfinfo readelf greadelf objdump gobjdump nm gnm strings gstrings; do
       local host_path="${PREFIX:-/data/data/com.termux/files/usr}/bin/$cmd"
       if [ -e "$host_path" ]; then
         dpkg-query -S "$host_path" 2>/dev/null | head -n 1 >&2 || true
@@ -686,6 +698,7 @@ EOF_TERMUX_WRAPPER
   # binary is fully relocatable when copied into the app-private runtime.
   for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3 \
     openssl file curl jq aapt2 rizin rz-asm rz-bin rz-find frida frida-ps frida-trace \
+    7z yq sqlite3 cmake ninja ss dig identify convert ffmpeg ffprobe pdfinfo \
     ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip; do
     rm -f "$stage/usr/libexec/dsh/wrappers/$cmd"
     ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$cmd"
@@ -786,5 +799,22 @@ validate_termux_tool_runtime() {
     sed -n '1,80p' "$pkg_log" >&2 || true
     return 7
   fi
-  echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + binutils + openssl + gdb/strace/rizin/frida + common CLI)"
+  local basic_log="$CACHE_DIR/basic-tools-smoke.log"
+  for cmd in 7z yq sqlite3 cmake ninja ss dig identify convert ffmpeg ffprobe pdfinfo; do
+    : > "$basic_log"
+    case "$cmd" in
+      7z) "${common_env[@]}" "$wrappers/$cmd" i >"$basic_log" 2>&1 ;;
+      yq|sqlite3|cmake|ninja|ffmpeg|ffprobe) "${common_env[@]}" "$wrappers/$cmd" --version >"$basic_log" 2>&1 ;;
+      ss) "${common_env[@]}" "$wrappers/$cmd" -V >"$basic_log" 2>&1 ;;
+      dig) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 ;;
+      identify|convert) "${common_env[@]}" "$wrappers/$cmd" -version >"$basic_log" 2>&1 ;;
+      pdfinfo) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 ;;
+    esac
+    if [ "$?" -ne 0 ]; then
+      echo "[DSH] Embedded basic tool smoke failed: $cmd" >&2
+      sed -n '1,120p' "$basic_log" >&2 || true
+      return 7
+    fi
+  done
+  echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + binutils + openssl + dynamic tools + basic_tools CLI)"
 }
