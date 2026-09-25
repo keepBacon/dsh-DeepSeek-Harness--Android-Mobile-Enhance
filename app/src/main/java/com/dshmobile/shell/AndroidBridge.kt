@@ -30,6 +30,7 @@ class AndroidBridge(
   private val onDeleteSkill: (String) -> String = { JSONObject().put("ok", false).put("error", "Skill manager unavailable").toString() },
   private val onDeleteSkillCollection: (String) -> String = { JSONObject().put("ok", false).put("error", "Skill collection manager unavailable").toString() },
   private val onWorkspacePath: () -> String? = { null },
+  private val onRememberWorkspacePath: (String) -> Boolean = { false },
   private val pickToken: String? = null,
 ) {
 
@@ -120,6 +121,15 @@ class AndroidBridge(
   @JavascriptInterface
   fun getLastWorkspacePath(capability: String): String? =
     if (authorized(capability)) onWorkspacePath() else null
+
+  /**
+   * Synchronize the Android shell's file-operation root with the Workspace
+   * currently owned by the DSH Web Session. The Activity validates and
+   * canonicalizes the path before it is persisted.
+   */
+  @JavascriptInterface
+  fun setCurrentWorkspacePath(capability: String, path: String): Boolean =
+    authorized(capability) && onRememberWorkspacePath(path)
 
   @JavascriptInterface
   fun getPickToken(capability: String): String? =
