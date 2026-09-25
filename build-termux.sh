@@ -952,6 +952,20 @@ apply_android_runtime_patches() {
   DSH_TARGET_VERSION="$DSH_VERSION" node "$ROOT/scripts/android-runtime-patch.mjs" "$stage/usr"
 }
 
+validate_android_typescript_code_runtime() {
+  local stage="$1"
+  echo '[DSH] Validating Android TypeScript run_code parser…'
+  env \
+    PATH="$stage/usr/bin:/system/bin" \
+    LD_LIBRARY_PATH="$stage/usr/lib" \
+    TERMUX__PREFIX="$stage/usr" \
+    PREFIX="$stage/usr" \
+    "$stage/usr/bin/node" "$ROOT/scripts/android-runtime-patch.mjs" --self-test || {
+      echo '[DSH] Android TypeScript run_code parser self-test failed.'
+      exit 8
+    }
+}
+
 install_mobile_mcp_toolbox() {
   local stage="$1"
   local dest="$stage/usr/libexec/dsh-mobile/toolbox-mcp.mjs"
@@ -1155,6 +1169,7 @@ refresh_dsh_runtime() {
   validate_pnpm_runtime "$stage"
   copy_native_module_deps "$stage"
   install_mobile_mcp_toolbox "$stage"
+  validate_android_typescript_code_runtime "$stage"
   validate_dsh_core_plugin_tree "$stage"
   mkdir -p "$stage/usr/etc"
   local embedded_node
