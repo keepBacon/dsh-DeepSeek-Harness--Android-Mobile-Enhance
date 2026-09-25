@@ -690,7 +690,7 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { showMcpManager() }
     })
     wrap.addView(TextView(this).apply {
-      text = "内置 mobile_tools 现覆盖源码、Git、HTTP、APK/ELF、进程/模块/内存只读分析、strace、Frida、GDB 动态调试、Rizin XREF/函数、JNI 与 IL2CPP 辅助分析；外部进程仍受 Android root/debuggable/ptrace 权限约束。IDA / Ghidra / Binary Ninja 继续通过远程 MCP 连接。"
+      text = "内置 mobile_tools 现在采用无 Root / 无 Shizuku 优先路径：可直接分析自身/同 UID 进程、FD/socket、运行时快照与子进程 strace；用户开启 Android 无线调试并主动配对后，可通过内置 ADB client 获取 package/process/logcat/JDWP/APK 信息。Frida/GDB/其它进程内存接口作为权限允许时的增强能力，不再作为默认路径。IDA / Ghidra / Binary Ninja 继续通过远程 MCP 连接。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
