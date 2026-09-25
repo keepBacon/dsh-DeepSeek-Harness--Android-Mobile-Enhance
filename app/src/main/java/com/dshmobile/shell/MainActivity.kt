@@ -491,7 +491,7 @@ class MainActivity : ComponentActivity() {
     // WebView 下载：会话日志导出（/api/session.export）与其余引擎源下载
     // 统一保存到当前 DSH 工作目录——浏览器导航带 Origin:null 会被 dsh
     // 的 /api browser-trust fence 拒绝（403），app 内 HttpURLConnection
-    // 无浏览器标记 → fence 放行（403 修复路径，见 downloadToDownloads）。
+    // 无浏览器标记 → fence 放行（403 修复路径，见 downloadToWorkspace）。
     webView.setDownloadListener { url, _userAgent, contentDisposition, mimeType, _contentLength ->
       downloadToWorkspace(url, contentDisposition, mimeType)
     }
@@ -3790,7 +3790,8 @@ class MainActivity : ComponentActivity() {
         android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
       ))
       addView(list, android.widget.LinearLayout.LayoutParams(
-        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
+        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        (360 * resources.displayMetrics.density).toInt(),
       ))
     }
 
@@ -3859,7 +3860,12 @@ class MainActivity : ComponentActivity() {
       }
       dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
         val files = selected.mapNotNull { path ->
-          try { java.io.File(path).canonicalFile.takeIf { it.isFile && isInsideWorkspace(root, it) } } catch (_: Throwable) { null }
+          try {
+            val original = java.io.File(path)
+            original.canonicalFile.takeIf {
+              it.isFile && !isWorkspaceSymlink(original) && isInsideWorkspace(root, it)
+            }
+          } catch (_: Throwable) { null }
         }
         if (files.isEmpty()) {
           showTestNotification("请选择文件", "文件必须位于当前工作目录内")
@@ -3908,7 +3914,8 @@ class MainActivity : ComponentActivity() {
         android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
       ))
       addView(list, android.widget.LinearLayout.LayoutParams(
-        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
+        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        (360 * resources.displayMetrics.density).toInt(),
       ))
     }
 
@@ -4117,7 +4124,9 @@ class MainActivity : ComponentActivity() {
       val disposition = c.getHeaderField("Content-Disposition") ?: request.contentDisposition
       val mime = normalizeMime(c.contentType ?: request.hintedMime, request.url)
       val filename = sanitizeFilename(parseDownloadFilename(request.url, disposition, mime))
-      val target = c.inputStream.use { input -> saveToWorkspaceStreamed(destination, filename, input) }
+      val target = c.inputStream.use { input ->
+        saveToWorkspaceStreamed(workspaceRoot, destination, filename, input)
+      }
       val relative = try { workspaceRoot.toPath().relativize(target.toPath()).toString() } catch (_: Throwable) { target.name }
       runOnUiThread { showTestNotification("文件已导出", "工作目录/$relative") }
     } catch (t: Throwable) {
@@ -4128,18 +4137,22 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun saveToWorkspaceStreamed(
+    workspaceRoot: java.io.File,
     destination: java.io.File,
     filename: String,
     input: java.io.InputStream,
   ): java.io.File {
-    val root = currentWorkspaceRoot()
-    // The request itself also carries a root snapshot and performDownload
-    // validates containment before this method. This second check protects
-    // against a directory being replaced while a queued download waits.
-    if (!destination.isDirectory || (root != null && !isInsideWorkspace(root, destination))) {
-      throw java.io.IOException("导出目录不可用")
+    // Use the root snapshot captured when the user approved the export. A later
+    // UI workspace switch must not redirect or invalidate an already-approved
+    // queued write. Re-canonicalize immediately before opening the target.
+    val root = workspaceRoot.canonicalFile
+    val dir = destination.canonicalFile
+    if (!root.isDirectory || !dir.isDirectory || isWorkspaceSymlink(dir) ||
+      !isInsideWorkspace(root, dir)
+    ) {
+      throw java.io.IOException("导出目录不可用或已离开工作目录")
     }
-    val target = reserveUniqueFile(destination, filename)
+    val target = reserveUniqueFile(dir, filename)
     try {
       target.outputStream().buffered(128 * 1024).use { out ->
         copyWithLimit(input, out, MAX_DOWNLOAD_BYTES, "导出文件超过 2 GB 上限")
