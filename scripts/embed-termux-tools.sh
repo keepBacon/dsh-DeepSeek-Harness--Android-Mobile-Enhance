@@ -64,7 +64,7 @@ install_termux_tool_runtime() {
   for cmd in apt-cache dpkg-query proot python3 file; do
     command -v "$cmd" >/dev/null 2>&1 || {
       echo "[DSH] 缺少 Termux 工具 $cmd。" >&2
-      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file -y" >&2
+      echo "[DSH] 执行: pkg install proot python python-pip jq coreutils findutils grep sed gawk gzip zip less which procps make file binutils openssl -y" >&2
       return 7
     }
   done
@@ -207,6 +207,14 @@ validate_termux_tool_runtime() {
   "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/dpkg-query" -W python >/dev/null 2>&1 || { echo "[DSH] Embedded dpkg database smoke test failed."; return 7; }
+  for cmd in readelf objdump nm strings; do
+    "${common_env[@]}" "$stage/usr/bin/$cmd" --version >/dev/null 2>&1 || {
+      echo "[DSH] Embedded binary-analysis tool failed: $cmd"; return 7;
+    }
+  done
+  "${common_env[@]}" "$stage/usr/bin/openssl" version >/dev/null 2>&1 || {
+    echo "[DSH] Embedded OpenSSL smoke test failed."; return 7;
+  }
 
   local apt_log="$CACHE_DIR/embedded-apt-smoke.log"
   if ! "${common_env[@]}" "$wrappers/apt" --version >"$apt_log" 2>&1; then
@@ -221,5 +229,5 @@ validate_termux_tool_runtime() {
     sed -n '1,80p' "$pkg_log" >&2 || true
     return 7
   fi
-  echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + common CLI)"
+  echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + binutils + openssl + common CLI)"
 }
