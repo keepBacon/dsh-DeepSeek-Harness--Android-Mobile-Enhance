@@ -802,16 +802,17 @@ validate_termux_tool_runtime() {
   local basic_log="$CACHE_DIR/basic-tools-smoke.log"
   for cmd in 7z yq sqlite3 cmake ninja ss dig identify convert ffmpeg ffprobe pdfinfo; do
     : > "$basic_log"
+    local smoke_rc=0
     case "$cmd" in
-      7z) "${common_env[@]}" "$wrappers/$cmd" i >"$basic_log" 2>&1 ;;
-      yq|sqlite3|cmake|ninja|ffmpeg|ffprobe) "${common_env[@]}" "$wrappers/$cmd" --version >"$basic_log" 2>&1 ;;
-      ss) "${common_env[@]}" "$wrappers/$cmd" -V >"$basic_log" 2>&1 ;;
-      dig) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 ;;
-      identify|convert) "${common_env[@]}" "$wrappers/$cmd" -version >"$basic_log" 2>&1 ;;
-      pdfinfo) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 ;;
+      7z) "${common_env[@]}" "$wrappers/$cmd" i >"$basic_log" 2>&1 || smoke_rc=$? ;;
+      yq|sqlite3|cmake|ninja|ffmpeg|ffprobe) "${common_env[@]}" "$wrappers/$cmd" --version >"$basic_log" 2>&1 || smoke_rc=$? ;;
+      ss) "${common_env[@]}" "$wrappers/$cmd" -V >"$basic_log" 2>&1 || smoke_rc=$? ;;
+      dig) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 || smoke_rc=$? ;;
+      identify|convert) "${common_env[@]}" "$wrappers/$cmd" -version >"$basic_log" 2>&1 || smoke_rc=$? ;;
+      pdfinfo) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 || smoke_rc=$? ;;
     esac
-    if [ "$?" -ne 0 ]; then
-      echo "[DSH] Embedded basic tool smoke failed: $cmd" >&2
+    if [ "$smoke_rc" -ne 0 ]; then
+      echo "[DSH] Embedded basic tool smoke failed: $cmd (exit=$smoke_rc)" >&2
       sed -n '1,120p' "$basic_log" >&2 || true
       return 7
     fi
