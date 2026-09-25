@@ -61,11 +61,7 @@ class MainActivity : ComponentActivity() {
   private val recoveryControls = mutableListOf<View>()
   private var pendingPickCallback: String? = null
   private var filePathCallback: ValueCallback<Array<Uri>>? = null
-  private enum class WorkspaceImportAction { FILES, BULK }
-
   private var pendingWorkspaceImportPath: String? = null
-  private var pendingWorkspaceImportAction: WorkspaceImportAction? = null
-  private var pendingSharedImportUris: List<Uri>? = null
   private var legacyDirectoryPermissionPending = false
   private val legacyPermissionRequestRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -165,32 +161,6 @@ class MainActivity : ComponentActivity() {
         return@registerForActivityResult
       }
       importFilesIntoWorkspace(workspace, readable)
-    }
-
-  /**
-   * Select/replace the import target and then resume the action that originally
-   * requested it. This removes the old dead-end where Settings told the user to
-   * leave the dialog, configure a workspace elsewhere, then come back and retry.
-   */
-  private val workspaceImportTargetPicker =
-    registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-      val sharedUris = pendingSharedImportUris
-      pendingSharedImportUris = null
-      val pendingAction = pendingWorkspaceImportAction
-      pendingWorkspaceImportAction = null
-
-      if (uri == null) return@registerForActivityResult
-      val path = resolveWritableWorkspacePath(uri)
-      if (path == null) {
-        showSimpleMessage("无法直接写入该目录", "请选择内部存储或可直接访问的外部存储目录。")
-        return@registerForActivityResult
-      }
-
-      ShellState.rememberWorkspacePath(this, path)
-      when {
-        sharedUris != null -> importFilesIntoWorkspace(path, sharedUris)
-        pendingAction == WorkspaceImportAction.BULK -> showWorkspaceBulkImportPicker(path)
-      }
     }
 
   /** Android SAF import for local plugin tarballs (content:// -> private real path). */
@@ -678,7 +648,7 @@ class MainActivity : ComponentActivity() {
     wrap.addView(group)
 
     wrap.addView(TextView(this).apply {
-      text = "从手机复制到工作区（维护）"
+      text = "从手机导入到当前工作区"
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
     })
@@ -700,7 +670,7 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { showWorkspaceBulkImportPicker() }
     })
     wrap.addView(TextView(this).apply {
-      text = "这是把外部手机文件复制进工作区的维护入口。DSH 对话中的文件选择与所有 Web 导出都只浏览当前工作目录，不会打开系统全局文件选择器。"
+      text = "手机文件只作为来源；目标始终是当前 DSH 工作目录。没有当前工作区时不会允许导入，也不会让导入流程另选目标目录。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
@@ -2344,8 +2314,10 @@ class MainActivity : ComponentActivity() {
   private fun showWorkspaceBulkImportPicker() {
     val workspace = currentWritableWorkspacePath()
     if (workspace == null) {
-      pendingWorkspaceImportAction = WorkspaceImportAction.BULK
-      workspaceImportTargetPicker.launch(null)
+      showSimpleMessage(
+        "没有当前工作目录",
+        "请先在 DSH 中打开一个工作区。手机文件和文件夹只会复制到当前工作目录，不会创建、替换或切换工作区。",
+      )
       return
     }
     showWorkspaceBulkImportPicker(workspace)
@@ -2739,6 +2711,15 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  private fun releaseImportReadPermission(uri: Uri) {
+    if (uri.scheme != "content") return
+    try {
+      contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    } catch (_: Throwable) {
+      // The provider may have supplied only a transient grant.
+    }
+  }
+
   private fun importFilesIntoWorkspace(workspacePath: String, uris: List<Uri>) {
     Thread {
       val imported = mutableListOf<String>()
@@ -2773,6 +2754,8 @@ class MainActivity : ComponentActivity() {
           } catch (t: Throwable) {
             val label = queryDisplayName(uri) ?: uri.lastPathSegment ?: "未知文件"
             failures += "$label：${t.message ?: t.javaClass.simpleName}"
+          } finally {
+            releaseImportReadPermission(uri)
           }
         }
       } catch (t: Throwable) {
