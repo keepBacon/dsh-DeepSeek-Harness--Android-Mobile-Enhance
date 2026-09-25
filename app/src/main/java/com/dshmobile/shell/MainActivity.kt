@@ -150,10 +150,21 @@ class MainActivity : ComponentActivity() {
       pendingWorkspaceImportPath = null
       if (uris.isEmpty()) return@registerForActivityResult
       if (workspace.isNullOrBlank()) {
-        showSimpleMessage("没有当前工作目录", "请先在 DSH 中选择工作目录。手机文件导入只会复制文件，不会创建或切换工作目录。")
+        showSimpleMessage("导入已取消", "打开手机文件选择器前没有有效的当前 DSH 工作目录。请先打开工作区后重试。")
         return@registerForActivityResult
       }
-      importFilesIntoWorkspace(workspace, uris)
+
+      // ACTION_OPEN_DOCUMENT returns content:// handles. Persist read authority
+      // before the copy thread starts so large/multi-file imports are not tied
+      // to the Activity result callback lifetime.
+      val readable = uris.distinctBy { it.toString() }.filter { uri ->
+        persistImportReadPermission(uri)
+      }
+      if (readable.isEmpty()) {
+        showSimpleMessage("无法读取所选文件", "系统没有授予可用的文件读取权限，请重新选择文件。")
+        return@registerForActivityResult
+      }
+      importFilesIntoWorkspace(workspace, readable)
     }
 
   /**
@@ -178,10 +189,6 @@ class MainActivity : ComponentActivity() {
       ShellState.rememberWorkspacePath(this, path)
       when {
         sharedUris != null -> importFilesIntoWorkspace(path, sharedUris)
-        pendingAction == WorkspaceImportAction.FILES -> {
-          pendingWorkspaceImportPath = path
-          workspaceFilePicker.launch(arrayOf("*/*"))
-        }
         pendingAction == WorkspaceImportAction.BULK -> showWorkspaceBulkImportPicker(path)
       }
     }
@@ -683,8 +690,8 @@ class MainActivity : ComponentActivity() {
     }
     wrap.addView(workspacePathLabel)
     wrap.addView(Button(this).apply {
-      text = "导入文件（可多选）"
-      contentDescription = "选择多个手机文件并复制到当前 DSH 工作区"
+      text = "从手机导入文件（可多选）"
+      contentDescription = "从手机选择多个文件并复制到当前 DSH 工作目录"
       setOnClickListener { showWorkspaceImportDialog() }
     })
     wrap.addView(Button(this).apply {
@@ -2509,8 +2516,11 @@ class MainActivity : ComponentActivity() {
   private fun showWorkspaceImportDialog() {
     val workspace = currentWritableWorkspacePath()
     if (workspace == null) {
-      pendingWorkspaceImportAction = WorkspaceImportAction.FILES
-      workspaceImportTargetPicker.launch(null)
+      pendingWorkspaceImportPath = null
+      showSimpleMessage(
+        "没有当前工作目录",
+        "请先在 DSH 中打开一个工作区。手机文件只会复制到当前工作目录，不会创建、替换或切换工作区。",
+      )
       return
     }
     pendingWorkspaceImportPath = workspace
@@ -2546,31 +2556,25 @@ class MainActivity : ComponentActivity() {
     // Prevent recreation from replaying the same external share.
     source.action = null
     if (uris.isEmpty()) return
-    val workspace = ShellState.lastWorkspacePath(this)
+    val workspace = currentWritableWorkspacePath()
     if (workspace.isNullOrBlank()) {
-      pendingSharedImportUris = uris
-      android.app.AlertDialog.Builder(this)
-        .setTitle("导入到 DSH 工作区")
-        .setMessage("尚未记录工作区目录。请选择目标目录后导入这 ${uris.size} 个文件。")
-        .setNegativeButton("取消") { _, _ -> pendingSharedImportUris = null }
-        .setPositiveButton("选择目录") { _, _ -> workspaceImportTargetPicker.launch(null) }
-        .show()
+      showSimpleMessage(
+        "无法导入到 DSH",
+        "当前没有可写工作目录。请先打开 DSH 工作区，再从系统分享文件到 DSH。",
+      )
+      return
+    }
+    val readable = uris.filter { persistImportReadPermission(it) }
+    if (readable.isEmpty()) {
+      showSimpleMessage("无法读取共享文件", "系统没有授予可用的文件读取权限。")
       return
     }
     android.app.AlertDialog.Builder(this)
-      .setTitle("导入到 DSH 工作区")
-      .setMessage("将 ${uris.size} 个文件复制到：\n$workspace")
+      .setTitle("复制到当前 DSH 工作区")
+      .setMessage("将 ${readable.size} 个文件复制到：\n$workspace")
       .setNegativeButton("取消", null)
-      .setNeutralButton("更换目录") { _, _ -> chooseShareImportTarget(uris) }
-      .setPositiveButton("导入") { _, _ -> importFilesIntoWorkspace(workspace, uris) }
+      .setPositiveButton("复制") { _, _ -> importFilesIntoWorkspace(workspace, readable) }
       .show()
-  }
-
-  /** Destination override for a share intent without losing the selected URIs. */
-  private fun chooseShareImportTarget(uris: List<Uri>) {
-    pendingWorkspaceImportAction = null
-    pendingSharedImportUris = uris
-    workspaceImportTargetPicker.launch(null)
   }
 
   private data class WorkspaceFolderCopyState(
@@ -2712,6 +2716,29 @@ class MainActivity : ComponentActivity() {
     throw java.io.IOException("同名文件夹过多：$clean")
   }
 
+  /**
+   * Keep ACTION_OPEN_DOCUMENT / share-sheet content readable for the duration
+   * of a background copy. Some providers do not offer persistable grants; in
+   * that case probe the current transient grant and continue only if readable.
+   */
+  private fun persistImportReadPermission(uri: Uri): Boolean {
+    if (uri.scheme != "content") return uri.scheme == "file"
+    try {
+      contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    } catch (_: SecurityException) {
+      // Provider may expose only a transient read grant; verify it below.
+    } catch (_: UnsupportedOperationException) {
+      // Non-DocumentsProvider content URI: transient grant may still be valid.
+    } catch (_: Throwable) {
+      // Fall through to a real read probe.
+    }
+    return try {
+      contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } ?: false
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
   private fun importFilesIntoWorkspace(workspacePath: String, uris: List<Uri>) {
     Thread {
       val imported = mutableListOf<String>()
@@ -2721,7 +2748,10 @@ class MainActivity : ComponentActivity() {
         val root = java.io.File(workspacePath).canonicalFile
         canonicalRoot = root
         if (!root.exists() || !root.isDirectory) throw java.io.IOException("工作目录不存在：${root.absolutePath}")
-        if (!root.canWrite()) throw java.io.IOException("工作目录不可写，请检查‘所有文件访问权限’：${root.absolutePath}")
+        if (!root.canRead() || !root.canWrite()) throw java.io.IOException("工作目录不可读写：${root.absolutePath}")
+        if (java.nio.file.Files.isSymbolicLink(java.io.File(workspacePath).toPath())) {
+          throw java.io.IOException("拒绝通过符号链接作为工作目录导入")
+        }
 
         for (uri in uris.distinctBy { it.toString() }) {
           try {
