@@ -317,7 +317,7 @@ must "$BT" 'validate-web-runtime-smoke.mjs'
 must "$BT" 'web --port 0 --no-open'
 must "$BT" "grep -Fq 'dsh web: http://127.0.0.1:'"
 forbid "$BT" 'new RegExp(`dsh web:'
-forbid "$BT" "node" - "\$port" "\$smoke_log" <<'NODE'"
+forbid "$BT" 'node - "$port" "$smoke_log" <<'\''NODE'\'''
 must "$BT" '"webBrowserAuthSmokeTest": true'
 must "$BT" '"standaloneWebSmokeValidator": true'
 must "$BT" '"kernelAssignedWebSmokePort": true'
