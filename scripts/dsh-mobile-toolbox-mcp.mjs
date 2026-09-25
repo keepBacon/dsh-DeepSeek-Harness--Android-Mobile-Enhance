@@ -34,6 +34,14 @@ const tools=[
  {name:'android_logcat',description:'Read bounded Android logcat output, optionally filtered by package PID, tag, minimum level and recent seconds.',inputSchema:{type:'object',properties:{package:{type:'string'},tag:{type:'string'},level:{type:'string',enum:['V','D','I','W','E','F'],default:'V'},sinceSeconds:{type:'integer',minimum:1,maximum:86400},maxLines:{type:'integer',minimum:1,maximum:2000,default:400}},additionalProperties:false}},
  {name:'apk_inspect',description:'Inspect an APK with embedded aapt2/unzip: package/version/SDK/permissions/launchable activity/ABIs plus bounded manifest tree and archive metadata.',inputSchema:fileSchema},
 
+ {name:'reverse_capabilities',description:'Report which local Android reverse/debug backends are actually available: proc visibility, root status, Frida, GDB/gdbserver, strace, Rizin, debuggerd and binutils. Optionally probes Frida connectivity.',inputSchema:{type:'object',properties:{probeFrida:{type:'boolean',default:false}},additionalProperties:false}},
+ {name:'package_process_info',description:'Resolve an Android package to visible PID(s), UID, APK paths, data directory, ABI and debuggable flag using pidof/cmd/dumpsys. Read-only.',inputSchema:{type:'object',properties:{package:{type:'string'}},required:['package'],additionalProperties:false}},
+ {name:'native_backtrace',description:'Request a bounded native backtrace through Android debuggerd for an authorized/debuggable PID. Returns permission errors explicitly.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},maxLines:{type:'integer',minimum:1,maximum:4000,default:1200}},required:['pid'],additionalProperties:false}},
+ {name:'frida_detach',description:'Detach and close a managed persistent Frida session previously created with frida_attach/frida_spawn persistent=true.',inputSchema:{type:'object',properties:{sessionId:{type:'string'}},required:['sessionId'],additionalProperties:false}},
+ {name:'symbol_resolve',description:'Resolve a runtime address to its mapped module, load bias, RVA and best-effort addr2line/nearest-symbol information.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},address:{type:'string'}},required:['pid','address'],additionalProperties:false}},
+ {name:'address_rebase',description:'Convert module base + RVA to runtime VA, or runtime VA - module base to RVA using exact 64-bit integer arithmetic.',inputSchema:{type:'object',properties:{base:{type:'string'},rva:{type:'string'},runtimeAddress:{type:'string'}},required:['base'],additionalProperties:false}},
+ {name:'il2cpp_metadata_info',description:'Inspect a global-metadata.dat header: magic, metadata version, string table and raw section offset/size pairs with bounds checks.',inputSchema:{type:'object',properties:{metadata:{type:'string'}},required:['metadata'],additionalProperties:false}},
+ {name:'il2cpp_find_class',description:'Locate exact IL2CPP class/namespace names inside the validated metadata string table. Returns metadata offsets without inventing type-definition RVAs.',inputSchema:{type:'object',properties:{metadata:{type:'string'},name:{type:'string'},namespace:{type:'string'},maxResults:{type:'integer',minimum:1,maximum:256,default:64}},required:['metadata','name'],additionalProperties:false}},
  {name:'process_list',description:'List Android/Linux processes visible to this app UID. Returns PID/PPID/UID/name/cmdline; inaccessible processes are skipped.',inputSchema:{type:'object',properties:{nameFilter:{type:'string'},maxResults:{type:'integer',minimum:1,maximum:2000,default:300}},additionalProperties:false}},
  {name:'process_info',description:'Inspect one visible process through /proc: status, cmdline, executable, cwd and basic identity. Access follows Android kernel permissions.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1}},required:['pid'],additionalProperties:false}},
  {name:'process_maps',description:'Parse /proc/<pid>/maps into structured mappings with addresses, permissions, offsets and paths.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},pathContains:{type:'string'},executableOnly:{type:'boolean',default:false}},required:['pid'],additionalProperties:false}},
@@ -44,8 +52,8 @@ const tools=[
  {name:'memory_search',description:'Search readable process mappings for UTF-8 text or an exact hex byte pattern. Read-only and bounded by maxBytes.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},text:{type:'string'},hex:{type:'string'},pathContains:{type:'string'},maxBytes:{type:'integer',minimum:4096,maximum:134217728,default:67108864},maxMatches:{type:'integer',minimum:1,maximum:128,default:32}},required:['pid'],additionalProperties:false}},
  {name:'syscall_trace',description:'Trace system calls of an authorized/debuggable process with strace for a bounded duration. Categories: file/network/memory/process/signal/ipc.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},durationMs:{type:'integer',minimum:100,maximum:15000,default:3000},categories:{type:'array',items:{type:'string',enum:['file','network','memory','process','signal','ipc']},maxItems:6},maxLines:{type:'integer',minimum:1,maximum:4000,default:1000}},required:['pid'],additionalProperties:false}},
  {name:'frida_processes',description:'List processes/apps through the bundled Frida client. Requires a reachable Frida backend for targets outside this app sandbox.',inputSchema:{type:'object',properties:{device:{type:'string',enum:['local','usb','remote'],default:'local'},host:{type:'string'},appsOnly:{type:'boolean',default:false}},additionalProperties:false}},
- {name:'frida_attach',description:'Verify Frida attachment to a PID and return Process.id/arch/platform from a tiny one-shot script.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},device:{type:'string',enum:['local','usb','remote'],default:'local'},host:{type:'string'},timeoutMs:{type:'integer',minimum:500,maximum:30000,default:5000}},required:['pid'],additionalProperties:false}},
- {name:'frida_spawn',description:'Spawn an authorized package through Frida and optionally run a supplied script. Runtime access still depends on Android/root/debuggable permissions.',inputSchema:{type:'object',properties:{package:{type:'string'},script:{type:'string'},device:{type:'string',enum:['local','usb','remote'],default:'local'},host:{type:'string'},timeoutMs:{type:'integer',minimum:500,maximum:30000,default:8000}},required:['package'],additionalProperties:false}},
+ {name:'frida_attach',description:'Attach Frida to a PID. By default this is a one-shot verification; persistent=true creates a managed session that remains attached until frida_detach.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},device:{type:'string',enum:['local','usb','remote'],default:'local'},host:{type:'string'},timeoutMs:{type:'integer',minimum:500,maximum:30000,default:5000},persistent:{type:'boolean',default:false}},required:['pid'],additionalProperties:false}},
+ {name:'frida_spawn',description:'Spawn an authorized package through Frida and optionally run a supplied script. persistent=true creates a managed session closable with frida_detach.',inputSchema:{type:'object',properties:{package:{type:'string'},script:{type:'string'},device:{type:'string',enum:['local','usb','remote'],default:'local'},host:{type:'string'},timeoutMs:{type:'integer',minimum:500,maximum:30000,default:8000},persistent:{type:'boolean',default:false}},required:['package'],additionalProperties:false}},
  {name:'frida_script',description:'Run a bounded Frida JavaScript snippet against a PID, process name, or spawned package.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},name:{type:'string'},package:{type:'string'},script:{type:'string'},device:{type:'string',enum:['local','usb','remote'],default:'local'},host:{type:'string'},timeoutMs:{type:'integer',minimum:500,maximum:30000,default:8000}},required:['script'],additionalProperties:false}},
  {name:'frida_trace',description:'Run frida-trace for a bounded time against a PID and include pattern; partial trace output is returned when the duration ends.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1},include:{type:'string'},device:{type:'string',enum:['local','usb','remote'],default:'local'},host:{type:'string'},durationMs:{type:'integer',minimum:500,maximum:15000,default:5000},maxLines:{type:'integer',minimum:1,maximum:4000,default:1200}},required:['pid','include'],additionalProperties:false}},
  {name:'debug_session_start',description:'Start a persistent GDB/MI session and optionally attach to a PID. Use only on processes Android permits this app to debug.',inputSchema:{type:'object',properties:{pid:{type:'integer',minimum:1}},additionalProperties:false}},
@@ -141,6 +149,7 @@ async function optionalReadlink(path){try{return await readlink(path)}catch{retu
 function parseProcStatus(raw){const out={};for(const line of String(raw||'').split(/\r?\n/)){const i=line.indexOf(':');if(i>0)out[line.slice(0,i)]=line.slice(i+1).trim()}return out}
 function parseProcMaps(raw){const out=[];for(const line of String(raw).split(/\r?\n/)){if(!line)continue;const m=line.match(/^([0-9a-fA-F]+)-([0-9a-fA-F]+)\s+(\S+)\s+([0-9a-fA-F]+)\s+(\S+)\s+(\d+)\s*(.*)$/);if(!m)continue;const start=parseInt(m[1],16),end=parseInt(m[2],16);out.push({start:'0x'+m[1].toLowerCase(),end:'0x'+m[2].toLowerCase(),size:end-start,permissions:m[3],offset:'0x'+m[4].toLowerCase(),device:m[5],inode:Number(m[6]),path:m[7]||''})}return out}
 async function mapsFor(pid){const raw=await readFile(procFile(pid,'maps'),'utf8');return parseProcMaps(raw)}
+async function existsPathForTool(path){try{const s=await stat(path);return s.isFile()}catch{return false}}
 function addressNumber(value){const normalized=addr(value);const n=Number(BigInt(normalized));if(!Number.isSafeInteger(n))throw new Error('address exceeds safe integer range');return n}
 function toolDirect(name){return resolve(PREFIX,'bin',name)}
 function toolWrapped(name){return resolve(PREFIX,'libexec/dsh/wrappers',name)}
@@ -150,6 +159,54 @@ function decodeJniName(symbol){let s=symbol.replace(/^Java_/,'');const sig=s.ind
 function bufferPattern(a){const hasText=typeof a.text==='string',hasHex=typeof a.hex==='string';if(hasText===hasHex)throw new Error('provide exactly one of text or hex');if(hasText){const b=Buffer.from(text(a.text,'text',65536));if(!b.length)throw new Error('text pattern is empty');return{buffer:b,kind:'text',value:a.text}}const h=text(a.hex,'hex',131072).replace(/\s+/g,'');if(!/^(?:[0-9a-fA-F]{2})+$/.test(h))throw new Error('hex must contain complete bytes');return{buffer:Buffer.from(h,'hex'),kind:'hex',value:h.toLowerCase()}}
 function findBufferOffsets(haystack,needle,base,maxMatches){const out=[];let pos=0;while(out.length<maxMatches){const i=haystack.indexOf(needle,pos);if(i<0)break;out.push('0x'+(BigInt(base)+BigInt(i)).toString(16));pos=i+Math.max(1,needle.length)}return out}
 async function rizinJson(path,command,timeoutMs=20000){const r=await runProcess(toolWrapped('rizin'),['-2','-q','-c',command,path],{timeoutMs,maxOutputBytes:MAX_COMMAND_OUTPUT});if(r.exitCode!==0)throw new Error('rizin failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));const raw=r.stdout.trim();try{return JSON.parse(raw)}catch{const start=Math.min(...['[','{'].map(ch=>{const i=raw.indexOf(ch);return i<0?Number.MAX_SAFE_INTEGER:i}));if(Number.isSafeInteger(start)){try{return JSON.parse(raw.slice(start))}catch{}}return{raw:raw.slice(0,MAX_COMMAND_OUTPUT),stderr:r.stderr.trim()}}}
+
+function hexBig(value,name='address'){
+ const v=text(value,name,128)
+ if(!/^(?:0x)?[0-9a-fA-F]+$/.test(v))throw new Error(name+' must be a hexadecimal integer')
+ return BigInt('0x'+v.replace(/^0x/i,''))
+}
+function hexValue(value){return '0x'+BigInt(value).toString(16)}
+async function executableAvailable(path){try{const s=await stat(path);return s.isFile()&&(s.mode&0o111)!==0}catch{return false}}
+function metadataHeader(data,fileSize){
+ if(data.length<8)throw new Error('metadata header is shorter than 8 bytes')
+ const magic=data.readUInt32LE(0),version=data.readInt32LE(4)
+ const names=['stringLiteral','stringLiteralData','string','events','properties','methods','parameterDefaultValues','fieldDefaultValues','fieldAndParameterDefaultValueData','fieldMarshaledSizes','parameters','fields','genericParameters','genericParameterConstraints','genericContainers','nestedTypes','interfaces','vtableMethods','interfaceOffsets','typeDefinitions','rgctxEntries','images','assemblies','metadataUsageLists','metadataUsagePairs','fieldRefs','referencedAssemblies','attributesInfo','attributeTypes','unresolvedVirtualCallParameterTypes','unresolvedVirtualCallParameterRanges','windowsRuntimeTypeNames','windowsRuntimeStrings','exportedTypeDefinitions']
+ const sections=[]
+ for(let i=0;i<names.length;i++){const pos=8+i*8;if(pos+8>data.length)break;const offset=data.readUInt32LE(pos),rawSize=data.readUInt32LE(pos+4);sections.push({name:names[i],offset:'0x'+offset.toString(16),rawSizeOrCount:rawSize,inFile:offset<=fileSize&&rawSize<=fileSize&&offset+rawSize<=fileSize})}
+ return{magic:'0x'+magic.toString(16),magicOk:magic===0xfab11baf,version,sections}
+}
+
+const FRIDA_SESSIONS=new Map()
+let FRIDA_SEQ=0
+function fridaSession(id){const s=FRIDA_SESSIONS.get(text(id,'sessionId',128));if(!s||s.closed)throw new Error('unknown or closed Frida session');return s}
+async function startManagedFrida(a,targetArgs,userScript=''){
+ const id='frida-'+Date.now().toString(36)+'-'+(++FRIDA_SEQ).toString(36)
+ const tmpRoot=await mkdtemp(resolve(process.env.TMPDIR||process.cwd(),'.dsh-frida-session-'))
+ const scriptPath=resolve(tmpRoot,'agent.js')
+ const source="console.log('__DSH_READY__'+JSON.stringify({pid:Process.id,arch:Process.arch,platform:Process.platform}));\n"+userScript+"\nsetInterval(function(){},1000);\n"
+ await writeFile(scriptPath,source,{mode:0o600})
+ const args=[...fridaDeviceArgs(a),...targetArgs,'-q','-l',scriptPath]
+ const child=spawn(toolWrapped('frida'),args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
+ const session={id,child,tmpRoot,closed:false,lines:[],ready:null,pid:null,target:targetArgs.join(' ')}
+ FRIDA_SESSIONS.set(id,session)
+ const feed=chunk=>{for(const line of chunk.toString('utf8').split(/\r?\n/)){if(!line)continue;session.lines.push(line);if(session.lines.length>1000)session.lines.splice(0,session.lines.length-1000);const at=line.indexOf('__DSH_READY__');if(at>=0){try{session.ready=JSON.parse(line.slice(at+'__DSH_READY__'.length));session.pid=session.ready.pid}catch{}}}}
+ child.stdout.on('data',feed);child.stderr.on('data',feed)
+ child.on('close',()=>{session.closed=true;FRIDA_SESSIONS.delete(id);rm(tmpRoot,{recursive:true,force:true}).catch(()=>{})})
+ const timeout=int(a.timeoutMs,5000,500,30000),started=Date.now()
+ while(!session.ready&&!session.closed&&Date.now()-started<timeout)await new Promise(r=>setTimeout(r,50))
+ if(!session.ready){const recent=session.lines.slice(-40).join('\n');await closeFrida(session);throw new Error('Frida persistent attach did not become ready: '+recent.slice(0,MAX_OUTPUT))}
+ return session
+}
+async function closeFrida(session){
+ if(session.closed)return
+ try{session.child.stdin.end()}catch{}
+ try{session.child.kill('SIGINT')}catch{}
+ await new Promise(r=>setTimeout(r,150))
+ if(!session.closed){try{session.child.kill('SIGKILL')}catch{}}
+ session.closed=true
+ FRIDA_SESSIONS.delete(session.id)
+ await rm(session.tmpRoot,{recursive:true,force:true}).catch(()=>{})
+}
 
 const DEBUG_SESSIONS=new Map()
 let DEBUG_SEQ=0
@@ -201,6 +258,49 @@ async function call(name,a={}){
    const f=await checkedPath(a.path),badging=await runStrict('aapt2',['dump','badging',f.path],{timeoutMs:15000,maxOutputBytes:MAX_COMMAND_OUTPUT}),meta=parseBadging(badging);let manifestTree='';try{manifestTree=await runStrict('aapt2',['dump','xmltree',f.path,'--file','AndroidManifest.xml'],{timeoutMs:15000,maxOutputBytes:MAX_COMMAND_OUTPUT})}catch(error){manifestTree='[xmltree unavailable] '+error.message}let archive='';try{archive=await runStrict('unzip',['-Z1',f.path],{timeoutMs:10000,maxOutputBytes:MAX_COMMAND_OUTPUT})}catch{}const entries=archive.split(/\r?\n/).filter(Boolean),abis=[...new Set(entries.map(x=>x.match(/^lib\/([^/]+)\//)?.[1]).filter(Boolean))],signatureFiles=entries.filter(x=>/^META-INF\/.*\.(?:RSA|DSA|EC|SF)$/i.test(x)).slice(0,100);return{...f,...meta,abis,signatureFiles,archiveEntries:entries.length,manifestTree:trimLines(manifestTree,500),badging:trimLines(badging,500)}
   }
 
+  case 'reverse_capabilities': {
+   const bins={frida:toolWrapped('frida'),fridaPs:toolWrapped('frida-ps'),fridaTrace:toolWrapped('frida-trace'),fridaServer:toolWrapped('frida-server'),gdb:toolDirect('gdb'),gdbserver:toolDirect('gdbserver'),strace:toolDirect('strace'),rizin:toolWrapped('rizin'),addr2line:toolDirect('addr2line'),nm:toolDirect('nm'),debuggerd:'/system/bin/debuggerd'}
+   const available={};for(const [k,p] of Object.entries(bins))available[k]=await executableAvailable(p)
+   let procMaps=false,procMemRead=false;try{await readFile('/proc/self/maps','utf8');procMaps=true}catch{};try{const h=await open('/proc/self/mem','r');await h.close();procMemRead=true}catch{}
+   let fridaProbe=null;if(bool(a.probeFrida,false)&&available.fridaPs){const q=await runProcess(bins.fridaPs,[],{timeoutMs:5000,maxOutputBytes:65536});fridaProbe={ok:q.exitCode===0,exitCode:q.exitCode,stderr:q.stderr.trim()||undefined}}
+   return{uid:typeof process.getuid==='function'?process.getuid():null,root:typeof process.getuid==='function'?process.getuid()===0:false,proc:{maps:procMaps,selfMemRead:procMemRead},available,fridaProbe,shizuku:{status:'not-probed',reason:'Shizuku binder capability is not reliably inferable from a shell-only MCP process'},notes:['Other-process proc/memory/ptrace access still depends on Android SELinux, UID, debuggable state, root or an authorized debug backend.']}
+  }
+  case 'package_process_info': {
+   const pkg=text(a.package,'package',512)
+   const [pidof,pathResult,dump]=await Promise.all([
+    runProcess('/system/bin/pidof',[pkg],{timeoutMs:3000,maxOutputBytes:65536}),
+    runProcess('/system/bin/cmd',['package','path',pkg],{timeoutMs:5000,maxOutputBytes:65536}),
+    runProcess('/system/bin/dumpsys',['package',pkg],{timeoutMs:8000,maxOutputBytes:MAX_COMMAND_OUTPUT})
+   ])
+   const pids=pidof.stdout.trim().split(/\s+/).filter(x=>/^\d+$/.test(x)).map(Number),apkPaths=pathResult.stdout.split(/\r?\n/).map(x=>x.replace(/^package:/,'').trim()).filter(Boolean)
+   const raw=dump.stdout,uid=Number(raw.match(/\buserId=(\d+)/)?.[1]||0)||null,dataDir=raw.match(/\bdataDir=([^\s]+)/)?.[1]||null,primaryCpuAbi=raw.match(/\bprimaryCpuAbi=([^\s]+)/)?.[1]||null,flags=raw.match(/\bflags=\[([^\]]*)\]/)?.[1]||''
+   return{package:pkg,running:pids.length>0,pids,uid,apkPaths,dataDir,primaryCpuAbi,debuggable:/\bDEBUGGABLE\b/.test(flags),packageManagerReadable:dump.exitCode===0}
+  }
+  case 'native_backtrace': {
+   const pid=pidValue(a.pid),r=await runProcess('/system/bin/debuggerd',['-b',String(pid)],{timeoutMs:12000,maxOutputBytes:MAX_COMMAND_OUTPUT}),combined=(r.stdout+(r.stderr?'\n[stderr]\n'+r.stderr:'')).trim()
+   return{pid,ok:r.exitCode===0,exitCode:r.exitCode,...trimLines(combined,int(a.maxLines,1200,1,4000))}
+  }
+  case 'symbol_resolve': {
+   const pid=pidValue(a.pid),address=hexBig(a.address),maps=await mapsFor(pid),m=maps.find(x=>address>=hexBig(x.start)&&address<hexBig(x.end))
+   if(!m)return{pid,address:hexValue(address),mapped:false}
+   const start=hexBig(m.start),fileOffset=hexBig(m.offset),loadBias=start-fileOffset,rva=address-loadBias,path=m.path?.replace(/\s+\(deleted\)$/,'')||''
+   let addr2line=null,nearestSymbol=null
+   if(path&&path.startsWith('/')&&await existsPathForTool(path)){const a2=await runProcess(toolDirect('addr2line'),['-f','-C','-e',path,hexValue(rva)],{timeoutMs:8000,maxOutputBytes:65536});if(a2.exitCode===0)addr2line=a2.stdout.trim();const nm=await runProcess(toolDirect('nm'),['-an',path],{timeoutMs:10000,maxOutputBytes:MAX_COMMAND_OUTPUT});if(nm.exitCode===0){let best=null;for(const line of nm.stdout.split(/\r?\n/)){const q=line.trim().match(/^([0-9a-fA-F]+)\s+\w\s+(.+)$/);if(!q)continue;const sa=BigInt('0x'+q[1]);if(sa<=rva&&(!best||sa>best.address))best={address:sa,symbol:q[2]}}if(best)nearestSymbol={symbol:best.symbol,address:hexValue(best.address),offset:hexValue(rva-best.address)}}}
+   return{pid,address:hexValue(address),mapped:true,module:path||null,mapping:m,loadBias:hexValue(loadBias),rva:hexValue(rva),addr2line,nearestSymbol}
+  }
+  case 'address_rebase': {
+   const base=hexBig(a.base,'base'),hasRva=a.rva!=null,hasRuntime=a.runtimeAddress!=null;if(hasRva===hasRuntime)throw new Error('provide exactly one of rva or runtimeAddress')
+   if(hasRva){const rva=hexBig(a.rva,'rva');return{base:hexValue(base),rva:hexValue(rva),runtimeAddress:hexValue(base+rva)}}
+   const runtimeAddress=hexBig(a.runtimeAddress,'runtimeAddress');if(runtimeAddress<base)throw new Error('runtimeAddress is below base');return{base:hexValue(base),runtimeAddress:hexValue(runtimeAddress),rva:hexValue(runtimeAddress-base)}
+  }
+  case 'il2cpp_metadata_info': {
+   const meta=await checkedPath(a.metadata),h=await open(meta.path,'r');try{const size=Math.min(meta.size,512),b=Buffer.alloc(size),rr=await h.read(b,0,size,0),header=metadataHeader(b.subarray(0,rr.bytesRead),meta.size);const stringSection=header.sections.find(x=>x.name==='string')||null;return{metadata:meta.path,size:meta.size,...header,stringSection}}finally{await h.close()}
+  }
+  case 'il2cpp_find_class': {
+   const meta=await checkedPath(a.metadata);if(meta.size>256*1024*1024)throw new Error('metadata exceeds 256 MiB search limit');const data=await readFile(meta.path),header=metadataHeader(data.subarray(0,Math.min(512,data.length)),data.length);if(!header.magicOk)throw new Error('not a valid IL2CPP metadata file');const stringSection=header.sections.find(x=>x.name==='string');if(!stringSection||!stringSection.inFile)throw new Error('metadata string table is unavailable or out of bounds');const start=Number(BigInt(stringSection.offset)),size=stringSection.rawSizeOrCount,end=start+size,table=data.subarray(start,end),name=text(a.name,'name',4096),namespace=a.namespace==null?null:text(a.namespace,'namespace',4096),max=int(a.maxResults,64,1,256)
+   const findExact=value=>{const needle=Buffer.from(value+'\0'),out=[];let pos=0;while(out.length<max){const i=table.indexOf(needle,pos);if(i<0)break;out.push({stringTableOffset:'0x'+i.toString(16),metadataOffset:'0x'+(start+i).toString(16)});pos=i+needle.length}return out}
+   return{metadata:meta.path,version:header.version,name,namespace,classNameOffsets:findExact(name),namespaceOffsets:namespace?findExact(namespace):[],confidence:'validated-string-table-only',note:'Type-definition record mapping is version-dependent; this tool does not invent a class index or RVA.'}
+  }
   case 'process_list': {
    const limit=int(a.maxResults,300,1,2000),filter=a.nameFilter==null?null:text(a.nameFilter,'nameFilter',1024).toLowerCase(),entries=await readdir('/proc',{withFileTypes:true}),out=[]
    for(const e of entries){if(!e.isDirectory()||!/^[0-9]+$/.test(e.name))continue;const pid=Number(e.name),statusRaw=await optionalRead(procFile(pid,'status'));if(statusRaw==null)continue;const status=parseProcStatus(statusRaw),cmdRaw=await optionalRead(procFile(pid,'cmdline'),null).catch(()=>null);let cmdline='';if(Buffer.isBuffer(cmdRaw))cmdline=cmdRaw.toString('utf8').replace(/\0+/g,' ').trim();const item={pid,ppid:Number(status.PPid||0),uid:Number((status.Uid||'0').split(/\s+/)[0]),name:status.Name||'',state:status.State||'',cmdline};if(filter&&!((item.name+' '+item.cmdline).toLowerCase().includes(filter)))continue;out.push(item);if(out.length>=limit)break}out.sort((x,y)=>x.pid-y.pid);return{processes:out,truncated:out.length>=limit}
@@ -234,11 +334,19 @@ async function call(name,a={}){
    const args=[...fridaDeviceArgs(a)];if(bool(a.appsOnly,false))args.push('-a');const r=await runProcess(toolWrapped('frida-ps'),args,{timeoutMs:8000,maxOutputBytes:MAX_COMMAND_OUTPUT});if(r.exitCode!==0)throw new Error('frida-ps failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));return{device:a.device||'local',output:r.stdout.trim(),stderr:r.stderr.trim()||undefined}
   }
   case 'frida_attach': {
-   const script="console.log(JSON.stringify({pid:Process.id,arch:Process.arch,platform:Process.platform}));",args=[...fridaDeviceArgs(a),'-p',String(pidValue(a.pid)),'-q','-e',script],r=await runProcess(toolWrapped('frida'),args,{timeoutMs:int(a.timeoutMs,5000,500,30000),maxOutputBytes:MAX_OUTPUT});if(r.exitCode!==0&& !r.timedOut)throw new Error('frida attach failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));return{pid:a.pid,stdout:r.stdout.trim(),stderr:r.stderr.trim(),timedOut:r.timedOut,exitCode:r.exitCode}
+   const pid=pidValue(a.pid)
+   if(bool(a.persistent,false)){const session=await startManagedFrida(a,['-p',String(pid)]);return{pid,sessionId:session.id,persistent:true,ready:session.ready,recent:session.lines.slice(-20)}}
+   const script="console.log(JSON.stringify({pid:Process.id,arch:Process.arch,platform:Process.platform}));",args=[...fridaDeviceArgs(a),'-p',String(pid),'-q','-e',script],r=await runProcess(toolWrapped('frida'),args,{timeoutMs:int(a.timeoutMs,5000,500,30000),maxOutputBytes:MAX_OUTPUT});if(r.exitCode!==0&& !r.timedOut)throw new Error('frida attach failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));return{pid,stdout:r.stdout.trim(),stderr:r.stderr.trim(),timedOut:r.timedOut,exitCode:r.exitCode,persistent:false}
   }
   case 'frida_spawn':
   case 'frida_script': {
-   const script=name==='frida_spawn'?(a.script==null?"console.log(JSON.stringify({pid:Process.id,arch:Process.arch,platform:Process.platform}));":text(a.script,'script')):text(a.script,'script'),tmpRoot=await mkdtemp(resolve(process.env.TMPDIR||process.cwd(),'.dsh-frida-')),scriptPath=resolve(tmpRoot,'agent.js');try{await writeFile(scriptPath,script,{mode:0o600});const target=name==='frida_spawn'?fridaTargetArgs(a,{spawn:true}):fridaTargetArgs(a),args=[...fridaDeviceArgs(a),...target,'-q','-l',scriptPath],r=await runProcess(toolWrapped('frida'),args,{timeoutMs:int(a.timeoutMs,name==='frida_spawn'?8000:8000,500,30000),maxOutputBytes:MAX_COMMAND_OUTPUT});if(r.exitCode!==0&&!r.timedOut)throw new Error('frida failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));return{target:target.join(' '),stdout:r.stdout.trim(),stderr:r.stderr.trim(),timedOut:r.timedOut,exitCode:r.exitCode}}finally{await rm(tmpRoot,{recursive:true,force:true})}
+   const script=name==='frida_spawn'?(a.script==null?"console.log(JSON.stringify({pid:Process.id,arch:Process.arch,platform:Process.platform}));":text(a.script,'script')):text(a.script,'script')
+   const target=name==='frida_spawn'?fridaTargetArgs(a,{spawn:true}):fridaTargetArgs(a)
+   if(name==='frida_spawn'&&bool(a.persistent,false)){const session=await startManagedFrida(a,target,script);return{target:target.join(' '),sessionId:session.id,persistent:true,ready:session.ready,recent:session.lines.slice(-20)}}
+   const tmpRoot=await mkdtemp(resolve(process.env.TMPDIR||process.cwd(),'.dsh-frida-')),scriptPath=resolve(tmpRoot,'agent.js');try{await writeFile(scriptPath,script,{mode:0o600});const args=[...fridaDeviceArgs(a),...target,'-q','-l',scriptPath],r=await runProcess(toolWrapped('frida'),args,{timeoutMs:int(a.timeoutMs,8000,500,30000),maxOutputBytes:MAX_COMMAND_OUTPUT});if(r.exitCode!==0&&!r.timedOut)throw new Error('frida failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));return{target:target.join(' '),stdout:r.stdout.trim(),stderr:r.stderr.trim(),timedOut:r.timedOut,exitCode:r.exitCode,persistent:false}}finally{await rm(tmpRoot,{recursive:true,force:true})}
+  }
+  case 'frida_detach': {
+   const session=fridaSession(a.sessionId),id=session.id,pid=session.pid;await closeFrida(session);return{sessionId:id,pid,detached:true}
   }
   case 'frida_trace': {
    const args=[...fridaDeviceArgs(a),'-p',String(pidValue(a.pid)),'-i',text(a.include,'include',4096)],r=await runProcess(toolWrapped('frida-trace'),args,{timeoutMs:int(a.durationMs,5000,500,15000),maxOutputBytes:MAX_COMMAND_OUTPUT});return{pid:a.pid,include:a.include,...trimLines((r.stdout+(r.stderr?'\n[stderr]\n'+r.stderr:'')),int(a.maxLines,1200,1,4000)),endedByTimeout:r.timedOut,exitCode:r.exitCode}
@@ -299,8 +407,10 @@ async function call(name,a={}){
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const [{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
 async function selfTest(){
  await sdk()
- const names=new Set(tools.map(x=>x.name));for(const name of ['fs_read','fs_list','fs_search','fs_write','fs_patch','command_run','git_status','git_diff','git_log','http_request','android_logcat','apk_inspect','process_list','process_info','process_maps','process_threads','module_list','memory_regions','memory_read','memory_search','syscall_trace','frida_processes','frida_attach','frida_spawn','frida_script','frida_trace','debug_session_start','debug_attach','debug_breakpoint_set','debug_continue','debug_registers','debug_backtrace','debug_memory_read','debug_session_close','binary_functions','binary_xrefs','jni_map_java_native','il2cpp_detect','il2cpp_find_method'])if(!names.has(name))throw new Error('missing tool '+name)
+ const names=new Set(tools.map(x=>x.name));for(const name of ['fs_read','fs_list','fs_search','fs_write','fs_patch','command_run','git_status','git_diff','git_log','http_request','android_logcat','apk_inspect','process_list','process_info','process_maps','process_threads','module_list','memory_regions','memory_read','memory_search','syscall_trace','frida_processes','frida_attach','frida_spawn','frida_script','frida_trace','debug_session_start','debug_attach','debug_breakpoint_set','debug_continue','debug_registers','debug_backtrace','debug_memory_read','debug_session_close','binary_functions','binary_xrefs','jni_map_java_native','reverse_capabilities','package_process_info','native_backtrace','frida_detach','symbol_resolve','address_rebase','il2cpp_detect','il2cpp_metadata_info','il2cpp_find_class','il2cpp_find_method'])if(!names.has(name))throw new Error('missing tool '+name)
  if((await call('protocol_decode',{data:'414243',encoding:'hex'})).utf8!=='ABC')throw new Error('decode self-test failed')
+ const rebased=await call('address_rebase',{base:'0x1000',rva:'0x20'});if(rebased.runtimeAddress!=='0x1020')throw new Error('address_rebase self-test failed')
+ const caps=await call('reverse_capabilities',{});if(!caps.proc?.maps)throw new Error('reverse_capabilities self-test failed')
  for(const b of ['file','readelf','objdump','nm','strings','rg','git'])await runStrict(b,['--version'])
  await runStrict('openssl',['version'])
  await runStrict('aapt2',['version'])
@@ -322,5 +432,5 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.0.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments||{});return{content:[{type:'text',text:JSON.stringify(value,null,2)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
+async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.1.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments||{});return{content:[{type:'text',text:JSON.stringify(value,null,2)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
