@@ -232,6 +232,14 @@ Android 壳现在把 **当前 DSH Session 的 `cwd` / Workspace 路径**作为 W
 - 返回给 WebView 的文件使用私有 `FileProvider` content URI；Provider 不导出，只有已经通过 Workspace 边界检查的文件才会被构造 URI。
 - 应用设置中的“从手机复制到工作区（维护）”仍保留，它只是把外部手机文件复制进 Workspace 的显式维护入口，不属于对话/模型的文件浏览域。
 
+## 内置 basic_tools MCP
+
+Android Runtime 现在除 `mobile_tools` 外，额外内置独立的 `basic_tools` MCP。两者使用不同命名空间：`mobile_tools` 保持逆向/动态分析能力，`basic_tools` 专注通用开发与工作区操作。
+
+`basic_tools` 当前提供 52 个结构化工具，覆盖：文件/目录信息与修改、压缩包、JSON/YAML/TOML/XML/CSV、SQLite、文本 diff/replace/regex、环境与磁盘、端口/DNS/TCP/TLS、证书与编码、Git、构建/测试检测、Gradle/npm/CMake、ImageMagick、FFmpeg/ffprobe、PDF 元信息和目录 SHA-256 manifest。
+
+对应 Termux Runtime 会一并打包 `7zip`、`yq`、`libsqlite`、`cmake`、`ninja`、`iproute2`、`dnsutils`、`imagemagick`、`ffmpeg`、`poppler`，构建阶段会检查关键命令实际存在并运行 smoke test。
+
 ## 内置 mobile_tools MCP
 
 内置 MCP 工具箱面向模型直接调用，参数尽量统一：路径既可使用绝对路径，也可相对 MCP 当前工作目录；目录/仓库类工具默认使用当前目录；超时和输出上限均有安全默认值。常规源码修改优先使用结构化文件工具，不要求模型自己拼 Shell 命令。
