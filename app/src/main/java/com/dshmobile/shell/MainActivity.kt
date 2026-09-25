@@ -62,7 +62,10 @@ class MainActivity : ComponentActivity() {
   private val recoveryControls = mutableListOf<View>()
   private var pendingPickCallback: String? = null
   private var filePathCallback: ValueCallback<Array<Uri>>? = null
+  private enum class WorkspaceImportAction { FILES, BULK }
+
   private var pendingWorkspaceImportPath: String? = null
+  private var pendingWorkspaceImportAction: WorkspaceImportAction? = null
   private var pendingSharedImportUris: List<Uri>? = null
   private var legacyDirectoryPermissionPending = false
   private val legacyPermissionRequestRunning = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -161,23 +164,33 @@ class MainActivity : ComponentActivity() {
       importFilesIntoWorkspace(workspace, uris)
     }
 
-  /** Optional override when the remembered workspace is stale or the user wants a different target. */
+  /**
+   * Select/replace the import target and then resume the action that originally
+   * requested it. This removes the old dead-end where Settings told the user to
+   * leave the dialog, configure a workspace elsewhere, then come back and retry.
+   */
   private val workspaceImportTargetPicker =
     registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
       val sharedUris = pendingSharedImportUris
       pendingSharedImportUris = null
+      val pendingAction = pendingWorkspaceImportAction
+      pendingWorkspaceImportAction = null
+
       if (uri == null) return@registerForActivityResult
       val path = resolveWritableWorkspacePath(uri)
       if (path == null) {
         showSimpleMessage("无法直接写入该目录", "请选择内部存储或可直接访问的外部存储目录。")
         return@registerForActivityResult
       }
+
       ShellState.rememberWorkspacePath(this, path)
-      if (sharedUris != null) {
-        importFilesIntoWorkspace(path, sharedUris)
-      } else {
-        pendingWorkspaceImportPath = path
-        workspaceFilePicker.launch(arrayOf("*/*"))
+      when {
+        sharedUris != null -> importFilesIntoWorkspace(path, sharedUris)
+        pendingAction == WorkspaceImportAction.FILES -> {
+          pendingWorkspaceImportPath = path
+          workspaceFilePicker.launch(arrayOf("*/*"))
+        }
+        pendingAction == WorkspaceImportAction.BULK -> showWorkspaceBulkImportPicker(path)
       }
     }
 
@@ -688,7 +701,7 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { showWorkspaceBulkImportPicker() }
     })
     wrap.addView(TextView(this).apply {
-      text = "文件可一次多选；文件夹可在目录浏览器中跨目录勾选多个。导入只复制内容，不会切换工作区。"
+      text = "文件可一次多选；文件夹可在目录浏览器中跨目录勾选多个。没有当前工作区时会先让你选择导入目标目录，选定后自动继续。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
@@ -2135,10 +2148,14 @@ class MainActivity : ComponentActivity() {
   private fun showWorkspaceBulkImportPicker() {
     val workspace = currentWritableWorkspacePath()
     if (workspace == null) {
-      showSimpleMessage("没有可用的当前工作目录", "请先在 DSH 中选择工作目录。批量导入只复制文件/文件夹，不会创建或切换工作区。")
+      pendingWorkspaceImportAction = WorkspaceImportAction.BULK
+      workspaceImportTargetPicker.launch(null)
       return
     }
+    showWorkspaceBulkImportPicker(workspace)
+  }
 
+  private fun showWorkspaceBulkImportPicker(workspace: String) {
     if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
       android.app.AlertDialog.Builder(this)
         .setTitle("需要文件访问权限")
@@ -2303,10 +2320,8 @@ class MainActivity : ComponentActivity() {
   private fun showWorkspaceImportDialog() {
     val workspace = currentWritableWorkspacePath()
     if (workspace == null) {
-      showSimpleMessage(
-        "没有可用的当前工作目录",
-        "请先通过 DSH 的工作目录选择功能设置一个目录。随后“上传手机文件”会直接把文件复制进去，不会把所选文件单独作为工作目录。",
-      )
+      pendingWorkspaceImportAction = WorkspaceImportAction.FILES
+      workspaceImportTargetPicker.launch(null)
       return
     }
     pendingWorkspaceImportPath = workspace
@@ -2364,6 +2379,7 @@ class MainActivity : ComponentActivity() {
 
   /** Destination override for a share intent without losing the selected URIs. */
   private fun chooseShareImportTarget(uris: List<Uri>) {
+    pendingWorkspaceImportAction = null
     pendingSharedImportUris = uris
     workspaceImportTargetPicker.launch(null)
   }
