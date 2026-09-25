@@ -1,0 +1,29 @@
+name: Validate relocated tool runtime
+
+on:
+  push:
+    branches:
+      - fix/relocated-tool-runtime
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: |
+          set -euo pipefail
+          bash -n build-termux.sh
+          bash -n scripts/embed-termux-tools.sh
+          bash -n scripts/validate-termux-wrapper-routing.sh
+      - name: Wrapper routing regression
+        run: bash scripts/validate-termux-wrapper-routing.sh
+      - name: Targeted assertions
+        run: |
+          grep -Fq 'openssl file curl jq' scripts/embed-termux-tools.sh
+          grep -Fq '"$wrappers/openssl" version' scripts/embed-termux-tools.sh
+          grep -Fq 'libexec/dsh/wrappers:$stage/usr/bin:/system/bin' build-termux.sh
+          grep -Fq 'libexec/dsh/wrappers' app/src/main/java/com/dshmobile/shell/McpConfigManager.kt
