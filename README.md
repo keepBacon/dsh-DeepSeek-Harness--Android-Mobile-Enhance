@@ -240,6 +240,30 @@ Android Runtime 现在除 `mobile_tools` 外，额外内置独立的 `basic_tool
 
 对应 Termux Runtime 会一并打包 `7zip`、`yq`、`libsqlite`、`cmake`、`ninja`、`iproute2`、`dnsutils`、`imagemagick`、`ffmpeg`、`poppler`，构建阶段会检查关键命令实际存在并运行 smoke test。
 
+## No-Root Runtime Analysis
+
+`mobile_tools` 3.2 以 **无 Root / 无 Shizuku 优先** 重新组织动态分析路径。默认先使用普通 App UID 可以访问的自身/同 UID `/proc`、FD/socket、运行时快照和子进程 `strace`；对于需要更高 Android 调试权限但仍不需要 Root 的场景，支持用户主动开启并配对 **Wireless Debugging / ADB**。
+
+新增工具：
+
+- `no_root_capabilities`
+- `self_runtime_snapshot`
+- `runtime_snapshot`
+- `runtime_diff`
+- `process_fds`
+- `process_network`
+- `child_strace`
+- `adb_devices`
+- `adb_pair`
+- `adb_connect`
+- `adb_package_info`
+- `adb_process_info`
+- `adb_logcat`
+- `adb_jdwp_list`
+- `adb_pull_apk`
+
+ADB 路径依赖用户在 Android 开发者选项中主动打开“无线调试”并完成一次性配对；它不会绕过系统授权。Frida/GDB/debuggerd/其它应用 `/proc`/内存读取仍保留为条件增强能力，仅在 Android UID/SELinux/debuggable/root/授权后端实际允许时使用。
+
 ## Runtime Reverse Analysis Foundation
 
 `mobile_tools` 3.1 在已有进程/内存只读、Frida、GDB、Rizin、JNI 与 IL2CPP 基础能力上补齐运行时分析链路：
