@@ -16,6 +16,9 @@ ES="$ROOT/app/src/main/java/com/dshmobile/shell/EngineService.kt"
 DFL="$ROOT/scripts/dsh-release-family-lock.json"
 DFT="$ROOT/scripts/dsh-runtime-family.mjs"
 WST="$ROOT/scripts/validate-web-runtime-smoke.mjs"
+MCM="$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt"
+MTB="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
+ETT="$ROOT/scripts/embed-termux-tools.sh"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 must() { grep -Fq "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
@@ -62,6 +65,27 @@ must "$EM" 'SSH_ASKPASS_REQUIRE'
 must "$EM" 'GIT_ASKPASS'
 must "$EM" 'DSH_GIT_AUTH_HOST" ] || exit 1'
 must "$MA" '.id_dsh-import-${java.util.UUID.randomUUID()}.tmp'
+
+# MCP / protocol / reverse-engineering tool surface.
+must "$MA" 'text = "工具与 MCP"'
+must "$MA" 'private fun showMcpManager()'
+must "$MA" 'text = "IDA MCP（远程）"'
+must "$EM" 'private val mcpConfigManager by lazy'
+must "$EM" '"web", "--patch", mcpPatch.absolutePath'
+must "$EM" 'env.putAll(mcpConfigManager.secretEnvironment())'
+must "$SC" 'saveMcpBearerToken'
+must "$MCM" 'class McpConfigManager('
+must "$MCM" "name: '@deepseek-ai/dsh-mcp-client'"
+must "$MCM" 'Authorization: !!js'
+must "$MTB" "name:'protocol_parse_http'"
+must "$MTB" "name:'binary_disassemble'"
+must "$MTB" 'StdioServerTransport'
+must "$BT" 'install_mobile_mcp_toolbox()'
+must "$BT" '"mobileToolboxMcp": true'
+must "$BT" 'binutils openssl'
+must "$ETT" 'for cmd in readelf objdump nm strings'
+must "$ETT" '"$stage/usr/bin/openssl" version'
+node --check "$MTB" >/dev/null
 
 # M-11/M-12 queues: downloads and permission-delayed notifications are not silently dropped.
 forbid "$MA" 'exportDownloading'
