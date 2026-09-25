@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,7 +12,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.View
@@ -35,6 +33,7 @@ import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.SecureRandom
@@ -78,12 +77,13 @@ class MainActivity : ComponentActivity() {
     val url: String,
     val contentDisposition: String?,
     val hintedMime: String?,
+    val workspaceRoot: String,
+    val destinationDir: String,
     val dedupeKey: String,
   )
   private val downloadQueue = java.util.concurrent.ConcurrentLinkedQueue<DownloadRequest>()
   private val queuedDownloads = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
   private val downloadWorkerRunning = java.util.concurrent.atomic.AtomicBoolean(false)
-  private val legacyDownloadPermissionPending = java.util.concurrent.atomic.AtomicBoolean(false)
 
   private val directoryPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
     val callback = pendingPickCallback
@@ -135,16 +135,8 @@ class MainActivity : ComponentActivity() {
     const val MAX_PLUGIN_ZIP_DEPTH = 32
   }
 
-  // 文件上传（<input type=file> → WebView onShowFileChooser → 系统文件选择器）。
-  // 与目录选择（directoryPicker，工作区用）分离：多选、任意类型。
-  private val filePicker =
-    registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-      val callback = filePathCallback
-      filePathCallback = null
-      if (callback != null) {
-        callback.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
-      }
-    }
+  // WebView file input is intentionally NOT backed by Android OpenDocument.
+  // The active DSH Workspace is the sole browse root exposed to the Web UI.
 
   /**
    * Phone files -> files inside the current DSH working directory.
@@ -295,7 +287,7 @@ class MainActivity : ComponentActivity() {
       }
     }
 
-  /** Android 8–10 legacy/workspace permission support; downloads use MediaStore on Android 10. */
+  /** Android 8–10 legacy permission support for external workspaces. */
   private val legacyStoragePermission =
     registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
       legacyPermissionRequestRunning.set(false)
@@ -313,10 +305,6 @@ class MainActivity : ComponentActivity() {
           )
           showSimpleMessage("存储权限未授权", "Android 8–10 需要存储权限或兼容工作区才能使用外部目录。")
         }
-      }
-      legacyDownloadPermissionPending.set(false)
-      if (writeGranted) startDownloadWorker() else if (downloadQueue.isNotEmpty()) {
-        clearDownloadQueue("Android 8/9 未获得写入下载目录的权限")
       }
     }
 
@@ -454,7 +442,7 @@ class MainActivity : ComponentActivity() {
         // （403 forbidden，防 DNS rebinding/跨站）。改为 app 内下载：
         // HttpURLConnection 无浏览器标记 → fence 放行（MuMu 实测验证）。
         if (isSessionExport(url, request.method)) {
-          downloadToDownloads(url, null, "application/zip")
+          downloadToWorkspace(url, null, "application/zip")
           return true
         }
         // 只允许引擎同源页面留在 WebView（特权桥 + 下载能力仅对引擎可信）；
@@ -501,22 +489,25 @@ class MainActivity : ComponentActivity() {
       }
     }
     // WebView 下载：会话日志导出（/api/session.export）与其余引擎源下载
-    // 统一走 app 内 MediaStore 下载——浏览器导航带 Origin:null 会被 dsh
+    // 统一保存到当前 DSH 工作目录——浏览器导航带 Origin:null 会被 dsh
     // 的 /api browser-trust fence 拒绝（403），app 内 HttpURLConnection
     // 无浏览器标记 → fence 放行（403 修复路径，见 downloadToDownloads）。
     webView.setDownloadListener { url, _userAgent, contentDisposition, mimeType, _contentLength ->
-      downloadToDownloads(url, contentDisposition, mimeType)
+      downloadToWorkspace(url, contentDisposition, mimeType)
     }
     webView.webChromeClient = object : WebChromeClient() {
       override fun onShowFileChooser(
         webView: WebView, filePathCallback: ValueCallback<Array<Uri>>, fileChooserParams: FileChooserParams,
       ): Boolean {
-        // 文件上传走系统文件选择器（OpenDocument，可多选）；directoryPicker
-        // 是目录选择（工作区用），两者必须分离。
+        // Never open Android's global file provider for model/composer input.
+        // The currently active DSH Workspace is the sole file browse domain.
         this@MainActivity.filePathCallback?.onReceiveValue(null)
         this@MainActivity.filePathCallback = filePathCallback
         val accepts = fileChooserParams.acceptTypes.filter { it.isNotBlank() }.toTypedArray()
-        filePicker.launch(if (accepts.isEmpty()) arrayOf("*/*") else accepts)
+        showWorkspaceFileChooser(
+          if (accepts.isEmpty()) arrayOf("*/*") else accepts,
+          fileChooserParams.mode == FileChooserParams.MODE_OPEN_MULTIPLE,
+        )
         return true
       }
 
@@ -623,6 +614,7 @@ class MainActivity : ComponentActivity() {
           result
         },
         onWorkspacePath = { ShellState.lastWorkspacePath(this) },
+        onRememberWorkspacePath = { path -> rememberActiveWorkspacePath(path) },
         pickToken = pickToken,
       ),
       "androidBridge",
@@ -1671,6 +1663,56 @@ class MainActivity : ComponentActivity() {
         const findSidebarToggle = () => findButton(['打开侧边栏', '收起侧边栏', 'open sidebar', 'collapse sidebar']);
         const findNewSession = () => findButton(['新建会话', 'new session']);
 
+        let lastWorkspaceSyncKey = '';
+        let workspaceSyncRunning = false;
+        const activeSessionIdFromUrl = () => {
+          try {
+            const parts = location.pathname.split('/').filter(Boolean);
+            const at = parts.lastIndexOf('session');
+            return at >= 0 && at + 1 < parts.length ? decodeURIComponent(parts[at + 1]) : null;
+          } catch (_) { return null; }
+        };
+        const syncActiveWorkspace = async () => {
+          const sessionId = activeSessionIdFromUrl();
+          if (!sessionId || workspaceSyncRunning) return;
+          workspaceSyncRunning = true;
+          try {
+            const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+            const response = await fetch('/api/session/list', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                type: 'client-request',
+                rpcId,
+                method: 'session/list',
+                payload: { args: { _request: {} } }
+              })
+            });
+            if (!response.ok) return;
+            const envelope = await response.json();
+            const items = envelope && envelope.result && envelope.result.ok
+              && envelope.result.value && Array.isArray(envelope.result.value.items)
+              ? envelope.result.value.items : [];
+            const session = items.find((item) => item && item.sessionId === sessionId);
+            const cwd = session && typeof session.cwd === 'string' ? session.cwd : '';
+            if (!cwd || cwd.charAt(0) !== '/') return;
+            const key = sessionId + '\n' + cwd;
+            if (key === lastWorkspaceSyncKey) return;
+            let accepted = false;
+            try {
+              accepted = !!(window.androidBridge
+                && window.androidBridge.setCurrentWorkspacePath(BRIDGE_CAP, cwd));
+            } catch (_) {}
+            if (accepted) lastWorkspaceSyncKey = key;
+          } catch (_) {
+            // Session navigation can race the Host list update. The next
+            // structural navigation/click retries without changing the root.
+          } finally {
+            workspaceSyncRunning = false;
+          }
+        };
+
         const directChildUnder = (node, ancestor) => {
           let current = node;
           while (current && current.parentElement && current.parentElement !== ancestor) current = current.parentElement;
@@ -1798,13 +1840,13 @@ class MainActivity : ComponentActivity() {
             button.removeAttribute('aria-haspopup');
             button.removeAttribute('aria-expanded');
             button.removeAttribute('disabled');
-            button.setAttribute('aria-label', '从手机上传文件到当前工作目录');
-            button.setAttribute('title', '上传手机文件到当前工作目录');
+            button.setAttribute('aria-label', '从当前工作目录选择文件');
+            button.setAttribute('title', '从当前工作目录选择文件');
             button.innerHTML = icon('import');
             button.addEventListener('click', (event) => {
               event.preventDefault();
               event.stopPropagation();
-              try { window.androidBridge && window.androidBridge.importFilesToWorkspace(BRIDGE_CAP); } catch (_) {}
+              try { fileInput.click(); } catch (_) {}
             }, true);
 
             if (fileInput.nextSibling) tools.insertBefore(button, fileInput.nextSibling);
@@ -2204,6 +2246,7 @@ class MainActivity : ComponentActivity() {
           }
           installSkillSettings();
           wireComposerImport();
+          void syncActiveWorkspace();
           const anchor = wireConfig();
           let manager = document.getElementById(MANAGER_ID);
           if (!pluginSurfaceVisible(anchor)) {
@@ -2264,8 +2307,8 @@ class MainActivity : ComponentActivity() {
         // ignored, avoiding a sync/layout pass on every generated token.
         document.addEventListener('click', schedule, true);
         window.addEventListener('resize', schedule, { passive: true });
-        window.addEventListener('popstate', schedule, { passive: true });
-        window.addEventListener('hashchange', schedule, { passive: true });
+        window.addEventListener('popstate', () => { schedule(); void syncActiveWorkspace(); }, { passive: true });
+        window.addEventListener('hashchange', () => { schedule(); void syncActiveWorkspace(); }, { passive: true });
         sync();
       })();
     """.trimIndent()
@@ -3622,6 +3665,337 @@ class MainActivity : ComponentActivity() {
     return null
   }
 
+  private data class WorkspaceBrowserEntry(
+    val file: java.io.File?,
+    val parent: Boolean = false,
+  )
+
+  /** Accept a DSH Session cwd only when it is an existing writable directory. */
+  private fun rememberActiveWorkspacePath(path: String): Boolean {
+    return try {
+      val requested = java.io.File(path)
+      if (!requested.isAbsolute) return false
+      val canonical = requested.canonicalFile
+      if (!canonical.isDirectory || !canonical.canRead() || !canonical.canWrite()) return false
+      ShellState.rememberWorkspacePath(this, canonical.absolutePath)
+      true
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  private fun currentWorkspaceRoot(): java.io.File? {
+    val raw = ShellState.lastWorkspacePath(this)?.takeIf { it.isNotBlank() } ?: return null
+    return try {
+      val root = java.io.File(raw).canonicalFile
+      root.takeIf { it.isDirectory && it.canRead() && it.canWrite() }
+    } catch (_: Throwable) {
+      null
+    }
+  }
+
+  private fun isInsideWorkspace(root: java.io.File, candidate: java.io.File): Boolean {
+    return try {
+      val r = root.canonicalFile
+      val c = candidate.canonicalFile
+      c.path == r.path || c.path.startsWith(r.path + java.io.File.separator)
+    } catch (_: Throwable) {
+      false
+    }
+  }
+
+  private fun workspacePathLabel(root: java.io.File, current: java.io.File): String {
+    val rel = try { root.toPath().relativize(current.toPath()).toString() } catch (_: Throwable) { "" }
+    val base = root.name.ifBlank { root.absolutePath }
+    return if (rel.isBlank()) base else base + java.io.File.separator + rel
+  }
+
+  private fun isWorkspaceSymlink(file: java.io.File): Boolean =
+    try { java.nio.file.Files.isSymbolicLink(file.toPath()) } catch (_: Throwable) { true }
+
+  private fun fileMatchesAccept(file: java.io.File, accepts: Array<String>): Boolean {
+    if (accepts.isEmpty() || accepts.any { it.isBlank() || it == "*/*" }) return true
+    val ext = file.extension.lowercase()
+    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)?.lowercase().orEmpty()
+    return accepts.any { raw ->
+      val accept = raw.trim().lowercase()
+      when {
+        accept.isBlank() || accept == "*/*" -> true
+        accept.startsWith(".") -> file.name.lowercase().endsWith(accept)
+        accept.endsWith("/*") -> mime.startsWith(accept.substringBefore('/') + "/")
+        else -> mime == accept
+      }
+    }
+  }
+
+  /**
+   * File chooser used by WebView <input type=file>. The browser is rooted at
+   * the active DSH Workspace and never exposes Android's global filesystem.
+   */
+  private fun showWorkspaceFileChooser(accepts: Array<String>, allowMultiple: Boolean) {
+    val callback = filePathCallback ?: return
+    val root = currentWorkspaceRoot()
+    if (root == null) {
+      filePathCallback = null
+      callback.onReceiveValue(null)
+      showSimpleMessage("没有当前工作目录", "请先在 DSH 中打开工作区，再选择文件。")
+      return
+    }
+
+    showWorkspaceFileSelection(root, accepts, allowMultiple) { files ->
+      val cb = filePathCallback
+      filePathCallback = null
+      if (cb == null) return@showWorkspaceFileSelection
+      if (files.isNullOrEmpty()) {
+        cb.onReceiveValue(null)
+        return@showWorkspaceFileSelection
+      }
+      val uris = files.mapNotNull { file ->
+        try {
+          val canonical = file.canonicalFile
+          if (!canonical.isFile || isWorkspaceSymlink(file) || !isInsideWorkspace(root, canonical)) null
+          else FileProvider.getUriForFile(this, "$packageName.workspace-files", canonical)
+        } catch (_: Throwable) {
+          null
+        }
+      }
+      cb.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
+    }
+  }
+
+  private fun showWorkspaceFileSelection(
+    root: java.io.File,
+    accepts: Array<String>,
+    allowMultiple: Boolean,
+    onResult: (List<java.io.File>?) -> Unit,
+  ) {
+    val selected = linkedSetOf<String>()
+    var current = root
+    var entries: List<WorkspaceBrowserEntry> = emptyList()
+    var completed = false
+
+    val pathView = android.widget.TextView(this).apply {
+      setPadding(32, 20, 32, 16)
+      textSize = 14f
+    }
+    val list = android.widget.ListView(this)
+    val labels = mutableListOf<String>()
+    val adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_list_item_1, labels)
+    list.adapter = adapter
+
+    val body = android.widget.LinearLayout(this).apply {
+      orientation = android.widget.LinearLayout.VERTICAL
+      addView(pathView, android.widget.LinearLayout.LayoutParams(
+        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+      ))
+      addView(list, android.widget.LinearLayout.LayoutParams(
+        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
+      ))
+    }
+
+    lateinit var reload: (java.io.File) -> Unit
+    reload = { requested ->
+      val dir = try { requested.canonicalFile } catch (_: Throwable) { current }
+      if (!dir.isDirectory || isWorkspaceSymlink(requested) || !isInsideWorkspace(root, dir)) {
+        Unit
+      } else {
+        current = dir
+        val children = dir.listFiles().orEmpty()
+          .filter { child ->
+            !isWorkspaceSymlink(child) &&
+              isInsideWorkspace(root, child) &&
+              (child.isDirectory || (child.isFile && fileMatchesAccept(child, accepts)))
+          }
+          .sortedWith(compareBy<java.io.File>({ !it.isDirectory }, { it.name.lowercase() }))
+        val next = mutableListOf<WorkspaceBrowserEntry>()
+        if (dir.path != root.path) next += WorkspaceBrowserEntry(dir.parentFile, parent = true)
+        next += children.map { WorkspaceBrowserEntry(it) }
+        entries = next
+        pathView.text = "工作目录 / " + workspacePathLabel(root, dir)
+        labels.clear()
+        labels += next.map { entry ->
+          when {
+            entry.parent -> "← 上一级"
+            entry.file?.isDirectory == true -> "📁  " + entry.file.name
+            entry.file != null && selected.contains(entry.file.absolutePath) -> "✓  " + entry.file.name
+            else -> "    " + (entry.file?.name ?: "")
+          }
+        }
+        adapter.notifyDataSetChanged()
+      }
+    }
+
+    list.setOnItemClickListener { _, _, position, _ ->
+      val entry = entries.getOrNull(position) ?: return@setOnItemClickListener
+      if (entry.parent) {
+        entry.file?.let(reload)
+        return@setOnItemClickListener
+      }
+      val file = entry.file ?: return@setOnItemClickListener
+      if (file.isDirectory) {
+        reload(file)
+      } else {
+        val canonical = try { file.canonicalFile } catch (_: Throwable) { return@setOnItemClickListener }
+        if (!isInsideWorkspace(root, canonical) || isWorkspaceSymlink(file)) return@setOnItemClickListener
+        if (!allowMultiple) selected.clear()
+        if (!selected.add(canonical.absolutePath)) selected.remove(canonical.absolutePath)
+        reload(current)
+      }
+    }
+
+    val dialog = android.app.AlertDialog.Builder(this)
+      .setTitle(if (allowMultiple) "从工作目录选择文件" else "从工作目录选择一个文件")
+      .setView(body)
+      .setNegativeButton("取消", null)
+      .setPositiveButton("打开", null)
+      .create()
+
+    dialog.setOnShowListener {
+      dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+        completed = true
+        onResult(null)
+        dialog.dismiss()
+      }
+      dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+        val files = selected.mapNotNull { path ->
+          try { java.io.File(path).canonicalFile.takeIf { it.isFile && isInsideWorkspace(root, it) } } catch (_: Throwable) { null }
+        }
+        if (files.isEmpty()) {
+          showTestNotification("请选择文件", "文件必须位于当前工作目录内")
+        } else {
+          completed = true
+          onResult(files)
+          dialog.dismiss()
+        }
+      }
+    }
+    dialog.setOnCancelListener {
+      if (!completed) {
+        completed = true
+        onResult(null)
+      }
+    }
+    reload(root)
+    dialog.show()
+  }
+
+  /**
+   * Destination picker for downloads/exports. Only directories below the
+   * active Workspace are listed; the parent action stops at the Workspace root.
+   */
+  private fun showWorkspaceDirectorySelection(
+    root: java.io.File,
+    onResult: (java.io.File?) -> Unit,
+  ) {
+    var current = root
+    var entries: List<WorkspaceBrowserEntry> = emptyList()
+    var completed = false
+
+    val pathView = android.widget.TextView(this).apply {
+      setPadding(32, 20, 32, 16)
+      textSize = 14f
+    }
+    val list = android.widget.ListView(this)
+    val labels = mutableListOf<String>()
+    val adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_list_item_1, labels)
+    list.adapter = adapter
+
+    val body = android.widget.LinearLayout(this).apply {
+      orientation = android.widget.LinearLayout.VERTICAL
+      addView(pathView, android.widget.LinearLayout.LayoutParams(
+        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+      ))
+      addView(list, android.widget.LinearLayout.LayoutParams(
+        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
+      ))
+    }
+
+    lateinit var reload: (java.io.File) -> Unit
+    reload = { requested ->
+      val dir = try { requested.canonicalFile } catch (_: Throwable) { current }
+      if (dir.isDirectory && !isWorkspaceSymlink(requested) && isInsideWorkspace(root, dir)) {
+        current = dir
+        val children = dir.listFiles().orEmpty()
+          .filter { it.isDirectory && !isWorkspaceSymlink(it) && isInsideWorkspace(root, it) }
+          .sortedBy { it.name.lowercase() }
+        val next = mutableListOf<WorkspaceBrowserEntry>()
+        if (dir.path != root.path) next += WorkspaceBrowserEntry(dir.parentFile, parent = true)
+        next += children.map { WorkspaceBrowserEntry(it) }
+        entries = next
+        pathView.text = "工作目录 / " + workspacePathLabel(root, dir)
+        labels.clear()
+        labels += next.map { if (it.parent) "← 上一级" else "📁  " + (it.file?.name ?: "") }
+        adapter.notifyDataSetChanged()
+      }
+    }
+
+    list.setOnItemClickListener { _, _, position, _ ->
+      entries.getOrNull(position)?.file?.let(reload)
+    }
+
+    val dialog = android.app.AlertDialog.Builder(this)
+      .setTitle("选择工作目录内的导出位置")
+      .setView(body)
+      .setNegativeButton("取消", null)
+      .setNeutralButton("新建文件夹", null)
+      .setPositiveButton("保存到这里", null)
+      .create()
+
+    dialog.setOnShowListener {
+      dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+        completed = true
+        onResult(null)
+        dialog.dismiss()
+      }
+      dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+        val selected = try { current.canonicalFile } catch (_: Throwable) { null }
+        if (selected == null || !selected.isDirectory || !isInsideWorkspace(root, selected)) {
+          showTestNotification("无法使用该目录", "导出位置必须位于当前工作目录内")
+        } else {
+          completed = true
+          onResult(selected)
+          dialog.dismiss()
+        }
+      }
+      dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+        val input = android.widget.EditText(this).apply {
+          hint = "文件夹名称"
+          setSingleLine(true)
+        }
+        android.app.AlertDialog.Builder(this)
+          .setTitle("新建文件夹")
+          .setView(input)
+          .setNegativeButton("取消", null)
+          .setPositiveButton("创建") { _, _ ->
+            val name = input.text?.toString()?.trim().orEmpty()
+            if (name.isBlank() || name == "." || name == ".." || name.contains('/') || name.contains('\\') || name.indexOf('\u0000') >= 0) {
+              showTestNotification("创建失败", "文件夹名称无效")
+              return@setPositiveButton
+            }
+            try {
+              val target = java.io.File(current, name)
+              if (!isInsideWorkspace(root, target)) throw java.io.IOException("目标超出工作目录")
+              if (!target.mkdir()) throw java.io.IOException("无法创建目录")
+              reload(current)
+            } catch (t: Throwable) {
+              showTestNotification("创建失败", t.message ?: "未知错误")
+            }
+          }
+          .show()
+      }
+    }
+    dialog.setOnCancelListener {
+      if (!completed) {
+        completed = true
+        onResult(null)
+      }
+    }
+    reload(root)
+    dialog.show()
+  }
+
   private fun requestWorkspaceStorageAccess() {
     if (Build.VERSION.SDK_INT >= 30) {
       openAllFilesAccessSettings()
@@ -3649,30 +4023,53 @@ class MainActivity : ComponentActivity() {
   }
 
   /**
-   * Download one same-origin DSH resource. Different files queue instead of
-   * being silently dropped; duplicate WebView callbacks for the same URL are
-   * de-duplicated until that job completes.
+   * Download/export one same-origin DSH resource. Before network I/O starts,
+   * the user chooses a destination inside the active DSH Workspace.
    */
-  private fun downloadToDownloads(url: String, contentDisposition: String?, hintedMime: String? = null) {
+  private fun downloadToWorkspace(url: String, contentDisposition: String?, hintedMime: String? = null) {
     if (!isEngineSource(url)) {
-      showTestNotification("下载被拒绝", "仅支持从本机 DSH 引擎下载文件")
+      showTestNotification("下载被拒绝", "仅支持从本机 DSH 引擎导出文件")
+      return
+    }
+    val root = currentWorkspaceRoot()
+    if (root == null) {
+      showSimpleMessage("没有当前工作目录", "请先在 DSH 中打开工作区，再导出文件。")
       return
     }
     val key = url + "\n" + contentDisposition.orEmpty()
     if (!queuedDownloads.add(key)) return
-    downloadQueue.add(DownloadRequest(url, contentDisposition, hintedMime, key))
-    startDownloadWorker()
+
+    showWorkspaceDirectorySelection(root) { destination ->
+      if (destination == null) {
+        queuedDownloads.remove(key)
+        return@showWorkspaceDirectorySelection
+      }
+      val canonicalDestination = try { destination.canonicalFile } catch (_: Throwable) { null }
+      if (canonicalDestination == null || !canonicalDestination.isDirectory ||
+        !isInsideWorkspace(root, canonicalDestination)
+      ) {
+        queuedDownloads.remove(key)
+        showTestNotification("导出失败", "目标目录已离开当前工作目录")
+        return@showWorkspaceDirectorySelection
+      }
+      downloadQueue.add(
+        DownloadRequest(
+          url = url,
+          contentDisposition = contentDisposition,
+          hintedMime = hintedMime,
+          workspaceRoot = root.absolutePath,
+          destinationDir = canonicalDestination.absolutePath,
+          dedupeKey = key,
+        ),
+      )
+      startDownloadWorker()
+    }
   }
 
   private fun startDownloadWorker() {
     if (!downloadWorkerRunning.compareAndSet(false, true)) return
     Thread {
       try {
-        if (Build.VERSION.SDK_INT < 29 && !hasLegacyStoragePermission()) {
-          legacyDownloadPermissionPending.set(true)
-          runOnUiThread { requestLegacyStoragePermission() }
-          return@Thread
-        }
         while (true) {
           val request = downloadQueue.poll() ?: break
           try {
@@ -3683,9 +4080,7 @@ class MainActivity : ComponentActivity() {
         }
       } finally {
         downloadWorkerRunning.set(false)
-        // Close a race where a new item was queued after the final poll but
-        // before the worker flag was cleared.
-        if (downloadQueue.isNotEmpty() && !legacyDownloadPermissionPending.get()) startDownloadWorker()
+        if (downloadQueue.isNotEmpty()) startDownloadWorker()
       }
     }.start()
   }
@@ -3696,12 +4091,18 @@ class MainActivity : ComponentActivity() {
       queuedDownloads.remove(request.dedupeKey)
     }
     downloadWorkerRunning.set(false)
-    showTestNotification("下载失败", reason)
+    showTestNotification("导出失败", reason)
   }
 
   private fun performDownload(request: DownloadRequest) {
     var conn: HttpURLConnection? = null
     try {
+      val workspaceRoot = java.io.File(request.workspaceRoot).canonicalFile
+      val destination = java.io.File(request.destinationDir).canonicalFile
+      if (!workspaceRoot.isDirectory || !destination.isDirectory ||
+        !isInsideWorkspace(workspaceRoot, destination)
+      ) throw java.io.IOException("导出目标已离开工作目录")
+
       val c = URL(request.url).openConnection() as HttpURLConnection
       conn = c
       c.connectTimeout = 15_000
@@ -3716,57 +4117,41 @@ class MainActivity : ComponentActivity() {
       val disposition = c.getHeaderField("Content-Disposition") ?: request.contentDisposition
       val mime = normalizeMime(c.contentType ?: request.hintedMime, request.url)
       val filename = sanitizeFilename(parseDownloadFilename(request.url, disposition, mime))
-      c.inputStream.use { input -> saveToDownloadsStreamed(filename, mime, input) }
-      runOnUiThread { showTestNotification("文件已下载", "已保存到 下载/$filename") }
+      val target = c.inputStream.use { input -> saveToWorkspaceStreamed(destination, filename, input) }
+      val relative = try { workspaceRoot.toPath().relativize(target.toPath()).toString() } catch (_: Throwable) { target.name }
+      runOnUiThread { showTestNotification("文件已导出", "工作目录/$relative") }
     } catch (t: Throwable) {
-      runOnUiThread { showTestNotification("下载失败", t.message ?: "未知错误") }
+      runOnUiThread { showTestNotification("导出失败", t.message ?: "未知错误") }
     } finally {
       conn?.disconnect()
     }
   }
 
-  /** Generic same-origin download path for generated documents, archives and attachments. */
-  private fun saveToDownloadsStreamed(filename: String, mimeType: String, input: java.io.InputStream) {
-    if (Build.VERSION.SDK_INT >= 29) {
-      val values = ContentValues().apply {
-        put(MediaStore.Downloads.DISPLAY_NAME, filename)
-        put(MediaStore.Downloads.MIME_TYPE, mimeType)
-        put(MediaStore.Downloads.IS_PENDING, 1)
-        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-      }
-      val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        ?: throw java.io.IOException("无法创建下载文件")
-      try {
-        contentResolver.openOutputStream(uri)?.use { out ->
-          copyWithLimit(input, out, MAX_DOWNLOAD_BYTES, "下载文件超过 2 GB 上限")
-        } ?: throw java.io.IOException("无法写入下载文件")
-        values.clear()
-        values.put(MediaStore.Downloads.IS_PENDING, 0)
-        contentResolver.update(uri, values, null, null)
-      } catch (t: Throwable) {
-        contentResolver.delete(uri, null, null)
-        throw t
-      }
-      return
+  private fun saveToWorkspaceStreamed(
+    destination: java.io.File,
+    filename: String,
+    input: java.io.InputStream,
+  ): java.io.File {
+    val root = currentWorkspaceRoot()
+    // The request itself also carries a root snapshot and performDownload
+    // validates containment before this method. This second check protects
+    // against a directory being replaced while a queued download waits.
+    if (!destination.isDirectory || (root != null && !isInsideWorkspace(root, destination))) {
+      throw java.io.IOException("导出目录不可用")
     }
-
-    if (!hasLegacyStoragePermission()) throw java.io.IOException("未获得共享存储写入权限")
-    @Suppress("DEPRECATION")
-    val root = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-      ?: throw java.io.IOException("系统下载目录不可用")
-    if (!root.exists() && !root.mkdirs()) throw java.io.IOException("无法创建系统下载目录")
-    val target = reserveUniqueFile(root, filename)
+    val target = reserveUniqueFile(destination, filename)
     try {
       target.outputStream().buffered(128 * 1024).use { out ->
-        copyWithLimit(input, out, MAX_DOWNLOAD_BYTES, "下载文件超过 2 GB 上限")
+        copyWithLimit(input, out, MAX_DOWNLOAD_BYTES, "导出文件超过 2 GB 上限")
       }
+      return target
     } catch (t: Throwable) {
       target.delete()
       throw t
     }
   }
 
-  /** Atomically reserve a unique filename before writing on legacy shared storage. */
+  /** Atomically reserve a unique filename without overwriting workspace data. */
   private fun reserveUniqueFile(root: java.io.File, requestedName: String): java.io.File {
     val clean = sanitizeFilename(requestedName)
     val dot = clean.lastIndexOf('.')
@@ -3892,7 +4277,7 @@ class MainActivity : ComponentActivity() {
 
   /**
    * 原子防重放的外部浏览器打开（非导出外链）。尽力而为：启动失败时
-   * 静默（调用方不读返回值），不再有 MediaStore 回退契约——回退仅
+   * 静默（调用方不读返回值），不再有系统 Downloads 回退契约——导出仅
    * 存在于导出路径（downloadToDownloads 内）。
    */
   private val exportLaunching = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -3903,7 +4288,7 @@ class MainActivity : ComponentActivity() {
       startActivity(Intent(Intent.ACTION_VIEW, uri))
       true
     } catch (_: Exception) {
-      // 无浏览器可处理：回退 MediaStore 下载路径
+      // 无浏览器可处理：回退工作目录导出路径
       false
     } finally {
       exportLaunching.set(false)
