@@ -26,7 +26,8 @@ DSH_NATIVE_COMPAT="${DSH_NATIVE_COMPAT:-1}"
 DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
 DSH_ALLOW_DEGRADED="${DSH_ALLOW_DEGRADED:-0}"
 DSH_TERMUX_TOOLS="${DSH_TERMUX_TOOLS:-1}"
-DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file}"
+DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl}"
+MOBILE_MCP_TOOLBOX="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
 DSH_EXTRA_TERMUX_PACKAGES="${DSH_EXTRA_TERMUX_PACKAGES:-}"
 # Favor faster first-launch extraction over maximum APK compression.
 DSH_XZ_PRESET="${DSH_XZ_PRESET:-0}"
@@ -951,6 +952,18 @@ apply_android_runtime_patches() {
   DSH_TARGET_VERSION="$DSH_VERSION" node "$ROOT/scripts/android-runtime-patch.mjs" "$stage/usr"
 }
 
+install_mobile_mcp_toolbox() {
+  local stage="$1"
+  local dest="$stage/usr/libexec/dsh-mobile/toolbox-mcp.mjs"
+  [ -f "$MOBILE_MCP_TOOLBOX" ] || { echo "[DSH] Missing mobile MCP toolbox source"; exit 8; }
+  mkdir -p "$(dirname "$dest")"
+  cp "$MOBILE_MCP_TOOLBOX" "$dest"
+  chmod 0755 "$dest"
+  "$stage/usr/bin/node" --check "$dest" >/dev/null
+  env PATH="$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Mobile MCP toolbox self-test failed.'; exit 8; }
+  echo '[DSH] Mobile MCP toolbox: OK'
+}
+
 validate_dsh_core_plugin_tree() {
   local stage="$1"
   local smoke_home="$CACHE_DIR/core-plugin-tree-smoke-home"
@@ -1121,6 +1134,7 @@ refresh_dsh_runtime() {
   write_runtime_pnpm_wrappers "$stage"
   validate_pnpm_runtime "$stage"
   copy_native_module_deps "$stage"
+  install_mobile_mcp_toolbox "$stage"
   validate_dsh_core_plugin_tree "$stage"
   mkdir -p "$stage/usr/etc"
   local embedded_node
@@ -1152,7 +1166,11 @@ refresh_dsh_runtime() {
   "webBrowserAuthSmokeTest": true,
   "standaloneWebSmokeValidator": true,
   "kernelAssignedWebSmokePort": true,
-  "directSingleResourceClientRoutes": true
+  "directSingleResourceClientRoutes": true,
+  "mcpClientRuntime": true,
+  "mobileToolboxMcp": true,
+  "binutilsRuntime": true,
+  "opensslRuntime": true
 }
 EOF
 
