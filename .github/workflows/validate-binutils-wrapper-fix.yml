@@ -1,0 +1,22 @@
+name: Validate binutils wrapper fix
+
+on:
+  push:
+    branches:
+      - fix/termux-binutils-wrapper-aliases
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax and regression checks
+        run: |
+          set -euo pipefail
+          bash -n build-termux.sh
+          bash -n scripts/embed-termux-tools.sh
+          bash -n scripts/check-remaining-fixes.sh
+          bash scripts/check-remaining-fixes.sh
