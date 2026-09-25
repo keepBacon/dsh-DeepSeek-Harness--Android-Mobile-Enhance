@@ -221,6 +221,17 @@ apt install <package>
 DSH_EXTRA_TERMUX_PACKAGES="ffmpeg openssl-tool" bash build-termux.sh
 ```
 
+## 工作目录文件边界
+
+Android 壳现在把 **当前 DSH Session 的 `cwd` / Workspace 路径**作为 Web 文件操作的唯一根目录：
+
+- 对话框、Composer 和其它 Web `<input type="file">` 不再打开 Android 全局文件选择器，而是在当前工作目录及其子目录内选择文件。
+- DSH 会话导出以及同源 Web 下载不再写入系统 `Downloads`；导出前只允许在当前工作目录内部选择目标子目录，并支持在该范围内新建文件夹。
+- Android 壳从当前 Web Session 的 `session/list` 摘要同步 `cwd`，切换 Workspace 后文件根目录随当前 Session 更新。
+- 所有选择均做 canonical-path containment 检查，并排除符号链接，禁止通过 `..`、symlink 或路径替换跳出 Workspace。
+- 返回给 WebView 的文件使用私有 `FileProvider` content URI；Provider 不导出，只有已经通过 Workspace 边界检查的文件才会被构造 URI。
+- 应用设置中的“从手机复制到工作区（维护）”仍保留，它只是把外部手机文件复制进 Workspace 的显式维护入口，不属于对话/模型的文件浏览域。
+
 ## 内置 mobile_tools MCP
 
 内置 MCP 工具箱面向模型直接调用，参数尽量统一：路径既可使用绝对路径，也可相对 MCP 当前工作目录；目录/仓库类工具默认使用当前目录；超时和输出上限均有安全默认值。常规源码修改优先使用结构化文件工具，不要求模型自己拼 Shell 命令。
