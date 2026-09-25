@@ -222,7 +222,7 @@ async function captureRuntimeSnapshot(pid,maxEntries=1000){
  RUNTIME_SNAPSHOTS.set(id,snapshot);trimSnapshotStore();return snapshot
 }
 function diffByKey(before,after,keyFn){const a=new Map(before.map(x=>[keyFn(x),x])),b=new Map(after.map(x=>[keyFn(x),x]));return{added:[...b].filter(([k])=>!a.has(k)).map(([,v])=>v),removed:[...a].filter(([k])=>!b.has(k)).map(([,v])=>v)}}
-function adbEndpoint(v){const s=text(v,'endpoint',1024);if(!s||/^-/ .test(s)||/\s/.test(s)||!/:\d{1,5}$/.test(s))throw new Error('endpoint must be host:port without whitespace');return s}
+function adbEndpoint(v){const s=text(v,'endpoint',1024);if(!s||s.startsWith('-')||/\s/.test(s)||!/:\d{1,5}$/.test(s))throw new Error('endpoint must be host:port without whitespace');return s}
 function adbPackage(v){const s=text(v,'package',512);if(!/^[A-Za-z][A-Za-z0-9_.]*$/.test(s))throw new Error('invalid Android package name');return s}
 function adbPrefix(serial){const args=[];if(serial!=null)args.push('-s',text(serial,'serial',1024));return args}
 async function adbRun(args,{serial,timeoutMs=15000,maxOutputBytes=MAX_COMMAND_OUTPUT}={}){
@@ -315,7 +315,7 @@ async function call(name,a={}){
   case 'no_root_capabilities': {
    let selfMaps=false,selfFd=false,selfNet=false;try{await readFile('/proc/self/maps','utf8');selfMaps=true}catch{};try{await readdir('/proc/self/fd');selfFd=true}catch{};try{await readFile('/proc/self/net/tcp','utf8');selfNet=true}catch{}
    const adbPath=toolWrapped('adb'),adbAvailable=await executableAvailable(adbPath);let adbProbe=null;if(bool(a.probeAdb,false)&&adbAvailable){const q=await runProcess(adbPath,['devices','-l'],{timeoutMs:5000,maxOutputBytes:65536});adbProbe={ok:q.exitCode===0,output:q.stdout.trim(),stderr:q.stderr.trim()||undefined}}
-   return{mode:'no-root-first',uid:typeof process.getuid==='function'?process.getuid():null,root:false,direct:{selfProcMaps:selfMaps,selfFd,selfNetworkTables:selfNet,childStrace:await executableAvailable(toolDirect('strace'))},wirelessAdb:{clientAvailable:adbAvailable,probe:adbProbe,requiresUserAction:'Enable Android Developer options > Wireless debugging, pair this app client, then connect.'},restrictedWithoutAuthorization:['other-app /proc details','ptrace attach','other-app memory','debuggerd on non-debuggable targets','Frida attach without a reachable authorized backend']}
+   return{mode:'no-root-first',uid:typeof process.getuid==='function'?process.getuid():null,root:typeof process.getuid==='function'?process.getuid()===0:false,direct:{selfProcMaps:selfMaps,selfFd,selfNetworkTables:selfNet,childStrace:await executableAvailable(toolDirect('strace'))},wirelessAdb:{clientAvailable:adbAvailable,probe:adbProbe,requiresUserAction:'Enable Android Developer options > Wireless debugging, pair this app client, then connect.'},restrictedWithoutAuthorization:['other-app /proc details','ptrace attach','other-app memory','debuggerd on non-debuggable targets','Frida attach without a reachable authorized backend']}
   }
   case 'self_runtime_snapshot': {
    const snap=await captureRuntimeSnapshot(process.pid,int(a.maxEntries,1000,1,5000));return{...snap,self:true}
@@ -525,6 +525,7 @@ async function selfTest(){
  await runStrict(toolDirect('strace'),['-V'])
  await runStrict(toolWrapped('rizin'),['-v'])
  await runStrict(toolWrapped('frida'),['--version'])
+ await runStrict(toolWrapped('adb'),['version'])
  const own=await call('process_info',{pid:process.pid});if(own.pid!==process.pid)throw new Error('process_info self-test failed')
  const ownMaps=await call('process_maps',{pid:process.pid});if(!ownMaps.mappings.length)throw new Error('process_maps self-test failed')
  const root=await mkdtemp(resolve(process.env.TMPDIR||process.cwd(),'.dsh-mobile-tools-'))
