@@ -102,7 +102,8 @@ must "$ETT" 'magick|ffmpeg|ffprobe)'
 must "$ETT" '"$bin" -version'
 forbid "$ETT" 'yq|sqlite3|cmake|ninja|ffmpeg|ffprobe)'
 forbid "$ETT" 'ffmpeg|ffprobe) "${common_env[@]}" "$wrappers/$cmd" --version'
-must "$ETT" '"$stage/usr/bin/openssl" version'
+must "$ETT" 'openssl)'
+must "$ETT" '"$bin" version'
 node --check "$MTB" >/dev/null
 
 # M-11/M-12 queues: downloads and permission-delayed notifications are not silently dropped.
