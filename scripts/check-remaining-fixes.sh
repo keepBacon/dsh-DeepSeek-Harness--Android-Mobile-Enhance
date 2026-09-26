@@ -344,8 +344,8 @@ must "$WST" 'AbortSignal.timeout(10_000)'
 must "$WST" "parsedLaunch.searchParams.getAll('token')"
 must "$BT" '"webClientBundleSmokeTest": true'
 must "$BT" '"directSingleResourceClientRoutes": true'
-must "$BT" "batch.url.includes('/??')"
-must "$BT" "row.url.includes('/??')"
+must "$WST" "batch.url.includes('/??')"
+must "$WST" "row.url.includes('/??')"
 must "$BT" '"corePluginTreeSmokeTest": true'
 forbid "$BT" '"@deepseek-ai/dsh@$DSH_VERSION" "pnpm@$PNPM_VERSION"'
 must "$BT" 'npm install --package-lock-only'
