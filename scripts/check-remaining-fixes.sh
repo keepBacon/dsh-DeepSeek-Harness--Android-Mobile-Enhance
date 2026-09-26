@@ -371,9 +371,9 @@ must "$DFT" 'cordisRealpaths.size !== 1'
 must "$DFT" 'Cordis singleton: OK'
 must "$BT" '"cordisVendorLocked": true'
 must "$BT" '"cordisSingletonValidated": true'
-must "$DFT" "mode==='manifest'"
-must "$DFT" "mode==='verify-lock'"
-must "$DFT" "mode==='verify-installed'"
+must "$DFT" "mode === 'manifest'"
+must "$DFT" "mode === 'verify-lock'"
+must "$DFT" "mode === 'verify-installed'"
 must "$BT" 'XZ_OPT="-$DSH_XZ_PRESET" tar -cJf'
 
 # Syntax/regression checks.
