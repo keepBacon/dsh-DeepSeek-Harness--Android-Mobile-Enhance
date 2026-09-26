@@ -897,8 +897,9 @@ validate_termux_tool_runtime() {
   fi
   local basic_log="$CACHE_DIR/basic-tools-smoke.log"
   for cmd in 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
-    if ! dsh_run_tool_smoke "$cmd" "$wrappers/$cmd" "$basic_log" "${common_env[@]}"; then
-      local smoke_rc=$?
+    local smoke_rc=0
+    dsh_run_tool_smoke "$cmd" "$wrappers/$cmd" "$basic_log" "${common_env[@]}" || smoke_rc=$?
+    if [ "$smoke_rc" -ne 0 ]; then
       echo "[DSH] Embedded basic tool smoke failed: $cmd (exit=$smoke_rc)" >&2
       sed -n '1,120p' "$basic_log" >&2 || true
       return 7
