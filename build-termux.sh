@@ -93,33 +93,99 @@ dsh_static_build_preflight() {
 
 dsh_static_build_preflight
 
+dsh_bootstrap_host_build_prerequisites() {
+  local auto="${DSH_AUTO_INSTALL_HOST_BUILD_DEPS:-1}"
+  local missing_packages=()
+  local seen=" "
+  local add_pkg
+  add_pkg() {
+    local pkg="$1"
+    case "$seen" in *" $pkg "*) return 0 ;; esac
+    seen+="$pkg "
+    missing_packages+=("$pkg")
+  }
+
+  command -v java >/dev/null 2>&1 || add_pkg openjdk-17
+  command -v curl >/dev/null 2>&1 || add_pkg curl
+  command -v unzip >/dev/null 2>&1 || add_pkg unzip
+  command -v tar >/dev/null 2>&1 || add_pkg tar
+  command -v xz >/dev/null 2>&1 || add_pkg xz-utils
+  command -v aapt2 >/dev/null 2>&1 || add_pkg aapt2
+  command -v node >/dev/null 2>&1 || add_pkg nodejs-lts
+  command -v npm >/dev/null 2>&1 || add_pkg nodejs-lts
+  command -v clang >/dev/null 2>&1 || add_pkg clang
+  command -v clang++ >/dev/null 2>&1 || add_pkg clang
+  command -v cmake >/dev/null 2>&1 || add_pkg cmake
+  command -v ninja >/dev/null 2>&1 || add_pkg ninja
+  command -v make >/dev/null 2>&1 || add_pkg make
+  command -v python >/dev/null 2>&1 || add_pkg python
+  command -v pkg-config >/dev/null 2>&1 || add_pkg pkg-config
+  command -v readelf >/dev/null 2>&1 || command -v llvm-readelf >/dev/null 2>&1 || add_pkg binutils
+  command -v git >/dev/null 2>&1 || add_pkg git
+  command -v ssh >/dev/null 2>&1 || add_pkg openssh
+  command -v ssh-keygen >/dev/null 2>&1 || add_pkg openssh
+  command -v ssh-keyscan >/dev/null 2>&1 || add_pkg openssh
+  command -v rg >/dev/null 2>&1 || add_pkg ripgrep
+
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  [ -f "$host_prefix/lib/libandroid-spawn.so" ] || add_pkg libandroid-spawn
+  local cert_found=0 cert
+  for cert in "$host_prefix/etc/tls/cert.pem" "$host_prefix/etc/ssl/certs/ca-certificates.crt" "$host_prefix/etc/tls/certs/ca-certificates.crt"; do
+    [ -s "$cert" ] && cert_found=1 && break
+  done
+  [ "$cert_found" = "1" ] || add_pkg ca-certificates
+
+  [ "${#missing_packages[@]}" -gt 0 ] || {
+    echo '[DSH] Host build prerequisites: OK'
+    return 0
+  }
+
+  echo "[DSH] Missing host build packages: ${missing_packages[*]}"
+  if [ "$auto" != "1" ]; then
+    echo "[DSH] Auto-install disabled. Run: pkg install ${missing_packages[*]} -y" >&2
+    return 2
+  fi
+  command -v pkg >/dev/null 2>&1 || {
+    echo '[DSH] Termux pkg is unavailable; cannot auto-install host prerequisites.' >&2
+    return 2
+  }
+  echo '[DSH] Installing all missing host build prerequisites before expensive build work…'
+  pkg install -y "${missing_packages[@]}" || {
+    echo '[DSH] Host prerequisite installation failed.' >&2
+    return 2
+  }
+  hash -r
+}
+
+dsh_ensure_android_sdk_platform() {
+  [ -f "$SDK/platforms/android-36/android.jar" ] && return 0
+  local sdkmanager=''
+  for candidate in "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK/cmdline-tools/bin/sdkmanager" "$SDK/tools/bin/sdkmanager"; do
+    if [ -x "$candidate" ]; then sdkmanager="$candidate"; break; fi
+  done
+  [ -n "$sdkmanager" ] || sdkmanager="$(command -v sdkmanager 2>/dev/null || true)"
+  if [ -z "$sdkmanager" ]; then
+    echo "[DSH] 缺少 Android SDK Platform 36，且未找到 sdkmanager: $SDK" >&2
+    return 3
+  fi
+  echo '[DSH] Installing Android SDK Platform 36 before runtime/native build…'
+  yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+  "$sdkmanager" "platforms;android-36" || return 3
+  [ -f "$SDK/platforms/android-36/android.jar" ] || return 3
+}
+
+dsh_bootstrap_host_build_prerequisites
+dsh_ensure_android_sdk_platform
+
 printf '[DSH] Java: '
 java -version 2>&1 | head -n 1 || true
 printf '[DSH] SDK: %s\n' "$SDK"
 printf '[DSH] Gradle home: %s\n' "$GRADLE_USER_HOME"
 
-if ! command -v java >/dev/null 2>&1; then
-  echo '[DSH] 缺少 Java。执行: pkg install openjdk-17 -y'
-  exit 2
-fi
-if ! command -v curl >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
-  echo '[DSH] 缺少 curl/unzip/tar。执行: pkg install curl unzip tar -y'
-  exit 2
-fi
-if ! command -v xz >/dev/null 2>&1; then
-  echo '[DSH] 缺少 xz 解压器。Termux 包名是 xz-utils。'
-  echo '[DSH] 执行: pkg install xz-utils -y'
-  exit 2
-fi
-if ! command -v aapt2 >/dev/null 2>&1; then
-  echo '[DSH] 缺少 Termux ARM aapt2。执行: pkg install aapt2 -y'
-  exit 2
-fi
-if [ ! -f "$SDK/platforms/android-36/android.jar" ]; then
-  echo "[DSH] 缺少 Android SDK Platform 36: $SDK/platforms/android-36/android.jar"
-  echo '[DSH] 请先安装 Android SDK 36 后重新运行。'
-  exit 3
-fi
+for cmd in java curl unzip tar xz aapt2; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "[DSH] Host prerequisite bootstrap did not provide: $cmd" >&2; exit 2; }
+done
+[ -f "$SDK/platforms/android-36/android.jar" ] || { echo "[DSH] Android SDK Platform 36 bootstrap failed." >&2; exit 3; }
 
 snapshot_valid() {
   [ -s "$SNAPSHOT" ] || return 1
