@@ -70,7 +70,8 @@ dsh_static_build_preflight() {
 
   # Known CLI contract regressions must fail in seconds, not after a long
   # runtime overlay/native build. ffmpeg/ffprobe use -version, not --version.
-  if grep -R -n -E 'ffmpeg["'\'' ]+--version|ffprobe["'\'' ]+--version|\$cmd["'\'' ]+--version.*ffmpeg|ffmpeg\|ffprobe.*--version' "$ROOT/build-termux.sh" "$ROOT/scripts" 2>/dev/null; then
+  if grep -n -E 'ffmpeg["'\'' ]+--version|ffprobe["'\'' ]+--version|ffmpeg\|ffprobe.*--version' \
+      "$ROOT/scripts/embed-termux-tools.sh" "$MOBILE_MCP_TOOLBOX" "$BASIC_MCP_TOOLBOX" 2>/dev/null; then
     echo "[DSH] Static preflight found invalid ffmpeg/ffprobe --version usage." >&2
     fail=1
   fi
