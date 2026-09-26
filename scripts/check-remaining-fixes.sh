@@ -60,7 +60,8 @@ must "$MA" 'showWorkspaceDirectorySelection(root)'
 must "$MA" 'private fun saveToWorkspaceStreamed('
 must "$MA" 'isInsideWorkspace(workspaceRoot, destination)'
 forbid "$MA" 'MediaStore.Downloads.EXTERNAL_CONTENT_URI'
-must "$MA" 'reserveUniqueFile(root, filename)'
+must "$MA" 'reserveUniqueFile(dir, filename)'
+must "$MA" 'if (candidate.createNewFile()) return candidate'
 
 # M-09/M-10 encrypted SSH/Git credentials and exact host-scoped askpass.
 must "$SC" 'AndroidKeyStore'
