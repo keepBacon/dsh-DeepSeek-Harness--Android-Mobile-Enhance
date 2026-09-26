@@ -1025,7 +1025,7 @@ validate_android_backend_parity() {
 
   sandbox_file="$(find "$modules" -path '*/@deepseek-ai/dsh-sandbox-local/lib/index.js' -type f -print -quit)"
   subprocess_file="$(find "$modules" -path '*/@deepseek-ai/dsh-subprocess-local/lib/index.js' -type f -print -quit)"
-  terminal_file="$(find "$modules" -path '*/@deepseek-ai/dsh-terminal-bash/lib/config.js' -type f -print -quit)"
+  terminal_file="$(find "$modules" -path '*/@deepseek-ai/dsh-terminal-bash/lib/index.js' -type f -print -quit)"
   [ -n "$sandbox_file" ] || { echo "[DSH] dsh-sandbox-local published artifact missing."; exit 8; }
   [ -n "$subprocess_file" ] || { echo "[DSH] dsh-subprocess-local published artifact missing."; exit 8; }
   [ -n "$terminal_file" ] || { echo "[DSH] dsh-terminal-bash published config missing."; exit 8; }
