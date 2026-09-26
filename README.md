@@ -240,6 +240,19 @@ Android Runtime 现在除 `mobile_tools` 外，额外内置独立的 `basic_tool
 
 对应 Termux Runtime 会一并打包 `7zip`、`yq`、`sqlite`、`cmake`、`ninja`、`iproute2`、`dnsutils`、`imagemagick`、`ffmpeg`、`poppler`，构建阶段会检查关键命令实际存在并运行 smoke test。
 
+## Android Desktop Backend Parity
+
+Android standalone keeps the upstream DSH 0.1.5-rc.2 Web/workspace composition and adapts only host capabilities that assume a desktop OS:
+
+- **Workspace / filesystem:** the official `dsh-fs-sandbox` remains active. Model-controlled writes and edits still use canonical workspace containment; the Android phone-file import/export bridge only copies to or from the selected DSH workspace.
+- **Process sandbox:** `dsh-sandbox-local` uses an Android-specific app-UID runner when `DSH_ANDROID_STANDALONE=1`. It reports `partial` enforcement rather than pretending Android provides desktop Linux `bwrap`/Landlock confinement.
+- **Subprocess:** `dsh-subprocess-local` skips desktop Linux systemd-scope probing on Android and uses its supported fallback process/session containment path.
+- **Terminal:** `dsh-terminal-bash` resolves the APK's embedded Bash through `DSH_SIDEBAR_SHELL` / `SHELL` instead of the desktop default `/bin/bash`.
+- **Directory picker:** the upstream Web `directory-picker-auto` naturally selects the browse backend on Android; the mobile UI adaptation does not replace the authoritative workspace backend.
+- **Core desktop Web capabilities:** workspace files/controller, Git/SSH, plugins, Skills, MCP, Bash, FS/FS search, jobs, subagents, workflows and Web tools stay on the official DSH composition. Android compatibility work preserves those services instead of maintaining a reduced parallel backend.
+
+Android cannot provide byte-for-byte desktop kernel behavior without root or a desktop kernel. The process sandbox therefore advertises `partial` enforcement; the app UID is the outer OS isolation boundary and DSH filesystem containment remains the authoritative model-write fence.
+
 ## No-Root Runtime Analysis
 
 `mobile_tools` 3.2 以 **无 Root / 无 Shizuku 优先** 重新组织动态分析路径。默认先使用普通 App UID 可以访问的自身/同 UID `/proc`、FD/socket、运行时快照和子进程 `strace`；对于需要更高 Android 调试权限但仍不需要 Root 的场景，支持用户主动开启并配对 **Wireless Debugging / ADB**。
