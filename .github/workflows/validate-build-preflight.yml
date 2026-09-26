@@ -88,7 +88,7 @@ jobs:
           node scripts/android-runtime-patch.mjs "$tmp"
           sandbox="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-sandbox-local/lib/index.js' -type f -print -quit)"
           subprocess="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-subprocess-local/lib/index.js' -type f -print -quit)"
-          terminal="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-terminal-bash/lib/config.js' -type f -print -quit)"
+          terminal="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-terminal-bash/lib/index.js' -type f -print -quit)"
           grep -Fq 'DSH Android compat: partial app-UID sandbox runner' "$sandbox"
           grep -Fq 'DSH Android compat: skip desktop linux-scope' "$subprocess"
           grep -Fq 'DSH Android compat: embedded Bash default' "$terminal"
