@@ -405,17 +405,81 @@ dsh_repair_termux_package_family() {
   return 7
 }
 
+dsh_run_tool_smoke() {
+  local cmd="$1" bin="$2" log="$3"
+  shift 3
+  local prefix=("$@")
+  : > "$log"
+
+  case "$cmd" in
+    openssl)
+      "${prefix[@]}" "$bin" version >"$log" 2>&1
+      ;;
+    aapt2|adb)
+      "${prefix[@]}" "$bin" version >"$log" 2>&1
+      ;;
+    strace|ss)
+      "${prefix[@]}" "$bin" -V >"$log" 2>&1
+      ;;
+    rizin|dig|pdfinfo)
+      "${prefix[@]}" "$bin" -v >"$log" 2>&1
+      ;;
+    7z)
+      "${prefix[@]}" "$bin" i >"$log" 2>&1
+      ;;
+    magick|ffmpeg|ffprobe)
+      "${prefix[@]}" "$bin" -version >"$log" 2>&1
+      ;;
+    frida-ps|frida-trace)
+      "${prefix[@]}" "$bin" --help >"$log" 2>&1
+      ;;
+    file|curl|jq|proot|python3|pip3|gdb|gdbserver|frida|frida-server|yq|sqlite3|cmake|ninja|readelf|objdump|nm|strings|rg|git|apt)
+      "${prefix[@]}" "$bin" --version >"$log" 2>&1
+      ;;
+    *)
+      echo "[DSH] No smoke contract registered for tool: $cmd" >"$log"
+      return 64
+      ;;
+  esac
+}
+
+dsh_host_required_tool_smoke() {
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local log="$CACHE_DIR/host-required-tools-smoke.log"
+  local cmd bin
+
+  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb readelf objdump nm strings; do
+    bin="$host_prefix/bin/$cmd"
+    if [ ! -x "$bin" ]; then
+      case "$cmd" in
+        readelf|objdump|nm|strings)
+          bin="$host_prefix/bin/g$cmd"
+          ;;
+      esac
+    fi
+    if [ ! -x "$bin" ]; then
+      echo "[DSH] Host smoke executable missing: $cmd ($bin)" >&2
+      return 7
+    fi
+    if ! dsh_run_tool_smoke "$cmd" "$bin" "$log"; then
+      echo "[DSH] Host tool smoke failed before staging: $cmd" >&2
+      sed -n '1,120p' "$log" >&2 || true
+      return 7
+    fi
+  done
+  echo "[DSH] Host required-tool smoke: OK"
+}
+
 dsh_host_dynamic_tool_smoke() {
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local log="$CACHE_DIR/host-dynamic-tool-smoke.log"
-  : > "$log"
 
-  "$host_prefix/bin/gdb" --version >>"$log" 2>&1 || return 11
-  "$host_prefix/bin/gdbserver" --version >>"$log" 2>&1 || return 12
-  "$host_prefix/bin/strace" -V >>"$log" 2>&1 || return 13
-  "$host_prefix/bin/rizin" -v >>"$log" 2>&1 || return 14
-  "$host_prefix/bin/frida" --version >>"$log" 2>&1 || return 15
-  "$host_prefix/bin/frida-server" --version >>"$log" 2>&1 || return 16
+  dsh_run_tool_smoke gdb "$host_prefix/bin/gdb" "$log" || return 11
+  dsh_run_tool_smoke gdbserver "$host_prefix/bin/gdbserver" "$log" || return 12
+  dsh_run_tool_smoke strace "$host_prefix/bin/strace" "$log" || return 13
+  dsh_run_tool_smoke rizin "$host_prefix/bin/rizin" "$log" || return 14
+  dsh_run_tool_smoke frida "$host_prefix/bin/frida" "$log" || return 15
+  dsh_run_tool_smoke frida-server "$host_prefix/bin/frida-server" "$log" || return 16
   return 0
 }
 
@@ -572,6 +636,10 @@ install_termux_tool_runtime() {
 
   dsh_validate_host_tool_contract || return 7
   dsh_repair_broken_host_dynamic_tools || return 7
+  # Run every required CLI with its real syntax before copying a large package
+  # closure. This catches flag/API drift (for example ffmpeg uses -version,
+  # not --version) before expensive staging/native builds.
+  dsh_host_required_tool_smoke || return 7
 
   # Do not assume that a command is owned by the package name we seeded.
   # Termux frequently splits commands into subpackages (Frida is one example).
@@ -829,18 +897,8 @@ validate_termux_tool_runtime() {
   fi
   local basic_log="$CACHE_DIR/basic-tools-smoke.log"
   for cmd in 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
-    : > "$basic_log"
-    local smoke_rc=0
-    case "$cmd" in
-      7z) "${common_env[@]}" "$wrappers/$cmd" i >"$basic_log" 2>&1 || smoke_rc=$? ;;
-      yq|sqlite3|cmake|ninja|ffmpeg|ffprobe) "${common_env[@]}" "$wrappers/$cmd" --version >"$basic_log" 2>&1 || smoke_rc=$? ;;
-      ss) "${common_env[@]}" "$wrappers/$cmd" -V >"$basic_log" 2>&1 || smoke_rc=$? ;;
-      dig) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 || smoke_rc=$? ;;
-      magick) "${common_env[@]}" "$wrappers/$cmd" -version >"$basic_log" 2>&1 || smoke_rc=$? ;;
-      pdfinfo) "${common_env[@]}" "$wrappers/$cmd" -v >"$basic_log" 2>&1 || smoke_rc=$? ;;
-      adb) "${common_env[@]}" "$wrappers/$cmd" version >"$basic_log" 2>&1 || smoke_rc=$? ;;
-    esac
-    if [ "$smoke_rc" -ne 0 ]; then
+    if ! dsh_run_tool_smoke "$cmd" "$wrappers/$cmd" "$basic_log" "${common_env[@]}"; then
+      local smoke_rc=$?
       echo "[DSH] Embedded basic tool smoke failed: $cmd (exit=$smoke_rc)" >&2
       sed -n '1,120p' "$basic_log" >&2 || true
       return 7
