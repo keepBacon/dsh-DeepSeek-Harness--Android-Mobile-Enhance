@@ -816,6 +816,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // copies Termux rg into the embedded prefix when available.
       "DSH_RG_PATH" to File(usrDir, "bin/rg").takeIf { it.isFile }?.absolutePath.orEmpty(),
       "DSH_ANDROID_STANDALONE" to "1",
+      // Android cannot rely on desktop Linux bwrap/Landlock from an ordinary
+      // app UID. sandbox-local is patched to use this explicit partial runner
+      // while fs-sandbox remains the workspace write-containment authority.
+      "DSH_ANDROID_SANDBOX_RUNNER" to File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh").absolutePath,
       "DSH_PICK_TOKEN" to (pickToken ?: ""),
       // DSH's in-Web plugin manager launches pnpm as a child of this Host.
       // Keep peer dependency resolution aligned with the shipped profile:
