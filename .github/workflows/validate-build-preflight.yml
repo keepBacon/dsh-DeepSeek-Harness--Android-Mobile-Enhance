@@ -75,6 +75,27 @@ jobs:
           check pdfinfo -v
           check 7z i
 
+      - name: Validate Android patches against published DSH 0.1.5-rc.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          npm install --prefix "$tmp/lib" --ignore-scripts --no-audit --no-fund --loglevel=error \
+            @deepseek-ai/dsh-sandbox-local@0.1.5-rc.2 \
+            @deepseek-ai/dsh-subprocess-local@0.1.5-rc.2 \
+            @deepseek-ai/dsh-terminal-bash@0.1.5-rc.2
+          node scripts/android-runtime-patch.mjs "$tmp"
+          sandbox="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-sandbox-local/lib/index.js' -type f -print -quit)"
+          subprocess="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-subprocess-local/lib/index.js' -type f -print -quit)"
+          terminal="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-terminal-bash/lib/config.js' -type f -print -quit)"
+          grep -Fq 'DSH Android compat: partial app-UID sandbox runner' "$sandbox"
+          grep -Fq 'DSH Android compat: skip desktop linux-scope' "$subprocess"
+          grep -Fq 'DSH Android compat: embedded Bash default' "$terminal"
+          node --check "$sandbox"
+          node --check "$subprocess"
+          node --check "$terminal"
+
       - name: Repository static regression suite
         shell: bash
         run: |
