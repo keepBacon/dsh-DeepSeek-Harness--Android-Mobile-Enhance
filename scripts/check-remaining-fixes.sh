@@ -16,6 +16,7 @@ ES="$ROOT/app/src/main/java/com/dshmobile/shell/EngineService.kt"
 DFL="$ROOT/scripts/dsh-release-family-lock.json"
 DFT="$ROOT/scripts/dsh-runtime-family.mjs"
 WST="$ROOT/scripts/validate-web-runtime-smoke.mjs"
+DPC="$ROOT/scripts/validate-desktop-web-parity.mjs"
 MCM="$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt"
 MTB="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
 ARP="$ROOT/scripts/android-runtime-patch.mjs"
@@ -326,6 +327,14 @@ must "$BT" '--strict-peer-deps=false'
 must "$BT" '--loglevel=error'
 must "$BT" 'validate_dsh_core_plugin_tree()'
 must "$BT" 'Core plugin tree + MCP toolbox: OK (real web boot)'
+must "$BT" 'validate-desktop-web-parity.mjs'
+must "$BT" 'web --dump-default-config'
+must "$BT" '"desktopWebCapabilityContract": true'
+must "$DPC" 'Desktop Web capability contract: OK'
+must "$DPC" "['workspace', '@deepseek-ai/dsh-workspace']"
+must "$DPC" "['code-runtime', '@deepseek-ai/dsh-code-runtime-worker-thread']"
+must "$DPC" 'AGENT_SCOPED_DISABLED'
+node "$DPC" --self-test >/dev/null
 must "$ARP" "'@deepseek-ai/dsh-sandbox-local'"
 must "$ARP" "'@deepseek-ai/dsh-subprocess-local'"
 must "$ARP" "'@deepseek-ai/dsh-terminal-bash'"

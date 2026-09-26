@@ -1099,10 +1099,13 @@ validate_dsh_core_plugin_tree() {
   local smoke_home="$CACHE_DIR/core-plugin-tree-smoke-home"
   local smoke_log="$CACHE_DIR/core-plugin-tree-smoke.log"
   local smoke_validator="$ROOT/scripts/validate-web-runtime-smoke.mjs"
+  local desktop_parity_validator="$ROOT/scripts/validate-desktop-web-parity.mjs"
+  local desktop_parity_dump="$CACHE_DIR/core-plugin-tree-web-default-config.yml"
   local mcp_patch="$CACHE_DIR/core-plugin-tree-mcp.patch.yml"
   local preload=""
 
   [ -f "$smoke_validator" ] || { echo "[DSH] Missing Web runtime smoke validator: $smoke_validator"; exit 8; }
+  [ -f "$desktop_parity_validator" ] || { echo "[DSH] Missing Desktop Web parity validator: $desktop_parity_validator"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/toolbox-mcp.mjs" ] || { echo "[DSH] Missing mobile MCP toolbox"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs" ] || { echo "[DSH] Missing basic MCP toolbox"; exit 8; }
 
@@ -1117,6 +1120,43 @@ validate_dsh_core_plugin_tree() {
   mkdir -p "$smoke_home/tmp"
   : > "$smoke_log"
   [ -f "$stage/usr/lib/libtermux-exec-ld-preload.so" ] && preload="$stage/usr/lib/libtermux-exec-ld-preload.so"
+
+  # The Android shell intentionally boots the official DSH Web profile instead
+  # of maintaining a reduced mobile backend. Verify the composed default tree
+  # before adding Android-only MCP overlays so upstream/profile drift cannot
+  # silently remove desktop Workspace, Jobs, Skills, Subagents, Workflow,
+  # filesystem, Web, plugin-management, or code-runtime surfaces.
+  echo '[DSH] Validating Desktop Web capability contract…'
+  if ! env \
+    PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" \
+    LD_LIBRARY_PATH="$stage/usr/lib" \
+    LD_PRELOAD="$preload" \
+    HOME="$smoke_home" \
+    DSH_HOME="$smoke_home/.dsh" \
+    TMPDIR="$smoke_home/tmp" \
+    SHELL="$stage/usr/bin/bash" \
+    DSH_SIDEBAR_SHELL="$stage/usr/bin/bash" \
+    TERMUX__ROOTFS="$stage" \
+    TERMUX__PREFIX="$stage/usr" \
+    TERMUX_PREFIX="$stage/usr" \
+    PREFIX="$stage/usr" \
+    TERMUX_HOME="$smoke_home" \
+    TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force \
+    TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1 \
+    DSH_ANDROID_STANDALONE=1 \
+    DSH_ANDROID_SANDBOX_RUNNER="$stage/usr/libexec/dsh-mobile/android-sandbox-runner.sh" \
+    "$stage/usr/bin/node" --expose-internals \
+      "$stage/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" \
+      web --dump-default-config >"$desktop_parity_dump"; then
+    echo '[DSH] Failed to dump the default Web capability tree.' >&2
+    exit 8
+  fi
+  if ! env LD_LIBRARY_PATH="$stage/usr/lib" \
+    "$stage/usr/bin/node" "$desktop_parity_validator" "$desktop_parity_dump"; then
+    echo '[DSH] Desktop Web capability parity validation failed.' >&2
+    exit 8
+  fi
+
   cat > "$mcp_patch" <<EOF_MCP
 - insert:
     - id: android-mcp-mobile-tools-smoke
@@ -1207,7 +1247,7 @@ EOF_MCP
   fi
 
   echo '[DSH] Core plugin tree + MCP toolbox: OK (real web boot)'
-  rm -rf "$smoke_home" "$mcp_patch"
+  rm -rf "$smoke_home" "$mcp_patch" "$desktop_parity_dump"
 }
 
 refresh_dsh_runtime() {
@@ -1334,6 +1374,7 @@ refresh_dsh_runtime() {
   "pnpmBuildApproval": true,
   "pluginProfileValidation": true,
   "corePluginTreeSmokeTest": true,
+  "desktopWebCapabilityContract": true,
   "webClientBundleSmokeTest": true,
   "webBrowserAuthSmokeTest": true,
   "standaloneWebSmokeValidator": true,
