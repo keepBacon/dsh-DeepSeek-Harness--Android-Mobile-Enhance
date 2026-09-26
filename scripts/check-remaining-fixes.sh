@@ -97,7 +97,11 @@ must "$ETT" 'for cmd in readelf objdump nm strings'
 must "$ETT" 'ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip'
 must "$ETT" 'elif [ -x "$prefix/bin/g$name" ]; then'
 must "$ETT" 'command_name="g$name"'
-must "$ETT" '"${common_env[@]}" "$wrappers/$cmd" --version'
+must "$ETT" 'dsh_run_tool_smoke()'
+must "$ETT" 'magick|ffmpeg|ffprobe)'
+must "$ETT" '"$bin" -version'
+forbid "$ETT" 'yq|sqlite3|cmake|ninja|ffmpeg|ffprobe)'
+forbid "$ETT" 'ffmpeg|ffprobe) "${common_env[@]}" "$wrappers/$cmd" --version'
 must "$ETT" '"$stage/usr/bin/openssl" version'
 node --check "$MTB" >/dev/null
 
