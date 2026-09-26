@@ -5,14 +5,39 @@
 
 resolve_termux_package_closure() {
   local roots=("$@")
-  {
-    printf '%s\n' "${roots[@]}"
-    apt-cache depends --installed --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances "${roots[@]}" 2>/dev/null \
-      | awk '/^[A-Za-z0-9][A-Za-z0-9+.:_-]*$/ { print $1; next } /^[[:space:]]*(Pre)?Depends:/ { sub(/^[[:space:]]*(Pre)?Depends:[[:space:]]*/, ""); gsub(/[<>]/, ""); if ($1 != "") print $1 }'
-  } | sed 's/:any$//' | awk 'NF && !seen[$0]++' \
-    | while IFS= read -r pkg; do
-        [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" = "installed" ] && printf '%s\n' "$pkg"
-      done
+  local dependency_output='' pkg
+  local candidates=()
+
+  # Keep apt-cache failure distinct from an ordinary "candidate is not installed"
+  # result. The old pipeline ended with:
+  #   [ installed ] && printf ...
+  # so when the last candidate was not installed the while loop returned 1.
+  # With build-termux.sh using set -Eeuo pipefail that normal filter condition
+  # aborted the entire build and the ERR trap misleadingly pointed at awk.
+  if ! dependency_output="$(apt-cache depends --installed --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances "${roots[@]}" 2>/dev/null)"; then
+    echo "[DSH] apt-cache dependency closure query failed." >&2
+    return 7
+  fi
+
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    candidates+=("$pkg")
+  done < <(
+    {
+      printf '%s\n' "${roots[@]}"
+      printf '%s\n' "$dependency_output" \
+        | awk '/^[A-Za-z0-9][A-Za-z0-9+.:_-]*$/ { print $1; next } /^[[:space:]]*(Pre)?Depends:/ { sub(/^[[:space:]]*(Pre)?Depends:[[:space:]]*/, ""); gsub(/[<>]/, ""); if ($1 != "") print $1 }'
+    } \
+      | sed 's/:any$//' \
+      | awk 'NF && !seen[$0]++'
+  )
+
+  for pkg in "${candidates[@]}"; do
+    if [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" = "installed" ]; then
+      printf '%s\n' "$pkg"
+    fi
+  done
+  return 0
 }
 
 copy_termux_package_payload() {
@@ -225,7 +250,7 @@ dsh_validate_host_tool_contract() {
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local fail=0 cmd owner
 
-  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server; do
+  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
     if [ ! -x "$host_prefix/bin/$cmd" ]; then
       case "$cmd" in
         gdbserver) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd (install provider: gdbserver)" >&2 ;;
@@ -237,7 +262,9 @@ dsh_validate_host_tool_contract() {
       continue
     fi
     owner="$(dsh_host_tool_owner "$cmd" || true)"
-    [ -n "$owner" ] && echo "[DSH] Tool owner: $cmd <- $owner"
+    if [ -n "$owner" ]; then
+      echo "[DSH] Tool owner: $cmd <- $owner"
+    fi
   done
 
   for cmd in readelf objdump nm strings; do
@@ -277,10 +304,11 @@ PY_DSH_FRIDA_DEPS
 
 dsh_required_tool_owner_packages() {
   local cmd owner
-  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server; do
+  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
     owner="$(dsh_host_tool_owner "$cmd" || true)"
-    [ -n "$owner" ] && printf '%s
-' "$owner"
+    if [ -n "$owner" ]; then
+      printf '%s\n' "$owner"
+    fi
   done
 }
 
