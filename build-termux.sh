@@ -212,6 +212,11 @@ dsh_gradle_source_preflight() {
 
 dsh_gradle_source_preflight
 
+if [ "${DSH_PREFLIGHT_ONLY:-0}" = "1" ]; then
+  echo '[DSH] PREFLIGHT OK: host prerequisites + Android SDK + Gradle/Kotlin/Manifest/resources passed.'
+  exit 0
+fi
+
 for cmd in java curl unzip tar xz aapt2; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "[DSH] Host prerequisite bootstrap did not provide: $cmd" >&2; exit 2; }
 done
