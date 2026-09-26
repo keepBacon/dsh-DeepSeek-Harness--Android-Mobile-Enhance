@@ -55,7 +55,11 @@ must "$MF" 'android.permission.READ_EXTERNAL_STORAGE'
 must "$MF" 'android.permission.WRITE_EXTERNAL_STORAGE'
 must "$MF" 'android:requestLegacyExternalStorage="true"'
 must "$MA" 'resolveWritableWorkspacePath(uri)'
-must "$MA" 'MediaStore.Downloads.EXTERNAL_CONTENT_URI'
+must "$MA" 'private fun downloadToWorkspace('
+must "$MA" 'showWorkspaceDirectorySelection(root)'
+must "$MA" 'private fun saveToWorkspaceStreamed('
+must "$MA" 'isInsideWorkspace(workspaceRoot, destination)'
+forbid "$MA" 'MediaStore.Downloads.EXTERNAL_CONTENT_URI'
 must "$MA" 'reserveUniqueFile(root, filename)'
 
 # M-09/M-10 encrypted SSH/Git credentials and exact host-scoped askpass.
