@@ -98,9 +98,9 @@ jobs:
 
           workspace="$tmp/workspace"
           mkdir -p "$workspace"
-          output="$(TMPDIR="$tmp" scripts/dsh-android-sandbox-runner.sh workspace-write "$workspace" -- bash -c 'printf "%s|%s" "$DSH_ANDROID_SANDBOX_MODE" "$DSH_ANDROID_SANDBOX_ENFORCEMENT"')"
+          output="$(TMPDIR="$tmp" bash scripts/dsh-android-sandbox-runner.sh workspace-write "$workspace" -- bash -c 'printf "%s|%s" "$DSH_ANDROID_SANDBOX_MODE" "$DSH_ANDROID_SANDBOX_ENFORCEMENT"')"
           test "$output" = "workspace-write|partial"
-          if scripts/dsh-android-sandbox-runner.sh invalid "$workspace" -- true >/dev/null 2>&1; then
+          if bash scripts/dsh-android-sandbox-runner.sh invalid "$workspace" -- true >/dev/null 2>&1; then
             echo "Android sandbox runner accepted an invalid mode" >&2
             exit 1
           fi
