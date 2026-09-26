@@ -837,50 +837,25 @@ validate_termux_tool_runtime() {
       return 7
     fi
   done
-  local openssl_log="$CACHE_DIR/embedded-openssl-smoke.log"
-  if ! "${common_env[@]}" "$wrappers/openssl" version >"$openssl_log" 2>&1; then
-    echo "[DSH] Embedded OpenSSL smoke test failed through relocation wrapper." >&2
-    echo "[DSH] This usually means the staged Termux payload or one of its shared libraries/config paths is incomplete." >&2
-    sed -n '1,120p' "$openssl_log" >&2 || true
-    return 7
-  fi
-
-  local file_log="$CACHE_DIR/embedded-file-smoke.log"
-  if ! "${common_env[@]}" "$wrappers/file" --version >"$file_log" 2>&1; then
-    echo "[DSH] Embedded file(1) smoke test failed through relocation wrapper." >&2
-    sed -n '1,120p' "$file_log" >&2 || true
-    return 7
-  fi
-
-  local aapt2_log="$CACHE_DIR/embedded-aapt2-smoke.log"
-  if ! "${common_env[@]}" "$wrappers/aapt2" version >"$aapt2_log" 2>&1; then
-    echo "[DSH] Embedded aapt2 smoke test failed through relocation wrapper." >&2
-    sed -n '1,120p' "$aapt2_log" >&2 || true
-    return 7
-  fi
-
-  local dynamic_log="$CACHE_DIR/embedded-dynamic-analysis-smoke.log"
-  if ! "${common_env[@]}" "$stage/usr/bin/gdb" --version >"$dynamic_log" 2>&1; then
-    echo '[DSH] Embedded gdb smoke test failed.' >&2; sed -n '1,100p' "$dynamic_log" >&2 || true; return 7
-  fi
-  if ! "${common_env[@]}" "$stage/usr/bin/strace" -V >"$dynamic_log" 2>&1; then
-    echo '[DSH] Embedded strace smoke test failed.' >&2; sed -n '1,100p' "$dynamic_log" >&2 || true; return 7
-  fi
-  if ! "${common_env[@]}" "$wrappers/rizin" -v >"$dynamic_log" 2>&1; then
-    echo '[DSH] Embedded Rizin smoke test failed.' >&2; sed -n '1,100p' "$dynamic_log" >&2 || true; return 7
-  fi
-  if ! "${common_env[@]}" "$wrappers/frida" --version >"$dynamic_log" 2>&1; then
-    echo '[DSH] Embedded Frida client smoke test failed.' >&2; sed -n '1,120p' "$dynamic_log" >&2 || true; return 7
-  fi
-  if ! "${common_env[@]}" "$wrappers/frida-ps" --help >"$dynamic_log" 2>&1; then
-    echo '[DSH] Embedded frida-ps smoke test failed (Python dependency closure incomplete).' >&2; sed -n '1,160p' "$dynamic_log" >&2 || true; return 7
-  fi
-  if ! "${common_env[@]}" "$wrappers/frida-trace" --help >"$dynamic_log" 2>&1; then
-    echo '[DSH] Embedded frida-trace smoke test failed (Python dependency closure incomplete).' >&2; sed -n '1,160p' "$dynamic_log" >&2 || true; return 7
-  fi
-  if ! "${common_env[@]}" "$stage/usr/bin/gdbserver" --version >"$dynamic_log" 2>&1; then
-    echo '[DSH] Embedded gdbserver smoke test failed.' >&2; sed -n '1,120p' "$dynamic_log" >&2 || true; return 7
-  fi
+  local staged_tool_log="$CACHE_DIR/embedded-required-tools-smoke.log"
+  local staged_cmd staged_bin staged_rc
+  for staged_cmd in openssl file aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
+    case "$staged_cmd" in
+      gdb|gdbserver|strace)
+        staged_bin="$stage/usr/bin/$staged_cmd"
+        ;;
+      *)
+        staged_bin="$wrappers/$staged_cmd"
+        ;;
+    esac
+    staged_rc=0
+    dsh_run_tool_smoke "$staged_cmd" "$staged_bin" "$staged_tool_log" "${common_env[@]}" || staged_rc=$?
+    if [ "$staged_rc" -ne 0 ]; then
+      echo "[DSH] Embedded required-tool smoke failed: $staged_cmd (exit=$staged_rc)" >&2
+      sed -n '1,160p' "$staged_tool_log" >&2 || true
+      return 7
+    fi
+  done
 
   local apt_log="$CACHE_DIR/embedded-apt-smoke.log"
   if ! "${common_env[@]}" "$wrappers/apt" --version >"$apt_log" 2>&1; then
@@ -895,15 +870,6 @@ validate_termux_tool_runtime() {
     sed -n '1,80p' "$pkg_log" >&2 || true
     return 7
   fi
-  local basic_log="$CACHE_DIR/basic-tools-smoke.log"
-  for cmd in 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
-    local smoke_rc=0
-    dsh_run_tool_smoke "$cmd" "$wrappers/$cmd" "$basic_log" "${common_env[@]}" || smoke_rc=$?
-    if [ "$smoke_rc" -ne 0 ]; then
-      echo "[DSH] Embedded basic tool smoke failed: $cmd (exit=$smoke_rc)" >&2
-      sed -n '1,120p' "$basic_log" >&2 || true
-      return 7
-    fi
-  done
+  echo "[DSH] Embedded required-tool smoke contract: OK"
   echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + binutils + openssl + dynamic tools + basic_tools CLI)"
 }
