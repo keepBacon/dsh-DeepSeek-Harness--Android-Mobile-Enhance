@@ -174,11 +174,18 @@ const arg=process.argv[2]
 if (arg === '--self-test') { selfTest(); process.exit(0) }
 if (!arg) { console.error('usage: validate-agent-preset-parity.mjs <node_modules-dir>'); process.exit(2) }
 
+function isDirectory(target) {
+  try { return fs.statSync(target).isDirectory() } catch { return false }
+}
+function isFile(target) {
+  try { return fs.statSync(target).isFile() } catch { return false }
+}
+
 const root=path.join(path.resolve(arg),'@deepseek-ai','dsh-agent-presets','presets')
-if (!fs.isDirectorySync(root)) throw new Error('shipped Agent preset root missing: ' + root)
+if (!isDirectory(root)) throw new Error('shipped Agent preset root missing: ' + root)
 for (const [id,contract] of Object.entries(contracts)) {
   const file=path.join(root,id,'agent.cordis.yml')
-  if (!fs.isFileSync(file)) throw new Error('shipped Agent preset missing: ' + file)
+  if (!isFile(file)) throw new Error('shipped Agent preset missing: ' + file)
   validate(id,fs.readFileSync(file,'utf8'),contract)
 }
 console.log('[DSH] Agent preset tool parity: OK (standard/PTC/minimal/Cordis)')

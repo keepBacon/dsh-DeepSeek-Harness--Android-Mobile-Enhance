@@ -86,7 +86,8 @@ jobs:
           npm install --prefix "$tmp/lib" --ignore-scripts --no-audit --no-fund --loglevel=error \
             @deepseek-ai/dsh-sandbox-local@0.1.5-rc.2 \
             @deepseek-ai/dsh-subprocess-local@0.1.5-rc.2 \
-            @deepseek-ai/dsh-terminal-bash@0.1.5-rc.2
+            @deepseek-ai/dsh-terminal-bash@0.1.5-rc.2 \
+            @deepseek-ai/dsh-agent-presets@0.1.5-rc.2
           node scripts/android-runtime-patch.mjs "$tmp"
           sandbox="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-sandbox-local/lib/index.js' -type f -print -quit)"
           subprocess="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-subprocess-local/lib/index.js' -type f -print -quit)"
@@ -97,6 +98,7 @@ jobs:
           node --check "$sandbox"
           node --check "$subprocess"
           node --check "$terminal"
+          node scripts/validate-agent-preset-parity.mjs "$tmp/lib/node_modules"
 
           workspace="$tmp/workspace"
           mkdir -p "$workspace"

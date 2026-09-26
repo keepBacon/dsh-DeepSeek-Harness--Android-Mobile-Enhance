@@ -348,6 +348,10 @@ must "$DPC" 'AGENT_SCOPED_DISABLED'
 node "$DPC" --self-test >/dev/null
 must "$BT" 'validate_agent_preset_tool_parity()'
 must "$BT" '"agentPresetToolParity": true'
+forbid "$APC" 'fs.isDirectorySync'
+forbid "$APC" 'fs.isFileSync'
+must "$APC" 'fs.statSync(target).isDirectory()'
+must "$APC" 'fs.statSync(target).isFile()'
 must "$APC" 'Agent preset tool parity: OK'
 must "$APC" "['tool-ask-user','@deepseek-ai/dsh-tool-ask-user']"
 must "$APC" "['present','@deepseek-ai/dsh-tool-present']"
