@@ -202,7 +202,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "24"
-          cache: npm
 
       - name: Resolve exact DSH 0.1.5-rc.2 release family
         shell: bash
