@@ -186,6 +186,32 @@ java -version 2>&1 | head -n 1 || true
 printf '[DSH] SDK: %s\n' "$SDK"
 printf '[DSH] Gradle home: %s\n' "$GRADLE_USER_HOME"
 
+dsh_gradle_source_preflight() {
+  local aapt2_bin log status
+  aapt2_bin="$(command -v aapt2)"
+  log="$ROOT/build-preflight.log"
+  echo '[DSH] Running fast Android source preflight before Runtime rebuild…'
+  set +e
+  bash ./gradlew --no-daemon --console=plain \
+    :app:checkDebugAarMetadata \
+    :app:compileDebugKotlin \
+    :app:processDebugMainManifest \
+    :app:mergeDebugResources \
+    -Pandroid.aapt2FromMavenOverride="$aapt2_bin" \
+    >"$log" 2>&1
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    echo '[DSH] Fast Android source preflight failed; Runtime rebuild was not started.' >&2
+    grep -E '(^e: |^error: |Execution failed|What went wrong|Compilation error|Unresolved reference|Cannot access|requires API|FAILURE:|Could not resolve|AAPT: error)' "$log" | tail -n 120 >&2 || true
+    echo "[DSH] Full preflight log: $log" >&2
+    return "$status"
+  fi
+  echo '[DSH] Fast Android source preflight: OK'
+}
+
+dsh_gradle_source_preflight
+
 for cmd in java curl unzip tar xz aapt2; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "[DSH] Host prerequisite bootstrap did not provide: $cmd" >&2; exit 2; }
 done
