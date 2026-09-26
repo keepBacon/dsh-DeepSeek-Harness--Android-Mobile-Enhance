@@ -100,9 +100,30 @@ jobs:
 
           workspace="$tmp/workspace"
           mkdir -p "$workspace"
-          output="$(TMPDIR="$tmp" bash scripts/dsh-android-sandbox-runner.sh workspace-write "$workspace" -- bash -c 'printf "%s|%s" "$DSH_ANDROID_SANDBOX_MODE" "$DSH_ANDROID_SANDBOX_ENFORCEMENT"')"
-          test "$output" = "workspace-write|partial"
-          if bash scripts/dsh-android-sandbox-runner.sh invalid "$workspace" -- true >/dev/null 2>&1; then
+          fake_stage="$tmp/stage"
+          mkdir -p "$fake_stage/usr/libexec/dsh" "$fake_stage/usr/bin" "$fake_stage/home/tmp"
+          cat >"$fake_stage/usr/libexec/dsh/bash-real" <<'EOF_BASH_REAL'
+          #!/usr/bin/env bash
+          exec bash "$@"
+          EOF_BASH_REAL
+          chmod +x "$fake_stage/usr/libexec/dsh/bash-real"
+          cat >"$fake_stage/usr/bin/bash" <<'EOF_BASH_WRAPPER'
+          #!/usr/bin/env bash
+          real="$TERMUX__PREFIX/libexec/dsh/bash-real"
+          [ -x "$real" ] || { echo "embedded bash runtime missing: $real" >&2; exit 127; }
+          exec "$real" "$@"
+          EOF_BASH_WRAPPER
+          chmod +x "$fake_stage/usr/bin/bash"
+
+          output="$(env \
+            TERMUX__PREFIX="$fake_stage/usr" \
+            PREFIX="$fake_stage/usr" \
+            HOME="$fake_stage/home" \
+            TMPDIR="$fake_stage/home/tmp" \
+            bash scripts/dsh-android-sandbox-runner.sh workspace-write "$workspace" -- \
+            "$fake_stage/usr/bin/bash" -c 'printf "%s|%s|%s" "$DSH_ANDROID_SANDBOX_MODE" "$DSH_ANDROID_SANDBOX_ENFORCEMENT" "$TERMUX__PREFIX"')"
+          test "$output" = "workspace-write|partial|$fake_stage/usr"
+          if env TERMUX__PREFIX="$fake_stage/usr" TMPDIR="$fake_stage/home/tmp" bash scripts/dsh-android-sandbox-runner.sh invalid "$workspace" -- true >/dev/null 2>&1; then
             echo "Android sandbox runner accepted an invalid mode" >&2
             exit 1
           fi

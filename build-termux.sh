@@ -1161,9 +1161,24 @@ validate_android_backend_parity() {
   local smoke_workspace="$CACHE_DIR/android-backend-parity-workspace"
   rm -rf "$smoke_workspace"
   mkdir -p "$smoke_workspace" "$stage/home/tmp"
-  env TMPDIR="$stage/home/tmp" "$runner" workspace-write "$smoke_workspace" -- \
+  env \
+    PATH="$stage/usr/bin:/system/bin" \
+    LD_LIBRARY_PATH="$stage/usr/lib" \
+    HOME="$stage/home" \
+    TMPDIR="$stage/home/tmp" \
+    SHELL="$stage/usr/bin/bash" \
+    DSH_SIDEBAR_SHELL="$stage/usr/bin/bash" \
+    TERMUX__ROOTFS="$stage" \
+    TERMUX__PREFIX="$stage/usr" \
+    TERMUX_PREFIX="$stage/usr" \
+    PREFIX="$stage/usr" \
+    TERMUX_HOME="$stage/home" \
+    TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force \
+    TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1 \
+    DSH_ANDROID_STANDALONE=1 \
+    "$runner" workspace-write "$smoke_workspace" -- \
     "$stage/usr/bin/bash" --noprofile --norc -c \
-    'test "$DSH_ANDROID_SANDBOX_MODE" = workspace-write && test "$DSH_ANDROID_SANDBOX_ENFORCEMENT" = partial && pwd >/dev/null' || {
+    'test "$DSH_ANDROID_SANDBOX_MODE" = workspace-write && test "$DSH_ANDROID_SANDBOX_ENFORCEMENT" = partial && test "$TERMUX__PREFIX" = "'"$stage"'/usr" && test -x "$TERMUX__PREFIX/libexec/dsh/bash-real" && pwd >/dev/null' || {
       echo "[DSH] Android sandbox runner smoke failed."; exit 8;
     }
   rm -rf "$smoke_workspace"
