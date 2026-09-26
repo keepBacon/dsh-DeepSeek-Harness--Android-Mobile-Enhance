@@ -22,6 +22,7 @@ MCM="$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt"
 MTB="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
 ARP="$ROOT/scripts/android-runtime-patch.mjs"
 ETT="$ROOT/scripts/embed-termux-tools.sh"
+ASR="$ROOT/scripts/dsh-android-sandbox-runner.sh"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 must() { grep -Fq -- "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
