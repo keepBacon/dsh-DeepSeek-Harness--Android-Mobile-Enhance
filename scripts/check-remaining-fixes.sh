@@ -325,6 +325,16 @@ must "$BT" '--strict-peer-deps=false'
 must "$BT" '--loglevel=error'
 must "$BT" 'validate_dsh_core_plugin_tree()'
 must "$BT" 'Core plugin tree + MCP toolbox: OK (real web boot)'
+must "$ARP" "'@deepseek-ai/dsh-sandbox-local'"
+must "$ARP" "'@deepseek-ai/dsh-subprocess-local'"
+must "$ARP" "'@deepseek-ai/dsh-terminal-bash'"
+must "$ARP" 'DSH Android compat: partial app-UID sandbox runner'
+must "$ARP" 'DSH Android compat: skip desktop linux-scope'
+must "$ARP" 'DSH Android compat: embedded Bash default'
+must "$BT" 'validate_android_backend_parity()'
+must "$BT" 'DSH_ANDROID_SANDBOX_RUNNER'
+must "$BT" 'androidWorkspaceBackendParity'
+must "$BT" 'androidSandboxEnforcement'
 must "$BT" 'validate-web-runtime-smoke.mjs'
 must "$BT" 'web --patch "$mcp_patch" --port 0 --no-open'
 must "$BT" "grep -Fq 'dsh web: http://127.0.0.1:'"
