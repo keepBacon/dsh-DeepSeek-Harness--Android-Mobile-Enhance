@@ -456,7 +456,7 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
 // terminal-bash defaults to /bin/bash on POSIX desktops. Android has no /bin
 // Bash; the APK already publishes the relocated embedded shell through
 // DSH_SIDEBAR_SHELL/SHELL.
-eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/config.js', (file) => {
+eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: embedded Bash default'
   if (txt.includes(marker)) return 'already'
