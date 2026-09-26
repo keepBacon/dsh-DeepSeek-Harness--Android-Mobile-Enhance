@@ -126,14 +126,20 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK 36
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "platforms;android-36"
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          sdkmanager_bin="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$sdkmanager_bin" ]; then
+            sdkmanager_bin="$(command -v sdkmanager || true)"
+          fi
+          [ -x "$sdkmanager_bin" ] || { echo "sdkmanager is unavailable on the runner" >&2; exit 1; }
+          yes | "$sdkmanager_bin" --licenses >/dev/null || true
+          "$sdkmanager_bin" "platforms;android-36"
+          test -s "$ANDROID_SDK_ROOT/platforms/android-36/android.jar"
 
       - name: Prepare CI runtime placeholder
         shell: bash
