@@ -78,7 +78,7 @@ function esc(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 function row(source, id, provider) {
-  const re = new RegExp('^\\s*- id: ' + esc(id) + '\\s*$[\\s\\S]*?^\\s+name: [\\\'"]?' + esc(provider) + '[\\\'"]?\\s*$', 'mu')
+  const re = new RegExp('^\\s*- id: ' + esc(id) + '\\s*$[\\s\\S]*?^\\s+name: [\\'"]?' + esc(provider) + '[\\'"]?\\s*$', 'mu')
   return re.test(source)
 }
 function disabled(source, id) {
