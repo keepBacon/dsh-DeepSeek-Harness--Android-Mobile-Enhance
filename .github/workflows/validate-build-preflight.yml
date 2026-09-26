@@ -190,3 +190,57 @@ jobs:
           set -euo pipefail
           bash ./gradlew --no-daemon --console=plain :app:assembleDebug
           test -s app/build/outputs/apk/debug/app-debug.apk
+
+
+  runtime-graph-preflight:
+    runs-on: ubuntu-latest
+    needs: static-preflight
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Resolve exact DSH 0.1.5-rc.2 release family
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/dsh-runtime"
+          prefix="$runtime/usr"
+          lib="$prefix/lib"
+          mkdir -p "$lib" "$runtime/home/.dsh" "$runtime/home/tmp"
+          node scripts/dsh-runtime-family.mjs manifest             scripts/dsh-release-family-lock.json 0.1.5-rc.2 11.7.0 > "$lib/package.json"
+          (
+            cd "$lib"
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund               --include=peer --strict-peer-deps=false --loglevel=error               --registry=https://registry.npmjs.org/               --fetch-retries=3 --fetch-retry-mintimeout=10000               --fetch-retry-maxtimeout=60000 --fetch-timeout=180000
+          )
+          node scripts/dsh-runtime-family.mjs verify-lock             scripts/dsh-release-family-lock.json "$lib/package-lock.json" 0.1.5-rc.2
+          (
+            cd "$lib"
+            npm ci --ignore-scripts --no-audit --no-fund               --include=peer --strict-peer-deps=false --loglevel=error               --registry=https://registry.npmjs.org/               --fetch-retries=3 --fetch-retry-mintimeout=10000               --fetch-retry-maxtimeout=60000 --fetch-timeout=180000
+          )
+          node scripts/dsh-runtime-family.mjs verify-installed             scripts/dsh-release-family-lock.json "$lib/node_modules" 0.1.5-rc.2
+
+      - name: Validate complete published runtime graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/dsh-runtime"
+          prefix="$runtime/usr"
+          lib="$prefix/lib"
+          modules="$lib/node_modules"
+          DSH_TARGET_VERSION=0.1.5-rc.2 node scripts/android-runtime-patch.mjs "$prefix"
+
+          while IFS= read -r file; do
+            node --check "$file"
+          done < <(grep -RIl --include='*.js' 'DSH Android compat:' "$modules/@deepseek-ai" || true)
+
+          node scripts/validate-agent-preset-parity.mjs "$modules"
+
+          dump="$RUNNER_TEMP/dsh-web-default-config.yml"
+          env             HOME="$runtime/home"             DSH_HOME="$runtime/home/.dsh"             TMPDIR="$runtime/home/tmp"             node "$modules/@deepseek-ai/dsh/lib/bin.js" web --dump-default-config > "$dump"
+          test -s "$dump"
+          node scripts/validate-desktop-web-parity.mjs "$dump"
