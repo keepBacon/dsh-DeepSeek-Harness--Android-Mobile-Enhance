@@ -80,6 +80,8 @@ dsh_static_build_preflight() {
     fail=1
   fi
   [ -f "$ROOT/scripts/android-runtime-patch.mjs" ] || { echo "[DSH] Missing android-runtime-patch.mjs" >&2; fail=1; }
+  [ -f "$ROOT/scripts/dsh-android-sandbox-runner.sh" ] || { echo "[DSH] Missing dsh-android-sandbox-runner.sh" >&2; fail=1; }
+  bash -n "$ROOT/scripts/dsh-android-sandbox-runner.sh" || fail=1;
   [ -f "$ROOT/scripts/dsh-runtime-family.mjs" ] || { echo "[DSH] Missing dsh-runtime-family.mjs" >&2; fail=1; }
   [ -f "$ROOT/scripts/dsh-release-family-lock.json" ] || { echo "[DSH] Missing dsh-release-family-lock.json" >&2; fail=1; }
   [ "$fail" -eq 0 ] || {
@@ -1005,7 +1007,11 @@ snapshot_has_git_runtime() {
 
 apply_android_runtime_patches() {
   local stage="$1"
+  local runner="$stage/usr/libexec/dsh-mobile/android-sandbox-runner.sh"
   echo '[DSH] Applying Android compatibility patches…'
+  mkdir -p "$(dirname "$runner")"
+  cp "$ROOT/scripts/dsh-android-sandbox-runner.sh" "$runner"
+  chmod 0755 "$runner"
   DSH_TARGET_VERSION="$DSH_VERSION" node "$ROOT/scripts/android-runtime-patch.mjs" "$stage/usr"
 }
 
