@@ -54,14 +54,28 @@ PNPM_TGZ="$CACHE_DIR/pnpm-$PNPM_VERSION.tgz"
 PNPM_URL="https://registry.npmjs.org/pnpm/-/pnpm-$PNPM_VERSION.tgz"
 
 dsh_static_build_preflight() {
-  local fail=0
-  bash -n "$ROOT/build-termux.sh" || fail=1
-  bash -n "$ROOT/scripts/embed-termux-tools.sh" || fail=1
+  local fail=0 file
+  while IFS= read -r -d '' file; do
+    bash -n "$file" || fail=1
+  done < <(find "$ROOT" -maxdepth 2 -type f -name '*.sh' -print0)
+
   if command -v node >/dev/null 2>&1; then
-    node --check "$MOBILE_MCP_TOOLBOX" >/dev/null || fail=1
-    node --check "$BASIC_MCP_TOOLBOX" >/dev/null || fail=1
+    while IFS= read -r -d '' file; do
+      node --check "$file" >/dev/null || fail=1
+    done < <(find "$ROOT/scripts" -maxdepth 1 -type f -name '*.mjs' -print0)
   else
-    echo "[DSH] Host node is missing; cannot syntax-check mobile MCP toolbox." >&2
+    echo "[DSH] Host node is missing; cannot syntax-check JavaScript build/runtime tools." >&2
+    fail=1
+  fi
+
+  # Known CLI contract regressions must fail in seconds, not after a long
+  # runtime overlay/native build. ffmpeg/ffprobe use -version, not --version.
+  if grep -R -n -E 'ffmpeg["'\'' ]+--version|ffprobe["'\'' ]+--version|\$cmd["'\'' ]+--version.*ffmpeg|ffmpeg\|ffprobe.*--version' "$ROOT/build-termux.sh" "$ROOT/scripts" 2>/dev/null; then
+    echo "[DSH] Static preflight found invalid ffmpeg/ffprobe --version usage." >&2
+    fail=1
+  fi
+  if ! grep -Fq 'dsh_run_tool_smoke()' "$ROOT/scripts/embed-termux-tools.sh"; then
+    echo "[DSH] Central Termux tool smoke dispatcher is missing." >&2
     fail=1
   fi
   [ -f "$ROOT/scripts/android-runtime-patch.mjs" ] || { echo "[DSH] Missing android-runtime-patch.mjs" >&2; fail=1; }
