@@ -27,6 +27,7 @@ jobs:
             node --check "$file"
           done < <(find scripts -maxdepth 1 -type f -name '*.mjs' -print0)
           node scripts/validate-desktop-web-parity.mjs --self-test
+          node scripts/validate-agent-preset-parity.mjs --self-test
 
       - name: Build contract regression guards
         shell: bash

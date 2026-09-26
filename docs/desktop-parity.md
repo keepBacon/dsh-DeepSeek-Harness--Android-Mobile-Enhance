@@ -35,3 +35,10 @@ Android does not maintain a reduced parallel DSH backend. The packaged runtime b
 The build now runs `dsh web --dump-default-config` against the staged Android runtime and validates the resulting composition before the APK is packaged. The contract requires the desktop Web surfaces for Workspace/Workspace Files, plugin inventory/settings, Jobs, Skills, Subagents, Workflow, filesystem/Web tools, attachments, TypeScript Code Runtime, and their Host/API/UI bridges to remain present.
 
 The validator also preserves upstream semantics instead of force-enabling rows: Web model-facing `tool-*` rows remain host-disabled because `dsh-agent-presets` composes them per Agent; PowerShell remains Windows-only; Schedule remains opt-in. A missing or unexpectedly disabled core capability fails the build.
+
+
+## Agent preset tool parity
+
+Host/Web services are only half of desktop parity: the Web profile delegates the model-facing catalog to shipped Agent presets. The build also validates the installed `@deepseek-ai/dsh-agent-presets` package inside the staged Android runtime.
+
+The `standard`, `ptc`, `minimal`, and `cordis` compositions are checked for critical tool rows and platform semantics. This covers Bash, filesystem/search, background jobs, Skills, goals/plan, Subagents, Workflow/Ralph, Ask User, Todo, Web, Present, PTC presentation, and the minimal preset's persistent terminal. Windows-only PowerShell gates and the PTC workflow choice are preserved rather than overridden.

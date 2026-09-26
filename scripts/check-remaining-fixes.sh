@@ -17,6 +17,7 @@ DFL="$ROOT/scripts/dsh-release-family-lock.json"
 DFT="$ROOT/scripts/dsh-runtime-family.mjs"
 WST="$ROOT/scripts/validate-web-runtime-smoke.mjs"
 DPC="$ROOT/scripts/validate-desktop-web-parity.mjs"
+APC="$ROOT/scripts/validate-agent-preset-parity.mjs"
 MCM="$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt"
 MTB="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
 ARP="$ROOT/scripts/android-runtime-patch.mjs"
@@ -335,6 +336,13 @@ must "$DPC" "['workspace', '@deepseek-ai/dsh-workspace']"
 must "$DPC" "['code-runtime', '@deepseek-ai/dsh-code-runtime-worker-thread']"
 must "$DPC" 'AGENT_SCOPED_DISABLED'
 node "$DPC" --self-test >/dev/null
+must "$BT" 'validate_agent_preset_tool_parity()'
+must "$BT" '"agentPresetToolParity": true'
+must "$APC" 'Agent preset tool parity: OK'
+must "$APC" "['tool-ask-user','@deepseek-ai/dsh-tool-ask-user']"
+must "$APC" "['present','@deepseek-ai/dsh-tool-present']"
+must "$APC" "['persistent-bash','@deepseek-ai/dsh-tool-bash-persistent']"
+node "$APC" --self-test >/dev/null
 must "$ARP" "'@deepseek-ai/dsh-sandbox-local'"
 must "$ARP" "'@deepseek-ai/dsh-subprocess-local'"
 must "$ARP" "'@deepseek-ai/dsh-terminal-bash'"

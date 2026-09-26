@@ -1056,6 +1056,18 @@ validate_android_backend_parity() {
   echo "[DSH] Android workspace/sandbox/subprocess/terminal backend parity: OK"
 }
 
+validate_agent_preset_tool_parity() {
+  local stage="$1"
+  local validator="$ROOT/scripts/validate-agent-preset-parity.mjs"
+  [ -f "$validator" ] || { echo "[DSH] Missing Agent preset parity validator: $validator"; exit 8; }
+  echo '[DSH] Validating shipped Agent preset tool parity…'
+  env LD_LIBRARY_PATH="$stage/usr/lib" \
+    "$stage/usr/bin/node" "$validator" "$stage/usr/lib/node_modules" || {
+      echo '[DSH] Agent preset tool parity validation failed.' >&2
+      exit 8
+    }
+}
+
 validate_android_typescript_code_runtime() {
   local stage="$1"
   echo '[DSH] Validating Android TypeScript run_code parser…'
@@ -1347,6 +1359,7 @@ refresh_dsh_runtime() {
   install_mobile_mcp_toolbox "$stage"
   install_basic_mcp_toolbox "$stage"
   validate_android_typescript_code_runtime "$stage"
+  validate_agent_preset_tool_parity "$stage"
   validate_dsh_core_plugin_tree "$stage"
   mkdir -p "$stage/usr/etc"
   local embedded_node
@@ -1375,6 +1388,7 @@ refresh_dsh_runtime() {
   "pluginProfileValidation": true,
   "corePluginTreeSmokeTest": true,
   "desktopWebCapabilityContract": true,
+  "agentPresetToolParity": true,
   "webClientBundleSmokeTest": true,
   "webBrowserAuthSmokeTest": true,
   "standaloneWebSmokeValidator": true,
