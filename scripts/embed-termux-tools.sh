@@ -118,7 +118,7 @@ validate_staged_termux_payload_contract() {
   require_exact_tool rizin rizin
   require_exact_tool 7z 7zip
   require_exact_tool yq yq
-  require_exact_tool sqlite3 libsqlite
+  require_exact_tool sqlite3 sqlite
   require_exact_tool cmake cmake
   require_exact_tool ninja ninja
   require_exact_tool ss iproute2
