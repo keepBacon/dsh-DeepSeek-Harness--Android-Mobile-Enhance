@@ -21,8 +21,8 @@ MTB="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
 ETT="$ROOT/scripts/embed-termux-tools.sh"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
-must() { grep -Fq "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
-forbid() { ! grep -Fq "$2" "$1" || fail "forbidden in $(basename "$1"): $2"; }
+must() { grep -Fq -- "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
+forbid() { ! grep -Fq -- "$2" "$1" || fail "forbidden in $(basename "$1"): $2"; }
 
 # M-01 workspace import publication must never use a check-then-rename overwrite path.
 must "$MA" 'Files.createLink(candidate.toPath(), temp.toPath())'
