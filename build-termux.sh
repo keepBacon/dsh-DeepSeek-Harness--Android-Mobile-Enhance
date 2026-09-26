@@ -1015,6 +1015,47 @@ apply_android_runtime_patches() {
   DSH_TARGET_VERSION="$DSH_VERSION" node "$ROOT/scripts/android-runtime-patch.mjs" "$stage/usr"
 }
 
+validate_android_backend_parity() {
+  local stage="$1"
+  local modules="$stage/usr/lib/node_modules"
+  local runner="$stage/usr/libexec/dsh-mobile/android-sandbox-runner.sh"
+  local sandbox_file subprocess_file terminal_file
+
+  [ -x "$runner" ] || { echo "[DSH] Android sandbox runner missing/not executable."; exit 8; }
+
+  sandbox_file="$(find "$modules" -path '*/@deepseek-ai/dsh-sandbox-local/lib/index.js' -type f -print -quit)"
+  subprocess_file="$(find "$modules" -path '*/@deepseek-ai/dsh-subprocess-local/lib/index.js' -type f -print -quit)"
+  terminal_file="$(find "$modules" -path '*/@deepseek-ai/dsh-terminal-bash/lib/config.js' -type f -print -quit)"
+  [ -n "$sandbox_file" ] || { echo "[DSH] dsh-sandbox-local published artifact missing."; exit 8; }
+  [ -n "$subprocess_file" ] || { echo "[DSH] dsh-subprocess-local published artifact missing."; exit 8; }
+  [ -n "$terminal_file" ] || { echo "[DSH] dsh-terminal-bash published config missing."; exit 8; }
+
+  grep -Fq 'DSH Android compat: partial app-UID sandbox runner' "$sandbox_file" || {
+    echo "[DSH] Android sandbox-local compatibility patch missing."; exit 8;
+  }
+  grep -Fq 'DSH Android compat: skip desktop linux-scope' "$subprocess_file" || {
+    echo "[DSH] Android subprocess-local compatibility patch missing."; exit 8;
+  }
+  grep -Fq 'DSH Android compat: embedded Bash default' "$terminal_file" || {
+    echo "[DSH] Android terminal-bash compatibility patch missing."; exit 8;
+  }
+
+  "$stage/usr/bin/node" --check "$sandbox_file" >/dev/null
+  "$stage/usr/bin/node" --check "$subprocess_file" >/dev/null
+  "$stage/usr/bin/node" --check "$terminal_file" >/dev/null
+
+  local smoke_workspace="$CACHE_DIR/android-backend-parity-workspace"
+  rm -rf "$smoke_workspace"
+  mkdir -p "$smoke_workspace" "$stage/home/tmp"
+  env TMPDIR="$stage/home/tmp" "$runner" workspace-write "$smoke_workspace" -- \
+    "$stage/usr/bin/bash" --noprofile --norc -c \
+    'test "$DSH_ANDROID_SANDBOX_MODE" = workspace-write && test "$DSH_ANDROID_SANDBOX_ENFORCEMENT" = partial && pwd >/dev/null' || {
+      echo "[DSH] Android sandbox runner smoke failed."; exit 8;
+    }
+  rm -rf "$smoke_workspace"
+  echo "[DSH] Android workspace/sandbox/subprocess/terminal backend parity: OK"
+}
+
 validate_android_typescript_code_runtime() {
   local stage="$1"
   echo '[DSH] Validating Android TypeScript run_code parser…'
