@@ -58,7 +58,7 @@ jobs:
             local tool="$1" expected="$2"
             local log="$tmp/$tool.log"
             dsh_run_tool_smoke "$tool" "$mock" "$log"
-            grep -Fxq "$expected" "$log"
+            grep -Fxq -- "$expected" "$log"
           }
 
           check ffmpeg -version
