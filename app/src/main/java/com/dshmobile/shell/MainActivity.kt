@@ -31,6 +31,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
@@ -294,6 +295,11 @@ class MainActivity : ComponentActivity() {
     root.addView(guideView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     setContentView(root)
     configureWebView()
+    onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+      override fun handleOnBackPressed() {
+        handleBackPressed()
+      }
+    })
     showStartingState("正在连接 DeepSeek Harness…")
     // Testable update trigger: adb am start -n .../.MainActivity -a com.dshmobile.shell.action.UPDATE
     if (intent?.action == ACTION_UPDATE) {
@@ -334,7 +340,7 @@ class MainActivity : ComponentActivity() {
     pushSystemDark(webView)
   }
 
-  override fun onBackPressed() {
+  private fun handleBackPressed() {
     if (webView.visibility != View.VISIBLE) {
       fallbackBackNavigation()
       return
@@ -374,7 +380,7 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun fallbackBackNavigation() {
-    if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    if (webView.canGoBack()) webView.goBack() else finishAfterTransition()
   }
 
   private fun configureWebView() {

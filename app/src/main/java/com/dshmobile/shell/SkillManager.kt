@@ -503,11 +503,11 @@ class SkillManager(
     // If a parent Skill bundle is found, nested SKILL.md files are resources,
     // not separate install roots.
     val roots = skillFiles
-      .map { it.parentFile.canonicalFile }
+      .mapNotNull { it.parentFile?.canonicalFile }
       .sortedBy { it.toPath().nameCount }
       .filter { candidate ->
         skillFiles.none { other ->
-          val parent = other.parentFile.canonicalFile
+          val parent = other.parentFile?.canonicalFile ?: return@none false
           parent != candidate && candidate.toPath().startsWith(parent.toPath())
         }
       }
