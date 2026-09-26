@@ -200,6 +200,9 @@ const wanted = new Set([
   '@deepseek-ai/dsh-client-modules',
   '@deepseek-ai/dsh-code-runtime-worker-thread',
   '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/dsh-sandbox-local',
+  '@deepseek-ai/dsh-subprocess-local',
+  '@deepseek-ai/dsh-terminal-bash',
 ])
 const dirs = packageDirsByName(wanted)
 const byName = new Map()
@@ -390,6 +393,82 @@ eachPackage('@deepseek-ai/dsh-client-modules', 'lib/index.js', (file) => {
   write(file, txt)
   return 'patched'
 }, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })
+
+
+// Android cannot rely on desktop Linux bwrap/Landlock from an ordinary app UID.
+// Keep the DSH sandbox seam active instead of falling through to
+// danger-full-access: confined calls go through our explicit runner and report
+// partial enforcement. fs-sandbox continues to enforce model file mutations by
+// canonical workspace containment; Android's app UID is the outer OS boundary.
+eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: partial app-UID sandbox runner'
+  if (txt.includes(marker)) return 'already'
+  const anchor = /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
+  const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+  if (matches.length !== 1) throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}`)
+  const injection = `${matches[0]}
+    // ${marker}.
+    if (process.env.DSH_ANDROID_STANDALONE === "1") {
+      const runner = process.env.DSH_ANDROID_SANDBOX_RUNNER;
+      if (!runner) {
+        throw new Error("DSH Android sandbox runner path is missing");
+      }
+      return {
+        argv: [runner, policy.mode, policy.workspaceRoot, "--", ...argv],
+        enforcement: "partial",
+        denialSignatures: ["permission denied", "read-only file system", "operation not permitted"],
+        runnerFailureRules: [{
+          allowedExitCodes: [125],
+          fatalSignatures: ["dsh-android-sandbox: runner failure:"]
+        }]
+      };
+    }`
+  txt = txt.replace(anchor, injection)
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: androidPermissionPresetGuardMandatory })
+
+// subprocess-local sees Android Node as linux. Its desktop Linux containment
+// path probes systemd-run / native Linux helpers that are unavailable or
+// meaningless inside an Android app sandbox. Force the provider's documented
+// fallback containment mode; node-pty and ordinary spawn remain the same.
+eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: skip desktop linux-scope'
+  if (txt.includes(marker)) return 'already'
+  const anchor = /selectContainmentMode\s*\(\s*kind\s*\)\s*\{/
+  const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+  if (matches.length !== 1) throw new Error(`subprocess-local containment anchor changed (${matches.length}): ${file}`)
+  const injection = `${matches[0]}
+    // ${marker}.
+    if (process.env.DSH_ANDROID_STANDALONE === "1") {
+      this.warnFallback?.(kind, "Android app runtime uses the app UID/process-session boundary");
+      return "fallback";
+    }`
+  txt = txt.replace(anchor, injection)
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: androidPermissionPresetGuardMandatory })
+
+// terminal-bash defaults to /bin/bash on POSIX desktops. Android has no /bin
+// Bash; the APK already publishes the relocated embedded shell through
+// DSH_SIDEBAR_SHELL/SHELL.
+eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/config.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: embedded Bash default'
+  if (txt.includes(marker)) return 'already'
+  const anchor = /((?:const|let|var)\s+DEFAULT_BASH_SHELL\s*=\s*)["']\/bin\/bash["']/
+  const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+  if (matches.length !== 1) throw new Error(`terminal-bash DEFAULT_BASH_SHELL anchor changed (${matches.length}): ${file}`)
+  txt = txt.replace(anchor, (_m, prefix) =>
+    `${prefix}process.env.DSH_ANDROID_STANDALONE === "1" ? (process.env.DSH_SIDEBAR_SHELL || process.env.SHELL || "/bin/bash") : "/bin/bash" /* ${marker} */`)
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: androidPermissionPresetGuardMandatory })
 
 // Preserve the exact permission defaults composed by the active plugin stack.
   // Upstream 0.1.5-rc.2 deliberately throws when sandbox + approval form a valid
