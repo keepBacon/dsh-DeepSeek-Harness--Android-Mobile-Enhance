@@ -1169,6 +1169,7 @@ EOF_MCP
     TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force \
     TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1 \
     DSH_ANDROID_STANDALONE=1 \
+    DSH_ANDROID_SANDBOX_RUNNER="$stage/usr/libexec/dsh-mobile/android-sandbox-runner.sh" \
     "$stage/usr/bin/node" --expose-internals \
       "$stage/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" \
       web --patch "$mcp_patch" --port 0 --no-open >"$smoke_log" 2>&1 &
@@ -1295,6 +1296,7 @@ refresh_dsh_runtime() {
   validate_termux_tool_runtime "$stage"
   install_sharp_wasm "$stage" "$used_registry"
   apply_android_runtime_patches "$stage"
+  validate_android_backend_parity "$stage"
   copy_ripgrep_runtime "$stage"
   validate_ripgrep_runtime "$stage"
   copy_git_ssh_ca_runtime "$stage"
@@ -1340,6 +1342,10 @@ refresh_dsh_runtime() {
   "mcpClientRuntime": true,
   "mobileToolboxMcp": true,
   "basicToolboxMcp": true,
+  "androidWorkspaceBackendParity": true,
+  "androidSandboxEnforcement": "partial-app-uid",
+  "androidSubprocessFallback": true,
+  "androidEmbeddedBashBackend": true,
   "binutilsRuntime": true,
   "opensslRuntime": true,
   "aapt2Runtime": true,
