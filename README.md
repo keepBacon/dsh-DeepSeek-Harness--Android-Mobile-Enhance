@@ -238,7 +238,7 @@ Android Runtime 现在除 `mobile_tools` 外，额外内置独立的 `basic_tool
 
 `basic_tools` 当前提供 52 个结构化工具，覆盖：文件/目录信息与修改、压缩包、JSON/YAML/TOML/XML/CSV、SQLite、文本 diff/replace/regex、环境与磁盘、端口/DNS/TCP/TLS、证书与编码、Git、构建/测试检测、Gradle/npm/CMake、ImageMagick、FFmpeg/ffprobe、PDF 元信息和目录 SHA-256 manifest。
 
-对应 Termux Runtime 会一并打包 `7zip`、`yq`、`libsqlite`、`cmake`、`ninja`、`iproute2`、`dnsutils`、`imagemagick`、`ffmpeg`、`poppler`，构建阶段会检查关键命令实际存在并运行 smoke test。
+对应 Termux Runtime 会一并打包 `7zip`、`yq`、`sqlite`、`cmake`、`ninja`、`iproute2`、`dnsutils`、`imagemagick`、`ffmpeg`、`poppler`，构建阶段会检查关键命令实际存在并运行 smoke test。
 
 ## No-Root Runtime Analysis
 
