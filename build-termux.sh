@@ -109,32 +109,45 @@ dsh_bootstrap_host_build_prerequisites() {
   command -v tar >/dev/null 2>&1 || add_pkg tar
   command -v xz >/dev/null 2>&1 || add_pkg xz-utils
   command -v aapt2 >/dev/null 2>&1 || add_pkg aapt2
-  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-    add_pkg nodejs-lts
-  elif ! node -e 'const [M,m]=process.versions.node.split(".").map(Number); process.exit(((M===22&&m>=19)||(M===24&&m>=2)||M>=25)?0:1)' >/dev/null 2>&1; then
+  # Node is needed even for the fast JavaScript preflight. npm and native
+  # toolchains are only required when rebuilding the embedded DSH runtime.
+  if ! command -v node >/dev/null 2>&1; then
     add_pkg nodejs-lts
   fi
-  command -v clang >/dev/null 2>&1 || add_pkg clang
-  command -v clang++ >/dev/null 2>&1 || add_pkg clang
-  command -v cmake >/dev/null 2>&1 || add_pkg cmake
-  command -v ninja >/dev/null 2>&1 || add_pkg ninja
-  command -v make >/dev/null 2>&1 || add_pkg make
-  command -v python >/dev/null 2>&1 || add_pkg python
-  command -v pkg-config >/dev/null 2>&1 || add_pkg pkg-config
-  command -v readelf >/dev/null 2>&1 || command -v llvm-readelf >/dev/null 2>&1 || add_pkg binutils
-  command -v git >/dev/null 2>&1 || add_pkg git
-  command -v ssh >/dev/null 2>&1 || add_pkg openssh
-  command -v ssh-keygen >/dev/null 2>&1 || add_pkg openssh
-  command -v ssh-keyscan >/dev/null 2>&1 || add_pkg openssh
-  command -v rg >/dev/null 2>&1 || add_pkg ripgrep
 
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
-  [ -f "$host_prefix/lib/libandroid-spawn.so" ] || add_pkg libandroid-spawn
-  local cert_found=0 cert
-  for cert in "$host_prefix/etc/tls/cert.pem" "$host_prefix/etc/ssl/certs/ca-certificates.crt" "$host_prefix/etc/tls/certs/ca-certificates.crt"; do
-    [ -s "$cert" ] && cert_found=1 && break
-  done
-  [ "$cert_found" = "1" ] || add_pkg ca-certificates
+  if [ "${DSH_REFRESH_RUNTIME:-1}" = "1" ]; then
+    if ! command -v npm >/dev/null 2>&1; then
+      add_pkg nodejs-lts
+    elif command -v node >/dev/null 2>&1 && ! node -e 'const [M,m]=process.versions.node.split(".").map(Number); process.exit(((M===22&&m>=19)||(M===24&&m>=2)||M>=25)?0:1)' >/dev/null 2>&1; then
+      add_pkg nodejs-lts
+    fi
+    command -v rg >/dev/null 2>&1 || add_pkg ripgrep
+
+    if [ "${DSH_NATIVE_COMPAT:-1}" = "1" ]; then
+      command -v clang >/dev/null 2>&1 || add_pkg clang
+      command -v clang++ >/dev/null 2>&1 || add_pkg clang
+      command -v cmake >/dev/null 2>&1 || add_pkg cmake
+      command -v ninja >/dev/null 2>&1 || add_pkg ninja
+      command -v make >/dev/null 2>&1 || add_pkg make
+      command -v python >/dev/null 2>&1 || add_pkg python
+      command -v pkg-config >/dev/null 2>&1 || add_pkg pkg-config
+      command -v readelf >/dev/null 2>&1 || command -v llvm-readelf >/dev/null 2>&1 || add_pkg binutils
+      [ -f "$host_prefix/lib/libandroid-spawn.so" ] || add_pkg libandroid-spawn
+    fi
+
+    if [ "${DSH_GIT_COMPAT:-1}" = "1" ]; then
+      command -v git >/dev/null 2>&1 || add_pkg git
+      command -v ssh >/dev/null 2>&1 || add_pkg openssh
+      command -v ssh-keygen >/dev/null 2>&1 || add_pkg openssh
+      command -v ssh-keyscan >/dev/null 2>&1 || add_pkg openssh
+      local cert_found=0 cert
+      for cert in "$host_prefix/etc/tls/cert.pem" "$host_prefix/etc/ssl/certs/ca-certificates.crt" "$host_prefix/etc/tls/certs/ca-certificates.crt"; do
+        [ -s "$cert" ] && cert_found=1 && break
+      done
+      [ "$cert_found" = "1" ] || add_pkg ca-certificates
+    fi
+  fi
 
   [ "${#missing_packages[@]}" -gt 0 ] || {
     echo '[DSH] Host build prerequisites: OK'
