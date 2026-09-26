@@ -91,8 +91,6 @@ dsh_static_build_preflight() {
   echo "[DSH] Static build preflight: OK"
 }
 
-dsh_static_build_preflight
-
 dsh_bootstrap_host_build_prerequisites() {
   local auto="${DSH_AUTO_INSTALL_HOST_BUILD_DEPS:-1}"
   local missing_packages=()
@@ -111,8 +109,11 @@ dsh_bootstrap_host_build_prerequisites() {
   command -v tar >/dev/null 2>&1 || add_pkg tar
   command -v xz >/dev/null 2>&1 || add_pkg xz-utils
   command -v aapt2 >/dev/null 2>&1 || add_pkg aapt2
-  command -v node >/dev/null 2>&1 || add_pkg nodejs-lts
-  command -v npm >/dev/null 2>&1 || add_pkg nodejs-lts
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    add_pkg nodejs-lts
+  elif ! node -e 'const [M,m]=process.versions.node.split(".").map(Number); process.exit(((M===22&&m>=19)||(M===24&&m>=2)||M>=25)?0:1)' >/dev/null 2>&1; then
+    add_pkg nodejs-lts
+  fi
   command -v clang >/dev/null 2>&1 || add_pkg clang
   command -v clang++ >/dev/null 2>&1 || add_pkg clang
   command -v cmake >/dev/null 2>&1 || add_pkg cmake
@@ -176,6 +177,9 @@ dsh_ensure_android_sdk_platform() {
 
 dsh_bootstrap_host_build_prerequisites
 dsh_ensure_android_sdk_platform
+# Run syntax/contract checks only after the bootstrap has guaranteed Node and
+# the other host-side prerequisites. This keeps first-run auto-repair reachable.
+dsh_static_build_preflight
 
 printf '[DSH] Java: '
 java -version 2>&1 | head -n 1 || true
