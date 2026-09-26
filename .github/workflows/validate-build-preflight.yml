@@ -1,0 +1,82 @@
+name: Validate build preflight
+
+on:
+  push:
+    branches: ["main", "fix/**", "feature/**"]
+  pull_request:
+
+jobs:
+  static-preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            bash -n "$file"
+          done < <(find . -maxdepth 2 -type f -name '*.sh' -print0)
+
+      - name: JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find scripts -maxdepth 1 -type f -name '*.mjs' -print0)
+
+      - name: Build contract regression guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -n -E 'ffmpeg["'\'' ]+--version|ffprobe["'\'' ]+--version|ffmpeg\|ffprobe.*--version' \
+              scripts/embed-termux-tools.sh scripts/dsh-mobile-toolbox-mcp.mjs scripts/dsh-basic-toolbox-mcp.mjs; then
+            echo 'Invalid ffmpeg/ffprobe --version usage detected.' >&2
+            exit 1
+          fi
+          grep -Fq 'dsh_run_tool_smoke()' scripts/embed-termux-tools.sh
+          grep -Fq 'magick|ffmpeg|ffprobe)' scripts/embed-termux-tools.sh
+          grep -Fq '"$bin" -version' scripts/embed-termux-tools.sh
+
+      - name: Smoke dispatcher argument contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/embed-termux-tools.sh
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          mock="$tmp/mock"
+          cat >"$mock" <<'EOF'
+          #!/usr/bin/env bash
+          printf '%s\n' "$*"
+          EOF
+          chmod +x "$mock"
+
+          check() {
+            local tool="$1" expected="$2"
+            local log="$tmp/$tool.log"
+            dsh_run_tool_smoke "$tool" "$mock" "$log"
+            grep -Fxq "$expected" "$log"
+          }
+
+          check ffmpeg -version
+          check ffprobe -version
+          check magick -version
+          check adb version
+          check aapt2 version
+          check sqlite3 --version
+          check yq --version
+          check cmake --version
+          check ninja --version
+          check ss -V
+          check dig -v
+          check pdfinfo -v
+          check 7z i
+
+      - name: Repository static regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-remaining-fixes.sh
