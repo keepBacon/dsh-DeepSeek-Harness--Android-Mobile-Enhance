@@ -18,6 +18,7 @@ DFT="$ROOT/scripts/dsh-runtime-family.mjs"
 WST="$ROOT/scripts/validate-web-runtime-smoke.mjs"
 MCM="$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt"
 MTB="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
+ARP="$ROOT/scripts/android-runtime-patch.mjs"
 ETT="$ROOT/scripts/embed-termux-tools.sh"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
