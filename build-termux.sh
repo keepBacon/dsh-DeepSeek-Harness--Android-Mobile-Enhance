@@ -1624,7 +1624,15 @@ refresh_dsh_runtime() {
   "gdbRuntime": true,
   "straceRuntime": true,
   "rizinRuntime": true,
-  "fridaRuntime": true
+  "fridaRuntime": true,
+  "extendedLinuxToolset": true,
+  "terminalUiToolset": true,
+  "networkDiagnosticToolset": true,
+  "databaseClientToolset": true,
+  "documentMediaToolset": true,
+  "androidApkCliToolset": true,
+  "formatterLintToolset": true,
+  "linuxToolCatalogCommands": ${#DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}
 }
 EOF
 
