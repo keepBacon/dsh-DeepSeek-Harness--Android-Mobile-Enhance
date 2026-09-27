@@ -15,7 +15,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/validate-termux-tool-catalog.sh
+          bash scripts/validate-termux-tool-catalog.sh --online
 
       - name: Shell syntax
         shell: bash
@@ -45,13 +45,15 @@ jobs:
             exit 1
           fi
           grep -Fq 'dsh_run_tool_smoke()' scripts/embed-termux-tools.sh
-          grep -Fq 'magick|ffmpeg|ffprobe)' scripts/embed-termux-tools.sh
-          grep -Fq '"$bin" -version' scripts/embed-termux-tools.sh
+          grep -Fq 'dsh_tool_spec_for' scripts/embed-termux-tools.sh
+          grep -Fq 'dash-version)' scripts/embed-termux-tools.sh
+          grep -Fq 'DSH_TERMUX_REQUIRED_TOOL_SPECS' scripts/embed-termux-tools.sh
 
       - name: Smoke dispatcher argument contract
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/dsh-termux-tool-catalog.sh
           source scripts/embed-termux-tools.sh
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
@@ -82,6 +84,11 @@ jobs:
           check dig -v
           check pdfinfo -v
           check 7z i
+          check clang --version
+          check tmux -V
+          check git-lfs version
+          check ffmpeg -version
+          check exiftool -ver
 
       - name: Validate Android patches against published DSH 0.1.5-rc.2
         shell: bash
