@@ -40,8 +40,11 @@ DSH_NATIVE_COMPAT="${DSH_NATIVE_COMPAT:-1}"
 DSH_GIT_COMPAT="${DSH_GIT_COMPAT:-1}"
 DSH_ALLOW_DEGRADED="${DSH_ALLOW_DEGRADED:-0}"
 DSH_TERMUX_TOOLS="${DSH_TERMUX_TOOLS:-1}"
-DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip xz-utils unzip zip curl jq less which procps make file binutils openssl openssl-tool aapt2 libc++ gdb gdbserver strace rizin 7zip yq sqlite cmake ninja iproute2 dnsutils imagemagick ffmpeg poppler android-tools}"
-DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-frida frida-python}"
+DSH_TERMUX_TOOL_CATALOG="$ROOT/scripts/dsh-termux-tool-catalog.sh"
+[ -f "$DSH_TERMUX_TOOL_CATALOG" ] || { echo "[DSH] Missing Linux tool catalog: $DSH_TERMUX_TOOL_CATALOG" >&2; exit 2; }
+. "$DSH_TERMUX_TOOL_CATALOG"
+DSH_TERMUX_TOOL_PACKAGES="${DSH_TERMUX_TOOL_PACKAGES:-$DSH_TERMUX_MAIN_TOOL_PACKAGES_DEFAULT}"
+DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-$DSH_TERMUX_ROOT_TOOL_PACKAGES_DEFAULT}"
 DSH_TERMUX_PRIMARY_APT_BASE="${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
 DSH_TERMUX_FALLBACK_APT_BASE="${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
 DSH_AUTO_INSTALL_TERMUX_TOOLS="${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}"
@@ -55,6 +58,7 @@ PNPM_URL="https://registry.npmjs.org/pnpm/-/pnpm-$PNPM_VERSION.tgz"
 
 dsh_static_build_preflight() {
   local fail=0 file
+  dsh_tool_catalog_self_test || fail=1
   while IFS= read -r -d '' file; do
     bash -n "$file" || fail=1
   done < <(find "$ROOT" -maxdepth 2 -type f -name '*.sh' -print0)
@@ -620,6 +624,10 @@ copy_link_deps() {
 }
 
 . "$ROOT/scripts/embed-termux-tools.sh"
+
+if [ "$DSH_REFRESH_RUNTIME" = "1" ] && [ "$DSH_TERMUX_TOOLS" = "1" ]; then
+  dsh_preflight_termux_tool_packages
+fi
 
 install_terminal_shell_runtime() {
   local stage="$1" host_bash host_prefix real_bash

@@ -85,73 +85,29 @@ copy_termux_package_payload() {
 
 validate_staged_termux_payload_contract() {
   local stage="$1"
-  local fail=0 cmd owner
+  local fail=0 spec cmd owner mode
 
-  require_exact_tool() {
-    cmd="$1"; owner="$2"
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r cmd owner mode <<< "$spec"
     if [ ! -x "$stage/usr/bin/$cmd" ]; then
       echo "[DSH] Embedded payload contract missing usr/bin/$cmd (expected from package: $owner)" >&2
       fail=1
     fi
-  }
+  done
 
-  require_binutils_tool() {
-    cmd="$1"
+  for cmd in "${DSH_TERMUX_BINUTILS_TOOLS[@]}"; do
     if [ ! -x "$stage/usr/bin/$cmd" ] && [ ! -x "$stage/usr/bin/g$cmd" ]; then
       echo "[DSH] Embedded payload contract missing $cmd/g$cmd (expected from package: binutils)" >&2
       fail=1
     fi
-  }
-
-  # OpenSSL deliberately splits the command-line binary into openssl-tool.
-  # The openssl package alone contains libraries/config and is not sufficient.
-  require_exact_tool openssl openssl-tool
-  require_exact_tool file file
-  require_exact_tool curl curl
-  require_exact_tool jq jq
-  require_exact_tool proot proot
-  require_exact_tool python3 python
-  require_exact_tool aapt2 aapt2
-  require_exact_tool gdb gdb
-  require_exact_tool gdbserver gdbserver
-  require_exact_tool strace strace
-  require_exact_tool rizin rizin
-  require_exact_tool 7z 7zip
-  require_exact_tool yq yq
-  require_exact_tool sqlite3 sqlite
-  require_exact_tool cmake cmake
-  require_exact_tool ninja ninja
-  require_exact_tool ss iproute2
-  require_exact_tool dig dnsutils
-  require_exact_tool magick imagemagick
-  require_exact_tool ffmpeg ffmpeg
-  require_exact_tool ffprobe ffmpeg
-  require_exact_tool pdfinfo poppler
-  require_exact_tool adb android-tools
-  # Termux splits Frida: the server is in "frida", while Python CLI tools
-  # (frida/frida-ps/frida-trace) are in the "frida-python" subpackage.
-  require_exact_tool frida frida-python
-  require_exact_tool frida-ps frida-python
-  require_exact_tool frida-trace frida-python
-  require_exact_tool frida-server frida
-  for cmd in readelf objdump nm strings; do
-    require_binutils_tool "$cmd"
   done
 
-  if [ "$fail" -ne 0 ]; then
-    echo "[DSH] Embedded Termux payload contract failed before native-module compilation." >&2
-    echo "[DSH] Host package ownership diagnostics:" >&2
-    for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb readelf greadelf objdump gobjdump nm gnm strings gstrings; do
-      local host_path="${PREFIX:-/data/data/com.termux/files/usr}/bin/$cmd"
-      if [ -e "$host_path" ]; then
-        dpkg-query -S "$host_path" 2>/dev/null | head -n 1 >&2 || true
-      fi
-    done
+  [ "$fail" -eq 0 ] || {
+    echo "[DSH] Embedded extended Linux/TUI payload contract failed." >&2
     return 7
-  fi
-  echo "[DSH] Embedded Termux payload contract: OK"
+  }
+  echo "[DSH] Embedded extended Linux/TUI payload contract: OK (${#DSH_TERMUX_REQUIRED_TOOL_SPECS[@]} commands)"
 }
-
 dsh_write_build_sources() {
   local file="$1" base="$2" include_root="${3:-0}"
   mkdir -p "$(dirname "$file")"
@@ -248,26 +204,20 @@ dsh_host_tool_owner() {
 
 dsh_validate_host_tool_contract() {
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
-  local fail=0 cmd owner
+  local fail=0 spec cmd owner mode actual_owner
 
-  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r cmd owner mode <<< "$spec"
     if [ ! -x "$host_prefix/bin/$cmd" ]; then
-      case "$cmd" in
-        gdbserver) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd (install provider: gdbserver)" >&2 ;;
-        frida|frida-ps|frida-trace) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd (install provider: frida-python)" >&2 ;;
-        frida-server) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd (install provider: frida)" >&2 ;;
-        *) echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd" >&2 ;;
-      esac
+      echo "[DSH] Host tool contract missing: $host_prefix/bin/$cmd (expected seed: $owner)" >&2
       fail=1
       continue
     fi
-    owner="$(dsh_host_tool_owner "$cmd" || true)"
-    if [ -n "$owner" ]; then
-      echo "[DSH] Tool owner: $cmd <- $owner"
-    fi
+    actual_owner="$(dsh_host_tool_owner "$cmd" || true)"
+    [ -z "$actual_owner" ] || echo "[DSH] Tool owner: $cmd <- $actual_owner"
   done
 
-  for cmd in readelf objdump nm strings; do
+  for cmd in "${DSH_TERMUX_BINUTILS_TOOLS[@]}"; do
     if [ ! -x "$host_prefix/bin/$cmd" ] && [ ! -x "$host_prefix/bin/g$cmd" ]; then
       echo "[DSH] Host tool contract missing: $cmd/g$cmd" >&2
       fail=1
@@ -278,7 +228,6 @@ dsh_validate_host_tool_contract() {
     if ! "$host_prefix/bin/python3" - <<'PY_DSH_FRIDA_DEPS'
 import importlib.metadata as md
 import sys
-
 required = ("prompt-toolkit", "colorama", "pygments", "websockets", "wcwidth")
 missing = []
 for name in required:
@@ -286,7 +235,6 @@ for name in required:
         md.distribution(name)
     except md.PackageNotFoundError:
         missing.append(name)
-
 if missing:
     print("[DSH] Missing Frida Python runtime distributions: " + ", ".join(missing), file=sys.stderr)
     sys.exit(7)
@@ -297,18 +245,17 @@ PY_DSH_FRIDA_DEPS
   fi
 
   [ "$fail" -eq 0 ] || {
-    echo "[DSH] Host tool preflight failed before staging. No APK files were modified." >&2
+    echo "[DSH] Host extended-tool preflight failed before staging." >&2
     return 7
   }
 }
 
 dsh_required_tool_owner_packages() {
-  local cmd owner
-  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
-    owner="$(dsh_host_tool_owner "$cmd" || true)"
-    if [ -n "$owner" ]; then
-      printf '%s\n' "$owner"
-    fi
+  local spec cmd owner mode actual_owner
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r cmd owner mode <<< "$spec"
+    actual_owner="$(dsh_host_tool_owner "$cmd" || true)"
+    [ -z "$actual_owner" ] || printf '%s\n' "$actual_owner"
   done
 }
 
@@ -408,66 +355,61 @@ dsh_repair_termux_package_family() {
 dsh_run_tool_smoke() {
   local cmd="$1" bin="$2" log="$3"
   shift 3
-  local prefix=("$@")
+  local prefix=("$@") found owner mode rc=0
   : > "$log"
 
-  case "$cmd" in
-    openssl)
-      "${prefix[@]}" "$bin" version >"$log" 2>&1
-      ;;
-    aapt2|adb)
-      "${prefix[@]}" "$bin" version >"$log" 2>&1
-      ;;
-    strace|ss)
-      "${prefix[@]}" "$bin" -V >"$log" 2>&1
-      ;;
-    rizin|dig|pdfinfo)
-      "${prefix[@]}" "$bin" -v >"$log" 2>&1
-      ;;
-    7z)
-      "${prefix[@]}" "$bin" i >"$log" 2>&1
-      ;;
-    magick|ffmpeg|ffprobe)
-      "${prefix[@]}" "$bin" -version >"$log" 2>&1
-      ;;
-    frida-ps|frida-trace)
+  found="$(dsh_tool_spec_for "$cmd" || true)"
+  [ -n "$found" ] || {
+    echo "[DSH] No smoke contract registered for tool: $cmd" >"$log"
+    return 64
+  }
+  IFS='|' read -r owner mode <<< "$found"
+
+  case "$mode" in
+    long) "${prefix[@]}" "$bin" --version >"$log" 2>&1 ;;
+    short-v) "${prefix[@]}" "$bin" -v >"$log" 2>&1 ;;
+    short-V) "${prefix[@]}" "$bin" -V >"$log" 2>&1 ;;
+    word) "${prefix[@]}" "$bin" version >"$log" 2>&1 ;;
+    dash-version) "${prefix[@]}" "$bin" -version >"$log" 2>&1 ;;
+    sevenzip) "${prefix[@]}" "$bin" i >"$log" 2>&1 ;;
+    help) "${prefix[@]}" "$bin" --help >"$log" 2>&1 ;;
+    java) "${prefix[@]}" "$bin" -version >"$log" 2>&1 ;;
+    exif) "${prefix[@]}" "$bin" -ver >"$log" 2>&1 ;;
+    ip-version) "${prefix[@]}" "$bin" -Version >"$log" 2>&1 ;;
+    help-any)
+      set +e
       "${prefix[@]}" "$bin" --help >"$log" 2>&1
+      rc=$?
+      set -e
+      [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]
       ;;
-    file|curl|jq|proot|python3|pip3|gdb|gdbserver|frida|frida-server|yq|sqlite3|cmake|ninja|readelf|objdump|nm|strings|rg|git|apt)
-      "${prefix[@]}" "$bin" --version >"$log" 2>&1
-      ;;
-    *)
-      echo "[DSH] No smoke contract registered for tool: $cmd" >"$log"
-      return 64
-      ;;
+    *) echo "[DSH] Unknown smoke mode '$mode' for $cmd" >"$log"; return 64 ;;
   esac
 }
 
 dsh_host_required_tool_smoke() {
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local log="$CACHE_DIR/host-required-tools-smoke.log"
-  local cmd bin
+  local spec cmd owner mode bin
 
-  for cmd in openssl file curl jq proot python3 aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace frida-server 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb readelf objdump nm strings; do
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r cmd owner mode <<< "$spec"
     bin="$host_prefix/bin/$cmd"
-    if [ ! -x "$bin" ]; then
-      case "$cmd" in
-        readelf|objdump|nm|strings)
-          bin="$host_prefix/bin/g$cmd"
-          ;;
-      esac
-    fi
-    if [ ! -x "$bin" ]; then
-      echo "[DSH] Host smoke executable missing: $cmd ($bin)" >&2
-      return 7
-    fi
+    [ -x "$bin" ] || { echo "[DSH] Host smoke executable missing: $cmd ($bin)" >&2; return 7; }
     if ! dsh_run_tool_smoke "$cmd" "$bin" "$log"; then
       echo "[DSH] Host tool smoke failed before staging: $cmd" >&2
       sed -n '1,120p' "$log" >&2 || true
       return 7
     fi
   done
-  echo "[DSH] Host required-tool smoke: OK"
+
+  for cmd in readelf objdump nm strings; do
+    bin="$host_prefix/bin/$cmd"
+    [ -x "$bin" ] || bin="$host_prefix/bin/g$cmd"
+    [ -x "$bin" ] || { echo "[DSH] Host binutils smoke executable missing: $cmd" >&2; return 7; }
+    "$bin" --version >"$log" 2>&1 || return 7
+  done
+  echo "[DSH] Host extended Linux/TUI tool smoke: OK"
 }
 
 dsh_host_dynamic_tool_smoke() {
@@ -586,6 +528,45 @@ dsh_validate_staged_dynamic_abi() {
   echo "[DSH] Early staged dynamic-analysis ABI preflight: OK"
 }
 
+DSH_TERMUX_TOOL_PREFLIGHT_DONE=0
+
+dsh_preflight_termux_tool_packages() {
+  [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || return 0
+  [ "$DSH_TERMUX_TOOL_PREFLIGHT_DONE" = "1" ] && return 0
+
+  local roots=() missing=() pkg
+  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
+  for pkg in "${roots[@]}"; do
+    [ -n "$pkg" ] || continue
+    if [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" != "installed" ]; then
+      missing+=("$pkg")
+    fi
+  done
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    [ "${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}" = "1" ] || {
+      echo "[DSH] Missing extended Termux packages: ${missing[*]}" >&2
+      return 7
+    }
+    echo "[DSH] Phase 1: installing extended Linux/TUI packages before Runtime rebuild (${#missing[@]} missing)…"
+    dsh_install_missing_termux_packages "${missing[@]}" || return 7
+  fi
+
+  for pkg in "${roots[@]}"; do
+    [ -n "$pkg" ] || continue
+    [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" = "installed" ] || {
+      echo "[DSH] Package still unavailable after preflight install: $pkg" >&2
+      return 7
+    }
+  done
+
+  dsh_validate_host_tool_contract || return 7
+  dsh_repair_broken_host_dynamic_tools || return 7
+  dsh_host_required_tool_smoke || return 7
+  DSH_TERMUX_TOOL_PREFLIGHT_DONE=1
+  echo "[DSH] Phase 1 host tool preflight: OK"
+}
+
 install_termux_tool_runtime() {
   local stage="$1"
   [ "${DSH_TERMUX_TOOLS:-1}" = "1" ] || { echo "[DSH] Embedded Termux tool runtime disabled."; return 0; }
@@ -597,49 +578,9 @@ install_termux_tool_runtime() {
     }
   done
 
+  dsh_preflight_termux_tool_packages || return 7
   local roots=() pkg
   read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
-  local missing_roots=()
-  for pkg in "${roots[@]}"; do
-    [ -n "$pkg" ] || continue
-    if [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" != "installed" ]; then
-      missing_roots+=("$pkg")
-    fi
-  done
-
-  # Never refresh repositories merely because dynamic tools are enabled.
-  # If everything is already installed, the build remains fully offline.
-  if [ "${#missing_roots[@]}" -gt 0 ]; then
-    if [ "${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}" = "1" ]; then
-      echo "[DSH] Installing missing Termux tool packages: ${missing_roots[*]}"
-      dsh_install_missing_termux_packages "${missing_roots[@]}" || {
-        echo "[DSH] 自动安装 Termux 工具包失败: ${missing_roots[*]}" >&2
-        echo "[DSH] 已尝试 direct + Cloudflare Termux 官方源，且没有修改宿主 sources.list。" >&2
-        echo "[DSH] 网络恢复后可直接重新执行 build-termux.sh；已安装工具不会重复刷新源。" >&2
-        return 7
-      }
-    else
-      echo "[DSH] Termux 工具包未安装: ${missing_roots[*]}" >&2
-      echo "[DSH] 请安装后重试。Frida 位于 Termux root repository。" >&2
-      return 7
-    fi
-  else
-    echo "[DSH] Required Termux tool packages already installed; skipping repository refresh."
-  fi
-  for pkg in "${roots[@]}"; do
-    [ -n "$pkg" ] || continue
-    [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" = "installed" ] || {
-      echo "[DSH] Termux 工具包安装后仍不可用: $pkg" >&2
-      return 7
-    }
-  done
-
-  dsh_validate_host_tool_contract || return 7
-  dsh_repair_broken_host_dynamic_tools || return 7
-  # Run every required CLI with its real syntax before copying a large package
-  # closure. This catches flag/API drift (for example ffmpeg uses -version,
-  # not --version) before expensive staging/native builds.
-  dsh_host_required_tool_smoke || return 7
 
   # Do not assume that a command is owned by the package name we seeded.
   # Termux frequently splits commands into subpackages (Frida is one example).
@@ -792,12 +733,19 @@ EOF_TERMUX_WRAPPER
   # the legacy /data/data/com.termux/files/usr view that upstream Termux
   # packages were compiled/configured for, rather than hoping that every
   # binary is fully relocatable when copied into the app-private runtime.
-  for cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python python3 pip pip3 \
-    openssl file curl jq aapt2 rizin rz-asm rz-bin rz-find frida frida-ps frida-trace \
-    7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb \
-    ar addr2line c++filt nm objcopy objdump ranlib readelf size strings strip; do
-    rm -f "$stage/usr/libexec/dsh/wrappers/$cmd"
-    ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$cmd"
+  local spec tool_cmd tool_owner tool_mode
+  for tool_cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python pip; do
+    rm -f "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
+    ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
+  done
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r tool_cmd tool_owner tool_mode <<< "$spec"
+    rm -f "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
+    ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
+  done
+  for tool_cmd in "${DSH_TERMUX_BINUTILS_TOOLS[@]}"; do
+    rm -f "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
+    ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
   done
   rm -f "$stage/usr/libexec/dsh/wrappers/termux-run"
   ln -s ../termux-run "$stage/usr/libexec/dsh/wrappers/termux-run"
@@ -838,20 +786,14 @@ validate_termux_tool_runtime() {
     fi
   done
   local staged_tool_log="$CACHE_DIR/embedded-required-tools-smoke.log"
-  local staged_cmd staged_bin staged_rc
-  for staged_cmd in openssl file aapt2 gdb gdbserver strace rizin frida frida-ps frida-trace 7z yq sqlite3 cmake ninja ss dig magick ffmpeg ffprobe pdfinfo adb; do
-    case "$staged_cmd" in
-      gdb|gdbserver|strace)
-        staged_bin="$stage/usr/bin/$staged_cmd"
-        ;;
-      *)
-        staged_bin="$wrappers/$staged_cmd"
-        ;;
-    esac
+  local staged_cmd staged_bin staged_rc spec staged_owner staged_mode
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r staged_cmd staged_owner staged_mode <<< "$spec"
+    staged_bin="$wrappers/$staged_cmd"
     staged_rc=0
     dsh_run_tool_smoke "$staged_cmd" "$staged_bin" "$staged_tool_log" "${common_env[@]}" || staged_rc=$?
     if [ "$staged_rc" -ne 0 ]; then
-      echo "[DSH] Embedded required-tool smoke failed: $staged_cmd (exit=$staged_rc)" >&2
+      echo "[DSH] Embedded extended-tool smoke failed: $staged_cmd (provider=$staged_owner exit=$staged_rc)" >&2
       sed -n '1,160p' "$staged_tool_log" >&2 || true
       return 7
     fi
@@ -870,6 +812,6 @@ validate_termux_tool_runtime() {
     sed -n '1,80p' "$pkg_log" >&2 || true
     return 7
   fi
-  echo "[DSH] Embedded required-tool smoke contract: OK"
-  echo "[DSH] Embedded tools: OK (pkg/apt/dpkg + python3/pip + binutils + openssl + dynamic tools + basic_tools CLI)"
+  echo "[DSH] Embedded extended-tool smoke contract: OK (${#DSH_TERMUX_REQUIRED_TOOL_SPECS[@]} commands)"
+  echo "[DSH] Embedded tools: OK (Linux/TUI/dev/network/database/document/Android CLI toolset)"
 }
