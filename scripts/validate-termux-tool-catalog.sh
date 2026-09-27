@@ -11,14 +11,14 @@ if [ "${1:-}" = "--online" ]; then
   trap 'rm -rf "$tmp"' EXIT
 
   fetch_index() {
-    local repo_name="$1" out="$2" base url
+    local repo_name="$1" suite="$2" component="$3" out="$4" base url
     for base in "https://packages.termux.dev/apt" "https://packages-cf.termux.dev/apt"; do
-      url="$base/$repo_name/dists/stable/main/binary-aarch64/Packages.xz"
-      if curl -fsSL --retry 2 --connect-timeout 15 "$url" | xz -dc >"$out"; then
+      url="$base/$repo_name/dists/$suite/$component/binary-aarch64/Packages"
+      if curl -fsSL --retry 2 --connect-timeout 15 "$url" -o "$out"; then
         [ -s "$out" ] && return 0
       fi
     done
-    echo "[DSH] Failed to fetch official Termux aarch64 index: $repo_name" >&2
+    echo "[DSH] Failed to fetch official Termux aarch64 index: $repo_name/$suite/$component" >&2
     return 7
   }
 
@@ -34,8 +34,8 @@ if [ "${1:-}" = "--online" ]; then
     [ "$fail" -eq 0 ]
   }
 
-  fetch_index termux-main "$tmp/main"
-  fetch_index termux-root "$tmp/root"
+  fetch_index termux-main stable main "$tmp/main"
+  fetch_index termux-root root stable "$tmp/root"
   read -r -a main_pkgs <<< "$DSH_TERMUX_MAIN_TOOL_PACKAGES_DEFAULT"
   read -r -a root_pkgs <<< "$DSH_TERMUX_ROOT_TOOL_PACKAGES_DEFAULT"
   check_index "$tmp/main" "${main_pkgs[@]}"
