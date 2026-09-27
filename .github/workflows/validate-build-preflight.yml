@@ -11,6 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate extended Termux tool catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/validate-termux-tool-catalog.sh
+
       - name: Shell syntax
         shell: bash
         run: |

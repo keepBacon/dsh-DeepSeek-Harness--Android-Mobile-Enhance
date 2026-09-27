@@ -22,6 +22,8 @@ MCM="$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt"
 MTB="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
 ARP="$ROOT/scripts/android-runtime-patch.mjs"
 ETT="$ROOT/scripts/embed-termux-tools.sh"
+TC="$ROOT/scripts/dsh-termux-tool-catalog.sh"
+TVC="$ROOT/scripts/validate-termux-tool-catalog.sh"
 ASR="$ROOT/scripts/dsh-android-sandbox-runner.sh"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
@@ -327,6 +329,19 @@ forbid "$BT" '      --legacy-peer-deps \\'
 must "$BT" '--include=peer'
 must "$BT" '--strict-peer-deps=false'
 must "$BT" '--loglevel=error'
+must "$TC" 'DSH_TERMUX_MAIN_TOOL_PACKAGES_DEFAULT'
+must "$TC" 'DSH_TERMUX_ROOT_TOOL_PACKAGES_DEFAULT'
+must "$TC" 'btop|btop|long'
+must "$TC" 'tcpdump|tcpdump|long'
+must "$TC" 'yazi|yazi|long'
+must "$TC" 'apktool|apktool|long'
+must "$TC" 'jadx|jadx|long'
+must "$TC" 'clang-format|clang|long'
+must "$TC" 'ctags|ctags|long'
+must "$ETT" 'dsh_preflight_termux_tool_packages()'
+must "$ETT" 'DSH_TERMUX_REQUIRED_TOOL_SPECS'
+must "$ETT" 'Embedded extended-tool smoke'
+bash "$TVC" >/dev/null
 must "$BT" 'dsh_bootstrap_host_build_prerequisites()'
 must "$BT" 'dsh_ensure_android_sdk_platform()'
 must "$BT" 'dsh_gradle_source_preflight()'
