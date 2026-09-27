@@ -662,17 +662,47 @@ install_extended_dev_tools() {
         }
   fi
 
-  for cmd in prettier eslint cmake-format; do
-    test -x "$stage/usr/bin/$cmd" || {
-      echo "[DSH] Developer tool missing after install: $cmd" >&2
-      return 7
-    }
-  done
-  env PATH="$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/prettier" --version >/dev/null
-  env PATH="$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/eslint" --version >/dev/null
-  env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" \
-    TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp" \
-    LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/cmake-format" --version >/dev/null
+  test -f "$stage/usr/lib/node_modules/prettier/bin/prettier.cjs" || {
+    echo '[DSH] Prettier package entry missing after npm install.' >&2
+    return 7
+  }
+  test -f "$stage/usr/lib/node_modules/eslint/bin/eslint.js" || {
+    echo '[DSH] ESLint package entry missing after npm install.' >&2
+    return 7
+  }
+
+  # npm CLI shims commonly use /usr/bin/env node, which Android does not
+  # guarantee. Replace only the executable shims with Android-safe trampolines;
+  # package contents remain untouched.
+  rm -f "$stage/usr/bin/prettier" "$stage/usr/bin/eslint"
+  cat >"$stage/usr/bin/prettier" <<'EOF_PRETTIER'
+#!/system/bin/sh
+prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
+[ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
+exec "$prefix/bin/node" "$prefix/lib/node_modules/prettier/bin/prettier.cjs" "$@"
+EOF_PRETTIER
+  cat >"$stage/usr/bin/eslint" <<'EOF_ESLINT'
+#!/system/bin/sh
+prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
+[ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
+exec "$prefix/bin/node" "$prefix/lib/node_modules/eslint/bin/eslint.js" "$@"
+EOF_ESLINT
+  chmod 0755 "$stage/usr/bin/prettier" "$stage/usr/bin/eslint"
+
+  test -x "$stage/usr/bin/cmake-format" || {
+    echo '[DSH] cmake-format missing after Python package install.' >&2
+    return 7
+  }
+  rm -f "$stage/usr/libexec/dsh/wrappers/cmake-format"
+  ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/cmake-format"
+
+  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" PATH="$stage/usr/bin:/system/bin" \
+    LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/prettier" --version >/dev/null
+  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" PATH="$stage/usr/bin:/system/bin" \
+    LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/eslint" --version >/dev/null
+  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp" \
+    PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" \
+    "$stage/usr/libexec/dsh/wrappers/cmake-format" --version >/dev/null
 
   echo '[DSH] Extended developer tools: OK (prettier + eslint + cmake-format)'
 }
