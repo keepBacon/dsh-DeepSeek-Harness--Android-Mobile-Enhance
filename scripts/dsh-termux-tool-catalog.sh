@@ -4,6 +4,8 @@
 
 DSH_TERMUX_MAIN_TOOL_PACKAGES_DEFAULT="apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip bzip2 xz-utils zstd lz4 cpio unzip zip 7zip curl wget aria2 jq yq less which procps diffutils patch parallel file binutils openssl openssl-tool aapt2 libc++ llvm clang lld make cmake ninja pkg-config gdb gdbserver strace ltrace rizin radare2 git git-lfs openssh shellcheck shfmt ctags cscope htop lsof tree rsync tmux fzf bat eza ncdu duf fd sd micro neovim ranger yazi glow gum dialog lazygit tig httpie dnsutils iproute2 net-tools nmap socat netcat-openbsd whois traceroute sqlite postgresql mariadb redis imagemagick ffmpeg poppler pandoc exiftool android-tools apksigner apktool jadx"
 DSH_TERMUX_ROOT_TOOL_PACKAGES_DEFAULT="frida frida-python btop tcpdump"
+DSH_NPM_DEV_TOOL_PACKAGES_DEFAULT="prettier@3.9.9 eslint@10.10.0"
+DSH_PYTHON_DEV_TOOL_PACKAGES_DEFAULT="cmakelang==0.6.13"
 
 DSH_TERMUX_REQUIRED_TOOL_SPECS=(
   "openssl|openssl-tool|word"

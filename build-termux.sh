@@ -48,6 +48,8 @@ DSH_TERMUX_ROOT_TOOL_PACKAGES="${DSH_TERMUX_ROOT_TOOL_PACKAGES:-$DSH_TERMUX_ROOT
 DSH_TERMUX_PRIMARY_APT_BASE="${DSH_TERMUX_PRIMARY_APT_BASE:-https://packages.termux.dev/apt}"
 DSH_TERMUX_FALLBACK_APT_BASE="${DSH_TERMUX_FALLBACK_APT_BASE:-https://packages-cf.termux.dev/apt}"
 DSH_AUTO_INSTALL_TERMUX_TOOLS="${DSH_AUTO_INSTALL_TERMUX_TOOLS:-1}"
+DSH_NPM_DEV_TOOL_PACKAGES="${DSH_NPM_DEV_TOOL_PACKAGES:-$DSH_NPM_DEV_TOOL_PACKAGES_DEFAULT}"
+DSH_PYTHON_DEV_TOOL_PACKAGES="${DSH_PYTHON_DEV_TOOL_PACKAGES:-$DSH_PYTHON_DEV_TOOL_PACKAGES_DEFAULT}"
 MOBILE_MCP_TOOLBOX="$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs"
 BASIC_MCP_TOOLBOX="$ROOT/scripts/dsh-basic-toolbox-mcp.mjs"
 DSH_EXTRA_TERMUX_PACKAGES="${DSH_EXTRA_TERMUX_PACKAGES:-}"
@@ -628,6 +630,52 @@ copy_link_deps() {
 if [ "$DSH_REFRESH_RUNTIME" = "1" ] && [ "$DSH_TERMUX_TOOLS" = "1" ]; then
   dsh_preflight_termux_tool_packages
 fi
+
+install_extended_dev_tools() {
+  local stage="$1"
+  local log="$CACHE_DIR/extended-dev-tools.log"
+  echo '[DSH] Installing pinned non-APT developer tools…'
+
+  if [ -n "$DSH_NPM_DEV_TOOL_PACKAGES" ]; then
+    env \
+      PATH="$stage/usr/bin:/system/bin" \
+      LD_LIBRARY_PATH="$stage/usr/lib" \
+      HOME="$stage/home" \
+      npm --prefix "$stage/usr" install --global --ignore-scripts --no-audit --no-fund \
+        $DSH_NPM_DEV_TOOL_PACKAGES >"$log" 2>&1 || {
+          echo '[DSH] npm developer-tool install failed.' >&2
+          sed -n '1,160p' "$log" >&2 || true
+          return 7
+        }
+  fi
+
+  if [ -n "$DSH_PYTHON_DEV_TOOL_PACKAGES" ]; then
+    env \
+      PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" \
+      LD_LIBRARY_PATH="$stage/usr/lib" \
+      TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp" \
+      "$stage/usr/libexec/dsh/wrappers/pip3" install --no-cache-dir --disable-pip-version-check \
+        $DSH_PYTHON_DEV_TOOL_PACKAGES >>"$log" 2>&1 || {
+          echo '[DSH] Python developer-tool install failed.' >&2
+          sed -n '1,160p' "$log" >&2 || true
+          return 7
+        }
+  fi
+
+  for cmd in prettier eslint cmake-format; do
+    test -x "$stage/usr/bin/$cmd" || {
+      echo "[DSH] Developer tool missing after install: $cmd" >&2
+      return 7
+    }
+  done
+  env PATH="$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/prettier" --version >/dev/null
+  env PATH="$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/eslint" --version >/dev/null
+  env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" \
+    TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp" \
+    LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/cmake-format" --version >/dev/null
+
+  echo '[DSH] Extended developer tools: OK (prettier + eslint + cmake-format)'
+}
 
 install_terminal_shell_runtime() {
   local stage="$1" host_bash host_prefix real_bash
@@ -1418,6 +1466,7 @@ refresh_dsh_runtime() {
 
   overlay_host_node_runtime "$stage"
   install_termux_tool_runtime "$stage"
+  install_extended_dev_tools "$stage"
   install_terminal_shell_runtime "$stage"
   local node_headers
   node_headers="$(prepare_node_headers)"
