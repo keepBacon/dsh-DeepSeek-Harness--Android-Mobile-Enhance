@@ -31,6 +31,9 @@ class AndroidBridge(
   private val onDeleteSkillCollection: (String) -> String = { JSONObject().put("ok", false).put("error", "Skill collection manager unavailable").toString() },
   private val onWorkspacePath: () -> String? = { null },
   private val onRememberWorkspacePath: (String) -> Boolean = { false },
+  private val onRunMobileTool: (String, String) -> String = { _, _ ->
+    JSONObject().put("ok", false).put("error", "Mobile tools unavailable").toString()
+  },
   private val pickToken: String? = null,
 ) {
 
@@ -130,6 +133,11 @@ class AndroidBridge(
   @JavascriptInterface
   fun setCurrentWorkspacePath(capability: String, path: String): Boolean =
     authorized(capability) && onRememberWorkspacePath(path)
+
+  @JavascriptInterface
+  fun runMobileTool(capability: String, category: String, command: String): String =
+    if (authorized(capability)) onRunMobileTool(category, command)
+    else JSONObject().put("ok", false).put("error", "bridge authorization failed").toString()
 
   @JavascriptInterface
   fun getPickToken(capability: String): String? =
