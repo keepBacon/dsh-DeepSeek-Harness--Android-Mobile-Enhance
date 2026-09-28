@@ -805,6 +805,8 @@ class MainActivity : ComponentActivity() {
         const STYLE_ID = 'dsh-android-mobile-style';
         const BAR_ID = 'dsh-android-mobile-bar';
         const SCRIM_ID = 'dsh-android-mobile-scrim';
+        const TOOLS_PANEL_ID = 'dsh-android-tools-panel';
+        const TOOLS_SCRIM_ID = 'dsh-android-tools-scrim';
         const SKILL_NAV_ID = 'dsh-android-skill-settings-nav';
         const SKILL_PANEL_ID = 'dsh-android-skill-settings-panel';
 
@@ -964,6 +966,197 @@ class MainActivity : ComponentActivity() {
             :root[data-dsh-mobile-sidebar-open] #dsh-android-mobile-scrim {
               opacity: 1;
               pointer-events: auto;
+            }
+
+            #dsh-android-tools-scrim {
+              position: fixed;
+              inset: var(--dsh-mobile-bar) 0 0 0;
+              z-index: 1180;
+              background: rgba(0, 0, 0, .24);
+              opacity: 0;
+              pointer-events: none;
+              transition: opacity 160ms ease-out;
+            }
+
+            #dsh-android-tools-panel {
+              position: fixed;
+              z-index: 1190;
+              top: var(--dsh-mobile-bar);
+              right: 0;
+              bottom: 0;
+              width: min(92vw, 420px);
+              max-width: 420px;
+              display: flex;
+              flex-direction: column;
+              background: var(--dsw-alias-bg-base, #fff);
+              color: var(--dsw-alias-text-primary, currentColor);
+              border-left: 1px solid var(--dsw-alias-border-l3, rgba(0,0,0,.08));
+              box-shadow: -12px 0 32px rgba(0,0,0,.10);
+              transform: translate3d(102%, 0, 0);
+              transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+              overflow: hidden;
+            }
+
+            :root[data-dsh-tools-open] #dsh-android-tools-scrim {
+              opacity: 1;
+              pointer-events: auto;
+            }
+
+            :root[data-dsh-tools-open] #dsh-android-tools-panel {
+              transform: translate3d(0, 0, 0);
+            }
+
+            .dsh-tools-header {
+              min-height: 60px;
+              padding: 12px 12px 10px 16px;
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+              border-bottom: 1px solid var(--dsw-alias-border-l3, rgba(0,0,0,.08));
+            }
+
+            .dsh-tools-title {
+              min-width: 0;
+            }
+
+            .dsh-tools-title strong {
+              display: block;
+              font-size: 16px;
+              line-height: 1.3;
+              font-weight: 650;
+              letter-spacing: -.01em;
+            }
+
+            .dsh-tools-title span {
+              display: block;
+              margin-top: 2px;
+              color: var(--dsw-alias-text-secondary, rgba(0,0,0,.58));
+              font-size: 12px;
+              line-height: 1.35;
+            }
+
+            #dsh-android-tools-panel .dsh-tools-close {
+              flex: none;
+              width: 36px;
+              height: 36px;
+              min-width: 36px;
+              min-height: 36px;
+              padding: 0;
+              display: grid;
+              place-items: center;
+              border: 0;
+              border-radius: 9px;
+              background: transparent;
+              color: inherit;
+            }
+
+            #dsh-android-tools-panel .dsh-tools-close:active {
+              transform: scale(.97);
+              background: color-mix(in srgb, currentColor 8%, transparent);
+            }
+
+            .dsh-tools-list {
+              min-height: 0;
+              flex: 1 1 auto;
+              overflow: auto;
+              padding: 8px;
+              display: flex;
+              flex-direction: column;
+              gap: 2px;
+              overscroll-behavior: contain;
+            }
+
+            #dsh-android-tools-panel .dsh-tool-item {
+              width: 100%;
+              min-height: 52px;
+              padding: 8px 10px;
+              display: grid;
+              grid-template-columns: 32px minmax(0, 1fr) 18px;
+              align-items: center;
+              gap: 10px;
+              border: 0;
+              border-radius: 10px;
+              background: transparent;
+              color: inherit;
+              text-align: left;
+              -webkit-tap-highlight-color: transparent;
+            }
+
+            #dsh-android-tools-panel .dsh-tool-item:hover {
+              background: color-mix(in srgb, currentColor 5%, transparent);
+            }
+
+            #dsh-android-tools-panel .dsh-tool-item:active {
+              transform: scale(.99);
+              background: color-mix(in srgb, currentColor 8%, transparent);
+            }
+
+            #dsh-android-tools-panel .dsh-tool-item:focus-visible,
+            #dsh-android-tools-panel .dsh-tools-close:focus-visible {
+              outline: 2px solid var(--dsw-alias-brand-primary, #4f7cff);
+              outline-offset: -2px;
+            }
+
+            #dsh-android-tools-panel .dsh-tool-item[data-active="true"] {
+              background: color-mix(in srgb, currentColor 8%, transparent);
+            }
+
+            .dsh-tool-icon {
+              width: 32px;
+              height: 32px;
+              display: grid;
+              place-items: center;
+              border-radius: 8px;
+              background: color-mix(in srgb, currentColor 6%, transparent);
+            }
+
+            .dsh-tool-icon svg {
+              width: 17px;
+              height: 17px;
+              fill: none;
+              stroke: currentColor;
+              stroke-width: 1.7;
+              stroke-linecap: round;
+              stroke-linejoin: round;
+            }
+
+            .dsh-tool-copy {
+              min-width: 0;
+            }
+
+            .dsh-tool-label {
+              display: block;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              font-size: 14px;
+              line-height: 1.3;
+              font-weight: 560;
+            }
+
+            .dsh-tool-hint {
+              display: block;
+              margin-top: 2px;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              color: var(--dsw-alias-text-secondary, rgba(0,0,0,.58));
+              font-size: 11px;
+              line-height: 1.35;
+            }
+
+            .dsh-tool-chevron {
+              font-size: 18px;
+              line-height: 1;
+              opacity: .42;
+            }
+
+            @media (max-width: 420px) {
+              #dsh-android-tools-panel {
+                width: 100vw;
+                max-width: 100vw;
+              }
             }
 
             [data-dsh-mobile-frame] {
@@ -1614,7 +1807,18 @@ class MainActivity : ComponentActivity() {
         const icon = (name) => {
           if (name === 'menu') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
           if (name === 'new') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+          if (name === 'tools') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="11" cy="18" r="1.5"/></svg>';
           return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 18h14"/></svg>';
+        };
+
+        const toolIcon = (name) => {
+          if (name === 'terminal') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7l4 4-4 4M11 16h7"/></svg>';
+          if (name === 'files') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2 2h9v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 9.5v-3a2 2 0 0 1 2-2h4l2 2h4"/></svg>';
+          if (name === 'processes') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h16M4 17h12"/><circle cx="17" cy="7" r="2"/><circle cx="7" cy="17" r="2"/></svg>';
+          if (name === 'packages') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l8-4 8 4-8 4z"/><path d="M4 7v10l8 4 8-4V7M12 11v10"/></svg>';
+          if (name === 'git') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v8a4 4 0 0 0 4 4h6"/><circle cx="7" cy="4" r="2"/><circle cx="17" cy="17" r="2"/><circle cx="7" cy="13" r="2"/></svg>';
+          if (name === 'network') return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
+          return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h5"/></svg>';
         };
 
         // Reuse the settings icon rendered by DSH's own UI component library.
@@ -1743,6 +1947,98 @@ class MainActivity : ComponentActivity() {
           else openSidebar();
         };
 
+        const TOOL_DEFS = [
+          { id: 'terminal', label: 'Terminal', hint: 'Shell and persistent terminal sessions' },
+          { id: 'files', label: 'Files', hint: 'Workspace files and file operations' },
+          { id: 'processes', label: 'Processes', hint: 'Process and runtime inspection' },
+          { id: 'packages', label: 'Packages', hint: 'pkg, apt, dpkg and installed tools' },
+          { id: 'git', label: 'Git', hint: 'Repository status and source control' },
+          { id: 'network', label: 'Network', hint: 'Interfaces, sockets, DNS and HTTP' },
+          { id: 'system', label: 'System', hint: 'Android and runtime environment' }
+        ];
+
+        const closeToolsPanel = () => {
+          ROOT.removeAttribute('data-dsh-tools-open');
+          const trigger = document.getElementById('dsh-mobile-tools');
+          if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        };
+
+        const openToolsPanel = () => {
+          closeSidebar();
+          ROOT.setAttribute('data-dsh-tools-open', '');
+          const trigger = document.getElementById('dsh-mobile-tools');
+          if (trigger) trigger.setAttribute('aria-expanded', 'true');
+        };
+
+        const toggleToolsPanel = () => {
+          if (ROOT.hasAttribute('data-dsh-tools-open')) closeToolsPanel();
+          else openToolsPanel();
+        };
+
+        const installToolsPanel = () => {
+          if (!document.body) return;
+          if (!document.getElementById(TOOLS_PANEL_ID)) {
+            const panel = document.createElement('aside');
+            panel.id = TOOLS_PANEL_ID;
+            panel.setAttribute('aria-label', 'Tools');
+
+            const header = document.createElement('div');
+            header.className = 'dsh-tools-header';
+
+            const heading = document.createElement('div');
+            heading.className = 'dsh-tools-title';
+            const title = document.createElement('strong');
+            title.textContent = 'Tools';
+            const subtitle = document.createElement('span');
+            subtitle.textContent = 'Android runtime utilities';
+            heading.append(title, subtitle);
+
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.className = 'dsh-tools-close';
+            close.setAttribute('aria-label', 'Close tools');
+            close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+            close.addEventListener('click', closeToolsPanel);
+            header.append(heading, close);
+
+            const list = document.createElement('nav');
+            list.className = 'dsh-tools-list';
+            list.setAttribute('aria-label', 'Tool categories');
+            TOOL_DEFS.forEach((tool) => {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'dsh-tool-item';
+              button.dataset.tool = tool.id;
+              button.setAttribute('aria-label', tool.label);
+              button.innerHTML =
+                '<span class="dsh-tool-icon">' + toolIcon(tool.id) + '</span>' +
+                '<span class="dsh-tool-copy"><span class="dsh-tool-label">' + tool.label + '</span>' +
+                '<span class="dsh-tool-hint">' + tool.hint + '</span></span>' +
+                '<span class="dsh-tool-chevron" aria-hidden="true">›</span>';
+              button.addEventListener('click', () => {
+                list.querySelectorAll('.dsh-tool-item[data-active="true"]').forEach((node) => {
+                  node.removeAttribute('data-active');
+                });
+                button.setAttribute('data-active', 'true');
+                window.dispatchEvent(new CustomEvent('dsh-android-tool-selected', {
+                  detail: { id: tool.id, label: tool.label }
+                }));
+              });
+              list.appendChild(button);
+            });
+
+            panel.append(header, list);
+            document.body.appendChild(panel);
+          }
+
+          if (!document.getElementById(TOOLS_SCRIM_ID)) {
+            const scrim = document.createElement('div');
+            scrim.id = TOOLS_SCRIM_ID;
+            scrim.addEventListener('click', closeToolsPanel);
+            document.body.appendChild(scrim);
+          }
+        };
+
         const installMobileChrome = () => {
           if (!document.body) return;
           let bar = document.getElementById(BAR_ID);
@@ -1755,6 +2051,9 @@ class MainActivity : ComponentActivity() {
             title.textContent = 'DeepSeek Harness';
             const actions = document.createElement('div');
             actions.className = 'dsh-mobile-actions';
+            const tools = makeButton('dsh-mobile-tools', 'Tools', 'tools');
+            tools.setAttribute('aria-haspopup', 'true');
+            tools.setAttribute('aria-expanded', 'false');
             const add = makeButton('dsh-mobile-new', '新建会话', 'new');
             const appSettings = makeButton('dsh-mobile-app-settings', '应用设置', null);
             appSettings.innerHTML = upstreamSettingsIcon();
@@ -1762,6 +2061,7 @@ class MainActivity : ComponentActivity() {
               if (UI_MODE === 'mobile') toggleMobileSidebar();
               else { try { findSidebarToggle()?.click(); } catch (_) {} }
             });
+            tools.addEventListener('click', toggleToolsPanel);
             add.addEventListener('click', () => {
               const target = findNewSession();
               if (target) target.click();
@@ -1769,10 +2069,11 @@ class MainActivity : ComponentActivity() {
             appSettings.addEventListener('click', () => {
               try { window.androidBridge && window.androidBridge.openAppSettings(BRIDGE_CAP); } catch (_) {}
             });
-            actions.append(add, appSettings);
+            actions.append(tools, add, appSettings);
             bar.append(menu, title, actions);
             document.body.appendChild(bar);
           }
+          installToolsPanel();
           let scrim = document.getElementById(SCRIM_ID);
           if (!scrim) {
             scrim = document.createElement('div');
