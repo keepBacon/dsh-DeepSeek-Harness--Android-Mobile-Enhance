@@ -220,6 +220,222 @@ class EngineManager(private val context: Context, private val pickToken: String?
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
   }
 
+  /**
+   * Execute one request from the Android mobile Tools surface.
+   *
+   * The category is allow-listed here rather than accepting arbitrary native
+   * executable paths from WebView. Terminal is the only free-form command
+   * surface; it still runs through the same embedded Termux namespace and cwd
+   * used by DSH instead of through Android's app process shell.
+   */
+  fun runMobileToolRequest(category: String, command: String, workspacePath: String?): String {
+    val normalized = category.trim().lowercase()
+    return try {
+      when (normalized) {
+        "terminal" -> {
+          val value = command.trim()
+          if (value.isEmpty()) {
+            JSONObject()
+              .put("ok", false)
+              .put("category", normalized)
+              .put("error", "Command is empty")
+              .toString()
+          } else if (value.length > 4096) {
+            JSONObject()
+              .put("ok", false)
+              .put("category", normalized)
+              .put("error", "Command exceeds 4096 characters")
+              .toString()
+          } else {
+            runMobileToolShell(normalized, value, workspacePath, timeoutSeconds = 20)
+          }
+        }
+        "files" -> mobileFilesSnapshot(workspacePath)
+        "processes" -> runMobileToolShell(
+          normalized,
+          "ps -A -o PID,PPID,USER,STAT,ETIME,NAME,ARGS 2>/dev/null || ps -A",
+          workspacePath,
+          timeoutSeconds = 8,
+        )
+        "packages" -> runMobileToolShell(
+          normalized,
+          "dpkg-query -W -f='\${binary:Package}\\t\${Version}\\n' 2>/dev/null | sort | head -n 600",
+          workspacePath,
+          timeoutSeconds = 12,
+        )
+        "git" -> runMobileToolShell(
+          normalized,
+          "git rev-parse --show-toplevel 2>/dev/null || { echo 'Not a Git repository.'; exit 2; }; " +
+            "git status --short --branch; printf '\\nRecent commits:\\n'; " +
+            "git log -8 --date=short --pretty=format:'%h  %ad  %s' 2>/dev/null || true",
+          workspacePath,
+          timeoutSeconds = 10,
+        )
+        "network" -> runMobileToolShell(
+          normalized,
+          "(ip -brief addr 2>&1 || ifconfig 2>&1); printf '\\nSockets:\\n'; " +
+            "ss -tun 2>&1 | head -n 240",
+          workspacePath,
+          timeoutSeconds = 10,
+        )
+        "system" -> runMobileToolShell(
+          normalized,
+          "printf 'Kernel:\\n'; uname -a; printf '\\nIdentity:\\n'; id; " +
+            "printf '\\nStorage:\\n'; df -h .; printf '\\nAndroid:\\n'; " +
+            "getprop ro.product.manufacturer 2>/dev/null; getprop ro.product.model 2>/dev/null; " +
+            "getprop ro.build.version.release 2>/dev/null; getprop ro.build.version.sdk 2>/dev/null",
+          workspacePath,
+          timeoutSeconds = 8,
+        )
+        else -> JSONObject()
+          .put("ok", false)
+          .put("category", normalized)
+          .put("error", "Unknown tool category")
+          .toString()
+      }
+    } catch (t: Throwable) {
+      JSONObject()
+        .put("ok", false)
+        .put("category", normalized)
+        .put("error", t.message ?: t.javaClass.simpleName)
+        .toString()
+    }
+  }
+
+  private fun mobileToolCwd(workspacePath: String?): File {
+    if (!workspacePath.isNullOrBlank()) {
+      try {
+        val workspace = File(workspacePath).canonicalFile
+        if (workspace.isDirectory) return workspace
+      } catch (_: Throwable) {}
+    }
+    homeDir.mkdirs()
+    return homeDir
+  }
+
+  private fun mobileFilesSnapshot(workspacePath: String?): String {
+    val cwd = mobileToolCwd(workspacePath)
+    val workspaceAvailable = !workspacePath.isNullOrBlank() && try {
+      File(workspacePath).canonicalFile == cwd
+    } catch (_: Throwable) { false }
+    if (!workspaceAvailable) {
+      return JSONObject()
+        .put("ok", false)
+        .put("category", "files")
+        .put("cwd", cwd.absolutePath)
+        .put("error", "No active workspace")
+        .toString()
+    }
+
+    val all = cwd.listFiles()?.toList().orEmpty()
+      .sortedWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase() }))
+    val limit = 250
+    val output = buildString {
+      append("Workspace: ").append(cwd.absolutePath).append('\n')
+      append("Entries: ").append(all.size).append("\n\n")
+      for (entry in all.take(limit)) {
+        val name = entry.name.replace("\n", "⏎").replace("\t", " ")
+        if (java.nio.file.Files.isSymbolicLink(entry.toPath())) {
+          append("LINK  ").append(name).append('\n')
+        } else if (entry.isDirectory) {
+          append("DIR   ").append(name).append('/').append('\n')
+        } else {
+          append("FILE  ").append(entry.length()).append(" B  ").append(name).append('\n')
+        }
+      }
+      if (all.size > limit) append("\n… ").append(all.size - limit).append(" more entries")
+    }
+    return JSONObject()
+      .put("ok", true)
+      .put("category", "files")
+      .put("cwd", cwd.absolutePath)
+      .put("exitCode", 0)
+      .put("output", output)
+      .toString()
+  }
+
+  private fun readMobileToolLog(file: File, maxBytes: Int = 128 * 1024): String {
+    if (!file.isFile) return ""
+    val length = file.length()
+    val size = minOf(length, maxBytes.toLong()).toInt()
+    val bytes = ByteArray(size)
+    var offset = 0
+    file.inputStream().use { input ->
+      while (offset < size) {
+        val read = input.read(bytes, offset, size - offset)
+        if (read <= 0) break
+        offset += read
+      }
+    }
+    val text = String(bytes, 0, offset, Charsets.UTF_8)
+    return if (length > maxBytes) text + "\n\n[output truncated]" else text
+  }
+
+  private fun runMobileToolShell(
+    category: String,
+    script: String,
+    workspacePath: String?,
+    timeoutSeconds: Long,
+  ): String {
+    val cwd = mobileToolCwd(workspacePath)
+    val termuxRun = File(usrDir, "libexec/dsh/termux-run")
+    if (!termuxRun.isFile) {
+      return JSONObject()
+        .put("ok", false)
+        .put("category", category)
+        .put("cwd", cwd.absolutePath)
+        .put("error", "Embedded Termux runner is unavailable")
+        .toString()
+    }
+
+    val log = File.createTempFile("dsh-mobile-tool-", ".log", context.cacheDir)
+    var process: Process? = null
+    return try {
+      val builder = ProcessBuilder(
+        termuxRun.absolutePath,
+        "bash",
+        "-lc",
+        script,
+      )
+      builder.environment().putAll(engineEnv(preloadBin))
+      builder.directory(cwd)
+      builder.redirectErrorStream(true)
+      builder.redirectOutput(log)
+      process = builder.start()
+
+      val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+      if (!finished) {
+        process.destroy()
+        if (!process.waitFor(500, TimeUnit.MILLISECONDS)) process.destroyForcibly()
+      }
+      val exitCode = if (finished) process.exitValue() else -2
+      val output = readMobileToolLog(log)
+      JSONObject()
+        .put("ok", finished && exitCode == 0)
+        .put("category", category)
+        .put("cwd", cwd.absolutePath)
+        .put("exitCode", exitCode)
+        .put("timedOut", !finished)
+        .put("output", output)
+        .apply {
+          if (!finished) put("error", "Command timed out after $timeoutSeconds seconds")
+        }
+        .toString()
+    } catch (t: Throwable) {
+      try { process?.destroyForcibly() } catch (_: Throwable) {}
+      JSONObject()
+        .put("ok", false)
+        .put("category", category)
+        .put("cwd", cwd.absolutePath)
+        .put("exitCode", -3)
+        .put("error", t.message ?: t.javaClass.simpleName)
+        .put("output", readMobileToolLog(log))
+        .toString()
+    } finally {
+      try { log.delete() } catch (_: Throwable) {}
+    }
+  }
+
   private fun compatibilityHint(text: String): String? = when {
     text.contains("node-addon-require-builtin", ignoreCase = true) ->
       "Android 兼容层缺少 require-builtin 回退；请用 v0.1 的兼容构建脚本重新生成 runtime。"
