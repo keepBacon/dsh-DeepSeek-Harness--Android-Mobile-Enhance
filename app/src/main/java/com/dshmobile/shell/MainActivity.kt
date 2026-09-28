@@ -1175,6 +1175,49 @@ class MainActivity : ComponentActivity() {
               line-height: 1.35;
             }
 
+            .dsh-tool-catalog {
+              flex: none;
+              max-height: 168px;
+              padding: 0 12px 10px;
+              overflow: auto;
+              display: flex;
+              flex-wrap: wrap;
+              align-content: flex-start;
+              gap: 6px;
+              overscroll-behavior: contain;
+            }
+
+            .dsh-tool-catalog:empty {
+              display: none;
+            }
+
+            #dsh-android-tools-panel .dsh-tool-chip {
+              max-width: 100%;
+              min-height: 28px;
+              padding: 4px 8px;
+              border: 1px solid var(--dsw-alias-border-l3, rgba(0,0,0,.08));
+              border-radius: 7px;
+              background: transparent;
+              color: inherit;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            }
+
+            #dsh-android-tools-panel .dsh-tool-chip:active {
+              transform: scale(.98);
+              background: color-mix(in srgb, currentColor 8%, transparent);
+            }
+
+            .dsh-tools-summary {
+              flex: none;
+              padding: 0 12px 8px;
+              color: var(--dsw-alias-text-secondary, rgba(0,0,0,.58));
+              font-size: 11px;
+              line-height: 1.35;
+            }
+
             #dsh-android-tools-panel .dsh-tool-item {
               width: 100%;
               min-height: 52px;
@@ -2144,12 +2187,37 @@ class MainActivity : ComponentActivity() {
             run.textContent = 'Run';
             terminalRow.append(command, run);
 
+            const catalogSummary = document.createElement('div');
+            catalogSummary.className = 'dsh-tools-summary';
+            const catalog = document.createElement('div');
+            catalog.className = 'dsh-tool-catalog';
+
             const output = document.createElement('pre');
             output.className = 'dsh-tool-output';
             output.textContent = 'Select a tool.';
             const status = document.createElement('div');
             status.className = 'dsh-tool-status';
-            detail.append(detailHead, terminalRow, output, status);
+            detail.append(detailHead, terminalRow, catalogSummary, catalog, output, status);
+
+            let runtimeCatalog = null;
+            try {
+              const rawCatalog = window.androidBridge
+                ? window.androidBridge.runMobileTool(BRIDGE_CAP, 'catalog', '')
+                : '{"ok":false}';
+              runtimeCatalog = JSON.parse(rawCatalog || '{}');
+            } catch (_) {
+              runtimeCatalog = null;
+            }
+
+            if (runtimeCatalog && runtimeCatalog.ok) {
+              const caps = Array.isArray(runtimeCatalog.desktopCapabilities)
+                ? runtimeCatalog.desktopCapabilities.join(' · ')
+                : '';
+              catalogSummary.textContent =
+                String(runtimeCatalog.total || 0) + ' runtime commands'
+                + (runtimeCatalog.dshVersion ? ' · DSH ' + runtimeCatalog.dshVersion : '')
+                + (caps ? '\nDesktop parity: ' + caps : '');
+            }
 
             let activeTool = null;
             const renderResult = (raw) => {
@@ -2164,12 +2232,45 @@ class MainActivity : ComponentActivity() {
               output.textContent = result.output || result.error || (result.ok ? 'Done.' : 'No output.');
             };
 
+            const renderCatalog = (tool) => {
+              catalog.replaceChildren();
+              if (!runtimeCatalog || !runtimeCatalog.ok || !runtimeCatalog.categories || !tool) return;
+              const names = Array.isArray(runtimeCatalog.categories[tool.id])
+                ? runtimeCatalog.categories[tool.id]
+                : [];
+              for (const name of names) {
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'dsh-tool-chip';
+                chip.textContent = name;
+                chip.setAttribute('aria-label', 'Open ' + name + ' in Terminal');
+                chip.addEventListener('click', () => {
+                  const terminal = TOOL_DEFS.find((item) => item.id === 'terminal');
+                  if (!terminal) return;
+                  activeTool = terminal;
+                  panel.dataset.tool = 'terminal';
+                  panel.dataset.detailOpen = 'true';
+                  detailTitle.textContent = 'Terminal';
+                  command.value = name + ' ';
+                  renderCatalog(terminal);
+                  output.textContent = 'Ready to run ' + name + '. Add arguments if needed.';
+                  status.textContent = 'runtime tool: ' + name;
+                  requestAnimationFrame(() => {
+                    command.focus();
+                    command.setSelectionRange(command.value.length, command.value.length);
+                  });
+                });
+                catalog.appendChild(chip);
+              }
+            };
+
             const runTool = (tool, terminalCommand = '') => {
               if (!tool) return;
               activeTool = tool;
               panel.dataset.tool = tool.id;
               panel.dataset.detailOpen = 'true';
               detailTitle.textContent = tool.label;
+              renderCatalog(tool);
               output.textContent = 'Loading…';
               status.textContent = '';
               let raw = '';
@@ -2190,6 +2291,7 @@ class MainActivity : ComponentActivity() {
               panel.removeAttribute('data-detail-open');
               panel.removeAttribute('data-tool');
               activeTool = null;
+              catalog.replaceChildren();
               output.textContent = '';
               status.textContent = '';
             });

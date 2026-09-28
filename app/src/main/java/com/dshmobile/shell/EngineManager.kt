@@ -232,6 +232,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val normalized = category.trim().lowercase()
     return try {
       when (normalized) {
+        "catalog" -> mobileToolCatalogJson()
         "terminal" -> {
           val value = command.trim()
           if (value.isEmpty()) {
@@ -300,6 +301,96 @@ class EngineManager(private val context: Context, private val pickToken: String?
         .put("error", t.message ?: t.javaClass.simpleName)
         .toString()
     }
+  }
+
+  private fun mobileToolCategory(name: String): String {
+    val terminal = setOf(
+      "bash", "sh", "tmux", "fzf", "bat", "eza", "micro", "nvim", "ranger", "yazi",
+      "glow", "gum", "dialog", "less", "which", "tree", "htop", "btop", "ncdu", "duf", "watch",
+    )
+    val files = setOf(
+      "file", "fd", "find", "rg", "grep", "sed", "awk", "gawk", "jq", "yq", "rsync",
+      "diff", "patch", "sd", "tar", "gzip", "bzip2", "xz", "zstd", "lz4", "cpio",
+      "zip", "unzip", "7z",
+    )
+    val processes = setOf(
+      "ps", "htop", "btop", "watch", "lsof", "strace", "ltrace", "gdb", "gdbserver",
+      "frida", "frida-ps", "frida-trace", "frida-server", "rizin", "r2",
+    )
+    val packages = setOf(
+      "pkg", "apt", "apt-get", "apt-cache", "apt-config", "dpkg", "dpkg-query", "dpkg-deb",
+      "python", "python3", "pip", "pip3", "node", "npm", "npx", "pnpm",
+    )
+    val git = setOf("git", "git-lfs", "lazygit", "tig", "ssh", "scp", "sftp")
+    val network = setOf(
+      "curl", "wget", "aria2c", "http", "dig", "ip", "ss", "ifconfig", "nmap", "socat",
+      "nc", "whois", "traceroute", "tcpdump", "adb",
+    )
+    return when (name) {
+      in processes -> "processes"
+      in packages -> "packages"
+      in git -> "git"
+      in network -> "network"
+      in files -> "files"
+      in terminal -> "terminal"
+      else -> "system"
+    }
+  }
+
+  /**
+   * Return the command surface actually present in this installed APK runtime.
+   *
+   * Most names come from libexec/dsh/wrappers, which is generated from the
+   * canonical Termux tool catalog during the full build. A small set of DSH
+   * runtime commands (Node/npm/pnpm/Bash/OpenSSH/ripgrep) live directly under
+   * usr/bin and are added only when the installed file really exists.
+   */
+  private fun mobileToolCatalogJson(): String {
+    val names = linkedSetOf<String>()
+    val validName = Regex("""^[A-Za-z0-9][A-Za-z0-9._+-]*$""")
+    val wrappers = File(usrDir, "libexec/dsh/wrappers")
+    wrappers.listFiles()?.forEach { entry ->
+      if (validName.matches(entry.name) && (entry.exists() || java.nio.file.Files.isSymbolicLink(entry.toPath()))) {
+        names += entry.name
+      }
+    }
+
+    val directRuntimeCommands = listOf(
+      "bash", "sh", "node", "npm", "npx", "pnpm", "rg",
+      "git", "ssh", "scp", "sftp", "ps",
+    )
+    for (name in directRuntimeCommands) {
+      val entry = File(usrDir, "bin/$name")
+      if (entry.exists() || java.nio.file.Files.isSymbolicLink(entry.toPath())) names += name
+    }
+
+    val categoryOrder = listOf("terminal", "files", "processes", "packages", "git", "network", "system")
+    val grouped = categoryOrder.associateWith { mutableListOf<String>() }
+    for (name in names.sorted()) {
+      grouped.getValue(mobileToolCategory(name)).add(name)
+    }
+
+    val categories = JSONObject()
+    for (id in categoryOrder) {
+      val array = JSONArray()
+      for (name in grouped.getValue(id)) array.put(name)
+      categories.put(id, array)
+    }
+
+    val desktopCapabilities = JSONArray()
+    for (name in listOf(
+      "Bash", "Files", "FS Search", "Jobs", "Skills", "Subagents",
+      "Workflow", "Web", "Present", "Todo", "Goal / Plan",
+    )) desktopCapabilities.put(name)
+
+    return JSONObject()
+      .put("ok", true)
+      .put("runtime", "embedded-termux")
+      .put("dshVersion", dshVersion())
+      .put("total", names.size)
+      .put("categories", categories)
+      .put("desktopCapabilities", desktopCapabilities)
+      .toString()
   }
 
   private fun mobileToolCwd(workspacePath: String?): File {
