@@ -1070,6 +1070,22 @@ class MainActivity : ComponentActivity() {
               overscroll-behavior: contain;
             }
 
+            .dsh-tools-section-label {
+              padding: 10px 10px 5px;
+              color: var(--dsw-alias-text-secondary, rgba(0,0,0,.58));
+              font-size: 11px;
+              line-height: 1.3;
+              font-weight: 650;
+              letter-spacing: .04em;
+              text-transform: uppercase;
+            }
+
+            .dsh-tools-section-label:not(:first-child) {
+              margin-top: 6px;
+              border-top: 1px solid var(--dsw-alias-border-l3, rgba(0,0,0,.07));
+              padding-top: 12px;
+            }
+
             .dsh-tool-detail {
               min-height: 0;
               flex: 1 1 auto;
@@ -2001,6 +2017,34 @@ class MainActivity : ComponentActivity() {
         const findSidebarToggle = () => findButton(['打开侧边栏', '收起侧边栏', 'open sidebar', 'collapse sidebar']);
         const findNewSession = () => findButton(['新建会话', 'new session']);
 
+        const findDshSurfaceControl = (tests) => {
+          const candidates = Array.from(document.querySelectorAll(
+            'button, [role="tab"], [role="treeitem"], a[href]'
+          )).filter((el) =>
+            !el.closest('#' + TOOLS_PANEL_ID)
+            && el.id !== 'dsh-mobile-app-settings'
+            && el.id !== 'dsh-mobile-tools'
+          );
+          const normalized = tests.map((value) => value.toLowerCase());
+          const exact = candidates.find((el) => {
+            const value = (
+              (el.getAttribute('aria-label') || '') + ' ' +
+              (el.getAttribute('title') || '') + ' ' +
+              (el.textContent || '')
+            ).trim().replace(/\s+/g, ' ').toLowerCase();
+            return normalized.some((test) => value === test);
+          });
+          if (exact) return exact;
+          return candidates.find((el) => {
+            const value = (
+              (el.getAttribute('aria-label') || '') + ' ' +
+              (el.getAttribute('title') || '') + ' ' +
+              (el.textContent || '')
+            ).trim().replace(/\s+/g, ' ').toLowerCase();
+            return normalized.some((test) => value.includes(test));
+          }) || null;
+        };
+
         let lastWorkspaceSyncKey = '';
         let workspaceSyncRunning = false;
         const activeSessionId = () => {
@@ -2108,6 +2152,18 @@ class MainActivity : ComponentActivity() {
           { id: 'system', label: 'System', hint: 'Android and runtime environment' }
         ];
 
+        const DSH_SURFACE_DEFS = [
+          { id: 'workspace', label: 'Workspace', hint: 'Official DSH workspace and files', tests: ['workspace', '工作区'] },
+          { id: 'jobs', label: 'Jobs', hint: 'Official DSH background jobs', tests: ['jobs', '作业', '任务'] },
+          { id: 'skills', label: 'Skills', hint: 'Official DSH Skills surface', tests: ['skills', '技能'] },
+          { id: 'subagents', label: 'Subagents', hint: 'Official DSH subagent controls', tests: ['subagents', 'sub-agents', 'subagent', '子代理', '子智能体'] },
+          { id: 'workflow', label: 'Workflow', hint: 'Official DSH workflow runs', tests: ['workflows', 'workflow', '工作流'] },
+          { id: 'plugins', label: 'Plugins', hint: 'Official DSH plugin inventory', tests: ['plugins', 'plugin', '插件'] },
+          { id: 'models', label: 'Models', hint: 'Official DSH model settings', tests: ['models', 'model', '模型'] },
+          { id: 'agent-presets', label: 'Agent Presets', hint: 'Official DSH agent preset settings', tests: ['agent presets', 'agent preset', 'agent 预设'] },
+          { id: 'settings', label: 'Settings', hint: 'Official DSH settings', tests: ['settings', 'general', '设置', '通用设置'] }
+        ];
+
         const closeToolsPanel = () => {
           ROOT.removeAttribute('data-dsh-tools-open');
           const trigger = document.getElementById('dsh-mobile-tools');
@@ -2124,6 +2180,31 @@ class MainActivity : ComponentActivity() {
         const toggleToolsPanel = () => {
           if (ROOT.hasAttribute('data-dsh-tools-open')) closeToolsPanel();
           else openToolsPanel();
+        };
+
+        const openDshSurface = (surface, onFailure) => {
+          if (!surface) return;
+          const tryOpen = () => {
+            const target = findDshSurfaceControl(surface.tests || []);
+            if (!target) return false;
+            closeToolsPanel();
+            try {
+              target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+              target.click();
+              return true;
+            } catch (_) {
+              return false;
+            }
+          };
+
+          if (tryOpen()) return;
+          openSidebar();
+          requestAnimationFrame(() => {
+            if (tryOpen()) return;
+            setTimeout(() => {
+              if (!tryOpen() && typeof onFailure === 'function') onFailure();
+            }, 80);
+          });
         };
 
         const installToolsPanel = () => {
@@ -2317,7 +2398,14 @@ class MainActivity : ComponentActivity() {
               }
             });
 
-            TOOL_DEFS.forEach((tool) => {
+            const appendSectionLabel = (text) => {
+              const label = document.createElement('div');
+              label.className = 'dsh-tools-section-label';
+              label.textContent = text;
+              list.appendChild(label);
+            };
+
+            const appendToolButton = (tool, onClick) => {
               const button = document.createElement('button');
               button.type = 'button';
               button.className = 'dsh-tool-item';
@@ -2333,9 +2421,31 @@ class MainActivity : ComponentActivity() {
                   node.removeAttribute('data-active');
                 });
                 button.setAttribute('data-active', 'true');
-                runTool(tool);
+                onClick(button);
               });
               list.appendChild(button);
+            };
+
+            appendSectionLabel('Runtime');
+            TOOL_DEFS.forEach((tool) => {
+              appendToolButton(tool, () => runTool(tool));
+            });
+
+            appendSectionLabel('DSH Desktop');
+            DSH_SURFACE_DEFS.forEach((surface) => {
+              appendToolButton(surface, (button) => {
+                openDshSurface(surface, () => {
+                  button.removeAttribute('data-active');
+                  panel.dataset.tool = surface.id;
+                  panel.dataset.detailOpen = 'true';
+                  detailTitle.textContent = surface.label;
+                  catalog.replaceChildren();
+                  output.textContent =
+                    surface.label + ' is part of the preserved desktop DSH capability set, ' +
+                    'but this DSH build did not expose a matching navigation control in the current DOM.';
+                  status.textContent = 'Official DSH surface unavailable in current view';
+                });
+              });
             });
 
             panel.append(header, list, detail);
