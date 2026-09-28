@@ -598,6 +598,9 @@ class MainActivity : ComponentActivity() {
         },
         onWorkspacePath = { ShellState.lastWorkspacePath(this) },
         onRememberWorkspacePath = { path -> rememberActiveWorkspacePath(path) },
+        onRunMobileTool = { category, command ->
+          engineManager.runMobileToolRequest(category, command, currentWritableWorkspacePath())
+        },
         pickToken = pickToken,
       ),
       "androidBridge",
@@ -1065,6 +1068,111 @@ class MainActivity : ComponentActivity() {
               flex-direction: column;
               gap: 2px;
               overscroll-behavior: contain;
+            }
+
+            .dsh-tool-detail {
+              min-height: 0;
+              flex: 1 1 auto;
+              display: none;
+              flex-direction: column;
+              overflow: hidden;
+            }
+
+            #dsh-android-tools-panel[data-detail-open="true"] .dsh-tools-list {
+              display: none;
+            }
+
+            #dsh-android-tools-panel[data-detail-open="true"] .dsh-tool-detail {
+              display: flex;
+            }
+
+            .dsh-tool-detail-head {
+              flex: none;
+              padding: 10px 12px;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              border-bottom: 1px solid var(--dsw-alias-border-l3, rgba(0,0,0,.08));
+            }
+
+            #dsh-android-tools-panel .dsh-tool-back,
+            #dsh-android-tools-panel .dsh-tool-refresh,
+            #dsh-android-tools-panel .dsh-tool-run {
+              min-height: 34px;
+              padding: 0 10px;
+              border: 0;
+              border-radius: 8px;
+              background: color-mix(in srgb, currentColor 6%, transparent);
+              color: inherit;
+              font: inherit;
+            }
+
+            #dsh-android-tools-panel .dsh-tool-back:active,
+            #dsh-android-tools-panel .dsh-tool-refresh:active,
+            #dsh-android-tools-panel .dsh-tool-run:active {
+              transform: scale(.98);
+            }
+
+            .dsh-tool-detail-title {
+              min-width: 0;
+              flex: 1 1 auto;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              font-size: 14px;
+              font-weight: 650;
+            }
+
+            .dsh-tool-terminal-row {
+              flex: none;
+              padding: 10px 12px 0;
+              display: none;
+              gap: 8px;
+            }
+
+            #dsh-android-tools-panel[data-tool="terminal"] .dsh-tool-terminal-row {
+              display: flex;
+            }
+
+            .dsh-tool-command {
+              min-width: 0;
+              flex: 1 1 auto;
+              height: 36px;
+              padding: 0 10px;
+              border: 1px solid var(--dsw-alias-border-l3, rgba(0,0,0,.10));
+              border-radius: 8px;
+              background: color-mix(in srgb, currentColor 2%, transparent);
+              color: inherit;
+              font: 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+              outline: none;
+            }
+
+            .dsh-tool-command:focus {
+              border-color: var(--dsw-alias-brand-primary, #4f7cff);
+            }
+
+            .dsh-tool-output {
+              min-height: 0;
+              flex: 1 1 auto;
+              margin: 10px 12px 12px;
+              padding: 12px;
+              overflow: auto;
+              border-radius: 10px;
+              background: color-mix(in srgb, currentColor 5%, transparent);
+              white-space: pre-wrap;
+              word-break: break-word;
+              font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+              user-select: text;
+              -webkit-user-select: text;
+              overscroll-behavior: contain;
+            }
+
+            .dsh-tool-status {
+              flex: none;
+              padding: 0 12px 10px;
+              color: var(--dsw-alias-text-secondary, rgba(0,0,0,.58));
+              font-size: 11px;
+              line-height: 1.35;
             }
 
             #dsh-android-tools-panel .dsh-tool-item {
@@ -2004,6 +2112,109 @@ class MainActivity : ComponentActivity() {
             const list = document.createElement('nav');
             list.className = 'dsh-tools-list';
             list.setAttribute('aria-label', 'Tool categories');
+
+            const detail = document.createElement('section');
+            detail.className = 'dsh-tool-detail';
+
+            const detailHead = document.createElement('div');
+            detailHead.className = 'dsh-tool-detail-head';
+            const back = document.createElement('button');
+            back.type = 'button';
+            back.className = 'dsh-tool-back';
+            back.textContent = 'Back';
+            const detailTitle = document.createElement('div');
+            detailTitle.className = 'dsh-tool-detail-title';
+            const refresh = document.createElement('button');
+            refresh.type = 'button';
+            refresh.className = 'dsh-tool-refresh';
+            refresh.textContent = 'Refresh';
+            detailHead.append(back, detailTitle, refresh);
+
+            const terminalRow = document.createElement('div');
+            terminalRow.className = 'dsh-tool-terminal-row';
+            const command = document.createElement('input');
+            command.className = 'dsh-tool-command';
+            command.type = 'text';
+            command.autocomplete = 'off';
+            command.spellcheck = false;
+            command.placeholder = 'Enter command';
+            const run = document.createElement('button');
+            run.type = 'button';
+            run.className = 'dsh-tool-run';
+            run.textContent = 'Run';
+            terminalRow.append(command, run);
+
+            const output = document.createElement('pre');
+            output.className = 'dsh-tool-output';
+            output.textContent = 'Select a tool.';
+            const status = document.createElement('div');
+            status.className = 'dsh-tool-status';
+            detail.append(detailHead, terminalRow, output, status);
+
+            let activeTool = null;
+            const renderResult = (raw) => {
+              let result;
+              try { result = JSON.parse(raw || '{}'); }
+              catch (_) { result = { ok: false, error: 'Invalid tool response', output: String(raw || '') }; }
+              const lines = [];
+              if (result.cwd) lines.push('cwd: ' + result.cwd);
+              if (Number.isInteger(result.exitCode)) lines.push('exit: ' + result.exitCode);
+              if (result.timedOut) lines.push('timed out');
+              status.textContent = lines.join(' · ');
+              output.textContent = result.output || result.error || (result.ok ? 'Done.' : 'No output.');
+            };
+
+            const runTool = (tool, terminalCommand = '') => {
+              if (!tool) return;
+              activeTool = tool;
+              panel.dataset.tool = tool.id;
+              panel.dataset.detailOpen = 'true';
+              detailTitle.textContent = tool.label;
+              output.textContent = 'Loading…';
+              status.textContent = '';
+              let raw = '';
+              try {
+                raw = window.androidBridge
+                  ? window.androidBridge.runMobileTool(BRIDGE_CAP, tool.id, terminalCommand || '')
+                  : '{"ok":false,"error":"Android bridge unavailable"}';
+              } catch (error) {
+                raw = JSON.stringify({ ok: false, error: String(error) });
+              }
+              renderResult(raw);
+              if (tool.id === 'terminal') {
+                requestAnimationFrame(() => command.focus());
+              }
+            };
+
+            back.addEventListener('click', () => {
+              panel.removeAttribute('data-detail-open');
+              panel.removeAttribute('data-tool');
+              activeTool = null;
+              output.textContent = '';
+              status.textContent = '';
+            });
+            refresh.addEventListener('click', () => {
+              if (!activeTool) return;
+              if (activeTool.id === 'terminal') {
+                status.textContent = 'Run a command to refresh terminal output.';
+                return;
+              }
+              runTool(activeTool);
+            });
+            const submitTerminal = () => {
+              if (!activeTool || activeTool.id !== 'terminal') return;
+              const value = command.value.trim();
+              if (!value) return;
+              runTool(activeTool, value);
+            };
+            run.addEventListener('click', submitTerminal);
+            command.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                submitTerminal();
+              }
+            });
+
             TOOL_DEFS.forEach((tool) => {
               const button = document.createElement('button');
               button.type = 'button';
@@ -2020,14 +2231,12 @@ class MainActivity : ComponentActivity() {
                   node.removeAttribute('data-active');
                 });
                 button.setAttribute('data-active', 'true');
-                window.dispatchEvent(new CustomEvent('dsh-android-tool-selected', {
-                  detail: { id: tool.id, label: tool.label }
-                }));
+                runTool(tool);
               });
               list.appendChild(button);
             });
 
-            panel.append(header, list);
+            panel.append(header, list, detail);
             document.body.appendChild(panel);
           }
 
