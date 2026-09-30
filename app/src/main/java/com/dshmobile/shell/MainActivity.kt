@@ -2455,6 +2455,48 @@ class MainActivity : ComponentActivity() {
                     addStructuredCard(item.subject, item.hash + ' · ' + item.date, 'commit');
                   }
                 }
+              } else if (result.view === 'system') {
+                const browser = result.browser || {};
+                const runtime = result.runtimeEnvironment || {};
+                addStructuredCard(
+                  browser.engine || 'Chromium WebView',
+                  (browser.provider || 'unknown') + (browser.version ? ' · ' + browser.version : ''),
+                  'browser'
+                );
+                if (browser.userAgent) {
+                  addStructuredCard('User-Agent', browser.userAgent, 'browser');
+                }
+                addStructuredCard(
+                  'Browser policy',
+                  [
+                    browser.safeBrowsing ? 'Safe Browsing' : 'Safe Browsing off',
+                    browser.cookies ? 'cookies' : 'cookies off',
+                    browser.thirdPartyCookies ? '3P cookies' : '3P cookies off',
+                    'mixed=' + (browser.mixedContent || 'unknown'),
+                    browser.fileAccess ? 'file access' : 'file access blocked'
+                  ].join(' · '),
+                  'policy'
+                );
+                addStructuredCard(
+                  'Shell / terminal',
+                  (runtime.shell || '') + ' · TERM=' + (runtime.term || '') + ' · ' + (runtime.colorTerm || ''),
+                  'runtime'
+                );
+                addStructuredCard(
+                  'HOME / PREFIX',
+                  (runtime.home || '') + ' · ' + (runtime.prefix || ''),
+                  'runtime'
+                );
+                addStructuredCard(
+                  'XDG',
+                  [
+                    runtime.xdgConfig,
+                    runtime.xdgData,
+                    runtime.xdgState,
+                    runtime.xdgCache
+                  ].filter(Boolean).join(' · '),
+                  'runtime'
+                );
               } else {
                 return false;
               }
