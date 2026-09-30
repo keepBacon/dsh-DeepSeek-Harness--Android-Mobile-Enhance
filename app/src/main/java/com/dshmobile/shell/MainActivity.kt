@@ -403,8 +403,13 @@ class MainActivity : ComponentActivity() {
       builtInZoomControls = true
       displayZoomControls = false
       textZoom = 100
-      userAgentString = "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36 DSH-Android/0.1.1"
+      // Keep Chromium/WebView identity aligned with the provider actually
+      // installed on this device. Hard-coding a future Chrome version makes
+      // feature detection and server-side compatibility less realistic.
+      userAgentString = browserUserAgent(native = false)
+      if (Build.VERSION.SDK_INT >= 26) {
+        safeBrowsingEnabled = true
+      }
       // prefers-color-scheme 跟随系统深色（某些厂商 WebView 默认不跟随；
       // FORCE_DARK_AUTO 让 media query 反映系统深浅，dsh 的"跟随系统"主题依赖它）。
       if (Build.VERSION.SDK_INT >= 29) {
@@ -607,19 +612,40 @@ class MainActivity : ComponentActivity() {
     )
   }
 
+  /**
+   * Chromium identity policy.
+   *
+   * Mobile mode uses the provider's real UA unchanged apart from the DSH
+   * product token. Native mode keeps the real Chromium major/full version but
+   * requests desktop-class responsive behavior. This is a compatibility UA,
+   * not an attempt to fake unavailable browser APIs or CPU features.
+   */
+  private fun browserUserAgent(native: Boolean): String {
+    val real = try { WebSettings.getDefaultUserAgent(this) } catch (_: Throwable) { "" }
+    val providerVersion = try { WebView.getCurrentWebViewPackage()?.versionName.orEmpty() } catch (_: Throwable) { "" }
+    val chromeVersion = Regex("""Chrome/([0-9.]+)""").find(real)?.groupValues?.getOrNull(1)
+      ?: providerVersion.substringBefore('-').takeIf { it.matches(Regex("""[0-9]+(?:\.[0-9]+){1,3}""")) }
+      ?: "0.0.0.0"
+
+    val base = if (native) {
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/$chromeVersion Safari/537.36"
+    } else if (real.isNotBlank()) {
+      real
+    } else {
+      "Mozilla/5.0 (Linux; Android ${Build.VERSION.RELEASE}; Mobile) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/$chromeVersion Mobile Safari/537.36"
+    }
+    return "$base DSH-Android/0.1.1"
+  }
+
   /** Apply persisted WebView viewport/UA policy before the next navigation. */
   private fun applyInterfaceModeSettings() {
     val native = ShellState.interfaceMode(this) == ShellState.UI_MODE_NATIVE
     webView.settings.apply {
       useWideViewPort = native
       loadWithOverviewMode = native
-      userAgentString = if (native) {
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 DSH-Android/0.1.1"
-      } else {
-        "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36 DSH-Android/0.1.1"
-      }
+      userAgentString = browserUserAgent(native)
     }
   }
 
