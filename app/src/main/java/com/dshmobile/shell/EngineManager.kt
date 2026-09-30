@@ -3,6 +3,8 @@ package com.dshmobile.shell
 import android.content.Context
 import android.os.Environment
 import android.util.Log
+import android.webkit.WebSettings
+import android.webkit.WebView
 import java.io.File
 import java.util.concurrent.TimeUnit
 import org.json.JSONArray
@@ -262,15 +264,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
           workspacePath,
           timeoutSeconds = 10,
         )
-        "system" -> runMobileToolShell(
-          normalized,
-          "printf 'Kernel:\\n'; uname -a; printf '\\nIdentity:\\n'; id; " +
-            "printf '\\nStorage:\\n'; df -h .; printf '\\nAndroid:\\n'; " +
-            "getprop ro.product.manufacturer 2>/dev/null; getprop ro.product.model 2>/dev/null; " +
-            "getprop ro.build.version.release 2>/dev/null; getprop ro.build.version.sdk 2>/dev/null",
-          workspacePath,
-          timeoutSeconds = 8,
-        )
+        "system" -> mobileSystemSnapshot(workspacePath)
         else -> JSONObject()
           .put("ok", false)
           .put("category", normalized)
@@ -559,6 +553,57 @@ class EngineManager(private val context: Context, private val pickToken: String?
       .put("branch", branch)
       .put("changes", changes)
       .put("commits", commits)
+      .toString()
+  }
+
+  private fun mobileSystemSnapshot(workspacePath: String?): String {
+    val raw = JSONObject(
+      runMobileToolShell(
+        "system",
+        "printf 'Kernel:\\n'; uname -a; printf '\\nIdentity:\\n'; id; " +
+          "printf '\\nStorage:\\n'; df -h .; printf '\\nRuntime:\\n'; " +
+          "printf 'SHELL=%s\\nTERM=%s\\nCOLORTERM=%s\\nHOME=%s\\nTMPDIR=%s\\n' " +
+          "\"\$SHELL\" \"\$TERM\" \"\$COLORTERM\" \"\$HOME\" \"\$TMPDIR\"; " +
+          "printf 'XDG_CONFIG_HOME=%s\\nXDG_DATA_HOME=%s\\nXDG_STATE_HOME=%s\\nXDG_CACHE_HOME=%s\\n' " +
+          "\"\$XDG_CONFIG_HOME\" \"\$XDG_DATA_HOME\" \"\$XDG_STATE_HOME\" \"\$XDG_CACHE_HOME\"; " +
+          "printf '\\nAndroid:\\n'; getprop ro.product.manufacturer 2>/dev/null; " +
+          "getprop ro.product.model 2>/dev/null; getprop ro.build.version.release 2>/dev/null; " +
+          "getprop ro.build.version.sdk 2>/dev/null",
+        workspacePath,
+        timeoutSeconds = 8,
+      )
+    )
+
+    val provider = try { WebView.getCurrentWebViewPackage() } catch (_: Throwable) { null }
+    val defaultUa = try { WebSettings.getDefaultUserAgent(context) } catch (_: Throwable) { "" }
+    val browser = JSONObject()
+      .put("engine", "Chromium WebView")
+      .put("provider", provider?.packageName ?: "unknown")
+      .put("version", provider?.versionName ?: "")
+      .put("userAgent", defaultUa)
+      .put("javascript", true)
+      .put("domStorage", true)
+      .put("cookies", true)
+      .put("thirdPartyCookies", true)
+      .put("safeBrowsing", true)
+      .put("mixedContent", "never_allow")
+      .put("fileAccess", false)
+
+    val runtime = JSONObject()
+      .put("shell", File(usrDir, "bin/bash").absolutePath)
+      .put("home", homeDir.absolutePath)
+      .put("prefix", usrDir.absolutePath)
+      .put("xdgConfig", File(homeDir, ".config").absolutePath)
+      .put("xdgData", File(homeDir, ".local/share").absolutePath)
+      .put("xdgState", File(homeDir, ".local/state").absolutePath)
+      .put("xdgCache", nodeCacheDir.absolutePath)
+      .put("term", "xterm-256color")
+      .put("colorTerm", "truecolor")
+
+    return raw
+      .put("view", "system")
+      .put("browser", browser)
+      .put("runtimeEnvironment", runtime)
       .toString()
   }
 
@@ -1211,10 +1256,37 @@ class EngineManager(private val context: Context, private val pickToken: String?
   /** Environment used by the DSH web engine and bundled command-line tools. */
   private fun engineEnv(preload: File = preloadBin): Map<String, String> {
     File(homeDir, ".ssh").mkdirs()
+    val xdgConfig = File(homeDir, ".config").apply { mkdirs() }
+    val xdgData = File(homeDir, ".local/share").apply { mkdirs() }
+    val xdgState = File(homeDir, ".local/state").apply { mkdirs() }
+    val runtimeDir = File(homeDir, ".run").apply {
+      mkdirs()
+      try { android.system.Os.chmod(absolutePath, 448) } catch (_: Throwable) {}
+    }
+    val editor = sequenceOf("nvim", "micro", "vi")
+      .map { File(usrDir, "bin/$it") }
+      .firstOrNull { it.isFile }
+      ?.absolutePath
+      ?: File(usrDir, "bin/bash").absolutePath
     val env = mutableMapOf(
       "PATH" to (usrDir.absolutePath + "/libexec/dsh/wrappers:" + usrDir.absolutePath + "/bin:/system/bin"),
       "LD_LIBRARY_PATH" to (usrDir.absolutePath + "/lib"),
       "HOME" to homeDir.absolutePath,
+      "XDG_CONFIG_HOME" to xdgConfig.absolutePath,
+      "XDG_DATA_HOME" to xdgData.absolutePath,
+      "XDG_STATE_HOME" to xdgState.absolutePath,
+      "XDG_RUNTIME_DIR" to runtimeDir.absolutePath,
+      "TERM" to "xterm-256color",
+      "COLORTERM" to "truecolor",
+      "TERM_PROGRAM" to "DSH-Mobile",
+      "TERM_PROGRAM_VERSION" to "0.1.1",
+      "EDITOR" to editor,
+      "VISUAL" to editor,
+      "GIT_EDITOR" to editor,
+      "TMP" to File(homeDir, "tmp").apply { mkdirs() }.absolutePath,
+      "TEMP" to File(homeDir, "tmp").absolutePath,
+      "PYTHONUTF8" to "1",
+      "PYTHONIOENCODING" to "utf-8",
       // Sidebar terminal + model terminal tools must resolve the embedded
       // Android-compatible Bash rather than the app process' empty/default
       // shell. The plugin checks DSH_SIDEBAR_SHELL before $SHELL.
