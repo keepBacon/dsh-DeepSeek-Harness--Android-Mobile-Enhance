@@ -1183,6 +1183,63 @@ class MainActivity : ComponentActivity() {
               overscroll-behavior: contain;
             }
 
+            .dsh-tool-structured {
+              min-height: 0;
+              flex: 1 1 auto;
+              margin: 10px 12px 12px;
+              overflow: auto;
+              display: none;
+              flex-direction: column;
+              gap: 6px;
+              overscroll-behavior: contain;
+            }
+
+            .dsh-tool-structured[data-active="true"] {
+              display: flex;
+            }
+
+            .dsh-structured-card {
+              padding: 9px 10px;
+              border: 1px solid var(--dsw-alias-border-l3, rgba(0,0,0,.08));
+              border-radius: 9px;
+              background: color-mix(in srgb, currentColor 2%, transparent);
+              display: grid;
+              gap: 3px;
+            }
+
+            .dsh-structured-row {
+              display: flex;
+              align-items: baseline;
+              justify-content: space-between;
+              gap: 10px;
+            }
+
+            .dsh-structured-primary {
+              min-width: 0;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              font-size: 13px;
+              line-height: 1.35;
+              font-weight: 600;
+            }
+
+            .dsh-structured-secondary {
+              min-width: 0;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+              color: var(--dsw-alias-text-secondary, rgba(0,0,0,.58));
+              font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            }
+
+            .dsh-structured-meta {
+              flex: none;
+              color: var(--dsw-alias-text-secondary, rgba(0,0,0,.58));
+              font-size: 11px;
+              line-height: 1.3;
+            }
+
             .dsh-tool-status {
               flex: none;
               padding: 0 12px 10px;
@@ -2273,12 +2330,15 @@ class MainActivity : ComponentActivity() {
             const catalog = document.createElement('div');
             catalog.className = 'dsh-tool-catalog';
 
+            const structured = document.createElement('div');
+            structured.className = 'dsh-tool-structured';
+
             const output = document.createElement('pre');
             output.className = 'dsh-tool-output';
             output.textContent = 'Select a tool.';
             const status = document.createElement('div');
             status.className = 'dsh-tool-status';
-            detail.append(detailHead, terminalRow, catalogSummary, catalog, output, status);
+            detail.append(detailHead, terminalRow, catalogSummary, catalog, structured, output, status);
 
             let runtimeCatalog = null;
             try {
@@ -2301,6 +2361,86 @@ class MainActivity : ComponentActivity() {
             }
 
             let activeTool = null;
+
+            const clearStructured = () => {
+              structured.removeAttribute('data-active');
+              structured.replaceChildren();
+              output.style.display = '';
+            };
+
+            const addStructuredCard = (primary, secondary, meta) => {
+              const card = document.createElement('div');
+              card.className = 'dsh-structured-card';
+
+              const row = document.createElement('div');
+              row.className = 'dsh-structured-row';
+              const title = document.createElement('div');
+              title.className = 'dsh-structured-primary';
+              title.textContent = String(primary || '');
+              row.appendChild(title);
+
+              if (meta) {
+                const metaNode = document.createElement('div');
+                metaNode.className = 'dsh-structured-meta';
+                metaNode.textContent = String(meta);
+                row.appendChild(metaNode);
+              }
+              card.appendChild(row);
+
+              if (secondary) {
+                const sub = document.createElement('div');
+                sub.className = 'dsh-structured-secondary';
+                sub.textContent = String(secondary);
+                card.appendChild(sub);
+              }
+              structured.appendChild(card);
+            };
+
+            const renderStructured = (result) => {
+              if (!result || !result.view) return false;
+              const items = Array.isArray(result.items) ? result.items : [];
+              structured.replaceChildren();
+
+              if (result.view === 'files') {
+                for (const item of items) {
+                  const size = item.kind === 'file' ? String(item.size || 0) + ' B' : item.kind;
+                  addStructuredCard(item.name, item.kind, size);
+                }
+              } else if (result.view === 'processes') {
+                for (const item of items) {
+                  const secondary = [item.user, item.state, item.elapsed, item.args].filter(Boolean).join(' · ');
+                  addStructuredCard(item.name || ('PID ' + item.pid), secondary, 'PID ' + item.pid);
+                }
+              } else if (result.view === 'packages') {
+                for (const item of items) {
+                  addStructuredCard(item.name, item.version, '');
+                }
+              } else if (result.view === 'git') {
+                if (result.root || result.branch) {
+                  addStructuredCard(result.branch || 'detached HEAD', result.root || '', 'repository');
+                }
+                if (Array.isArray(result.changes)) {
+                  for (const item of result.changes) {
+                    addStructuredCard(item.path, item.code, 'change');
+                  }
+                }
+                if (Array.isArray(result.commits)) {
+                  for (const item of result.commits) {
+                    addStructuredCard(item.subject, item.hash + ' · ' + item.date, 'commit');
+                  }
+                }
+              } else {
+                return false;
+              }
+
+              if (!structured.children.length) {
+                addStructuredCard('No items', 'Nothing to display.', '');
+              }
+              structured.setAttribute('data-active', 'true');
+              output.style.display = 'none';
+              return true;
+            };
+
             const renderResult = (raw) => {
               let result;
               try { result = JSON.parse(raw || '{}'); }
@@ -2309,8 +2449,13 @@ class MainActivity : ComponentActivity() {
               if (result.cwd) lines.push('cwd: ' + result.cwd);
               if (Number.isInteger(result.exitCode)) lines.push('exit: ' + result.exitCode);
               if (result.timedOut) lines.push('timed out');
+              if (Number.isInteger(result.count)) lines.push('items: ' + result.count);
               status.textContent = lines.join(' · ');
-              output.textContent = result.output || result.error || (result.ok ? 'Done.' : 'No output.');
+
+              clearStructured();
+              if (!renderStructured(result)) {
+                output.textContent = result.output || result.error || (result.ok ? 'Done.' : 'No output.');
+              }
             };
 
             const renderCatalog = (tool) => {
@@ -2373,6 +2518,7 @@ class MainActivity : ComponentActivity() {
               panel.removeAttribute('data-tool');
               activeTool = null;
               catalog.replaceChildren();
+              clearStructured();
               output.textContent = '';
               status.textContent = '';
             });

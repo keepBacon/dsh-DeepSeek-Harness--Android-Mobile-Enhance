@@ -252,26 +252,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
           }
         }
         "files" -> mobileFilesSnapshot(workspacePath)
-        "processes" -> runMobileToolShell(
-          normalized,
-          "ps -A -o PID,PPID,USER,STAT,ETIME,NAME,ARGS 2>/dev/null || ps -A",
-          workspacePath,
-          timeoutSeconds = 8,
-        )
-        "packages" -> runMobileToolShell(
-          normalized,
-          "dpkg-query -W -f='\${binary:Package}\\t\${Version}\\n' 2>/dev/null | sort | head -n 600",
-          workspacePath,
-          timeoutSeconds = 12,
-        )
-        "git" -> runMobileToolShell(
-          normalized,
-          "git rev-parse --show-toplevel 2>/dev/null || { echo 'Not a Git repository.'; exit 2; }; " +
-            "git status --short --branch; printf '\\nRecent commits:\\n'; " +
-            "git log -8 --date=short --pretty=format:'%h  %ad  %s' 2>/dev/null || true",
-          workspacePath,
-          timeoutSeconds = 10,
-        )
+        "processes" -> mobileProcessesSnapshot(workspacePath)
+        "packages" -> mobilePackagesSnapshot(workspacePath)
+        "git" -> mobileGitSnapshot(workspacePath)
         "network" -> runMobileToolShell(
           normalized,
           "(ip -brief addr 2>&1 || ifconfig 2>&1); printf '\\nSockets:\\n'; " +
@@ -436,12 +419,146 @@ class EngineManager(private val context: Context, private val pickToken: String?
       }
       if (all.size > limit) append("\n… ").append(all.size - limit).append(" more entries")
     }
+    val items = JSONArray()
+    for (entry in all.take(limit)) {
+      val kind = when {
+        java.nio.file.Files.isSymbolicLink(entry.toPath()) -> "link"
+        entry.isDirectory -> "directory"
+        else -> "file"
+      }
+      items.put(
+        JSONObject()
+          .put("name", entry.name)
+          .put("kind", kind)
+          .put("size", if (entry.isFile) entry.length() else 0L)
+          .put("modified", entry.lastModified())
+          .put("hidden", entry.name.startsWith("."))
+      )
+    }
+
     return JSONObject()
       .put("ok", true)
       .put("category", "files")
+      .put("view", "files")
       .put("cwd", cwd.absolutePath)
       .put("exitCode", 0)
+      .put("count", all.size)
+      .put("truncated", all.size > limit)
+      .put("items", items)
       .put("output", output)
+      .toString()
+  }
+
+  private fun mobileProcessesSnapshot(workspacePath: String?): String {
+    val raw = JSONObject(
+      runMobileToolShell(
+        "processes",
+        "ps -A -o PID,PPID,USER,STAT,ETIME,NAME,ARGS 2>/dev/null || ps -A",
+        workspacePath,
+        timeoutSeconds = 8,
+      )
+    )
+    if (!raw.optBoolean("ok", false)) return raw.toString()
+
+    val rows = JSONArray()
+    for (line in raw.optString("output").lineSequence()) {
+      val trimmed = line.trim()
+      if (trimmed.isEmpty() || trimmed.startsWith("PID ")) continue
+      val parts = trimmed.split(Regex("""\s+"""), limit = 7)
+      if (parts.size < 6 || parts[0].toIntOrNull() == null) continue
+      rows.put(
+        JSONObject()
+          .put("pid", parts[0].toInt())
+          .put("ppid", parts.getOrElse(1) { "" })
+          .put("user", parts.getOrElse(2) { "" })
+          .put("state", parts.getOrElse(3) { "" })
+          .put("elapsed", parts.getOrElse(4) { "" })
+          .put("name", parts.getOrElse(5) { "" })
+          .put("args", parts.getOrElse(6) { "" })
+      )
+      if (rows.length() >= 400) break
+    }
+    return raw
+      .put("view", "processes")
+      .put("count", rows.length())
+      .put("items", rows)
+      .toString()
+  }
+
+  private fun mobilePackagesSnapshot(workspacePath: String?): String {
+    val raw = JSONObject(
+      runMobileToolShell(
+        "packages",
+        "dpkg-query -W -f='\${binary:Package}\\t\${Version}\\n' 2>/dev/null | sort | head -n 600",
+        workspacePath,
+        timeoutSeconds = 12,
+      )
+    )
+    if (!raw.optBoolean("ok", false)) return raw.toString()
+
+    val rows = JSONArray()
+    for (line in raw.optString("output").lineSequence()) {
+      val tab = line.indexOf('\t')
+      if (tab <= 0) continue
+      rows.put(
+        JSONObject()
+          .put("name", line.substring(0, tab))
+          .put("version", line.substring(tab + 1))
+      )
+    }
+    return raw
+      .put("view", "packages")
+      .put("count", rows.length())
+      .put("items", rows)
+      .toString()
+  }
+
+  private fun mobileGitSnapshot(workspacePath: String?): String {
+    val script =
+      "root=\"\$(git rev-parse --show-toplevel 2>/dev/null)\" || { echo 'Not a Git repository.'; exit 2; }; " +
+        "printf '__DSH_ROOT__\\t%s\\n' \"\$root\"; " +
+        "printf '__DSH_BRANCH__\\t'; git branch --show-current 2>/dev/null; " +
+        "printf '__DSH_STATUS__\\n'; git status --porcelain=v1 2>/dev/null; " +
+        "printf '__DSH_LOG__\\n'; git log -12 --date=short --pretty=format:'%h%x09%ad%x09%s' 2>/dev/null || true"
+    val raw = JSONObject(runMobileToolShell("git", script, workspacePath, timeoutSeconds = 10))
+    if (!raw.optBoolean("ok", false)) return raw.toString()
+
+    var root = ""
+    var branch = ""
+    var section = ""
+    val changes = JSONArray()
+    val commits = JSONArray()
+    for (line in raw.optString("output").lineSequence()) {
+      when {
+        line.startsWith("__DSH_ROOT__\t") -> root = line.substringAfter('\t')
+        line.startsWith("__DSH_BRANCH__\t") -> branch = line.substringAfter('\t')
+        line == "__DSH_STATUS__" -> section = "status"
+        line == "__DSH_LOG__" -> section = "log"
+        section == "status" && line.isNotBlank() -> {
+          val code = line.take(2)
+          val path = line.drop(3).trim()
+          changes.put(JSONObject().put("code", code).put("path", path))
+        }
+        section == "log" && line.isNotBlank() -> {
+          val parts = line.split('\t', limit = 3)
+          if (parts.size == 3) {
+            commits.put(
+              JSONObject()
+                .put("hash", parts[0])
+                .put("date", parts[1])
+                .put("subject", parts[2])
+            )
+          }
+        }
+      }
+    }
+
+    return raw
+      .put("view", "git")
+      .put("root", root)
+      .put("branch", branch)
+      .put("changes", changes)
+      .put("commits", commits)
       .toString()
   }
 
