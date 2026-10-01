@@ -257,13 +257,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
         "processes" -> mobileProcessesSnapshot(workspacePath)
         "packages" -> mobilePackagesSnapshot(workspacePath)
         "git" -> mobileGitSnapshot(workspacePath)
-        "network" -> runMobileToolShell(
-          normalized,
-          "(ip -brief addr 2>&1 || ifconfig 2>&1); printf '\\nSockets:\\n'; " +
-            "ss -tun 2>&1 | head -n 240",
-          workspacePath,
-          timeoutSeconds = 10,
-        )
+        "network" -> mobileNetworkSnapshot(workspacePath)
+        "network-service-start" -> startLocalDevServer(command, workspacePath)
+        "network-service-stop" -> stopLocalDevServer()
         "system" -> mobileSystemSnapshot(workspacePath)
         else -> JSONObject()
           .put("ok", false)
@@ -554,6 +550,182 @@ class EngineManager(private val context: Context, private val pickToken: String?
       .put("changes", changes)
       .put("commits", commits)
       .toString()
+  }
+
+  private fun mobileNetworkSnapshot(workspacePath: String?): String {
+    val raw = JSONObject(
+      runMobileToolShell(
+        "network",
+        "printf '__DSH_ADDR__\\n'; (ip -brief addr 2>/dev/null || ifconfig 2>/dev/null); " +
+          "printf '__DSH_LISTEN__\\n'; (ss -ltnp 2>/dev/null || ss -ltn 2>/dev/null || true)",
+        workspacePath,
+        timeoutSeconds = 10,
+      )
+    )
+
+    val interfaces = JSONArray()
+    val listeners = JSONArray()
+    var section = ""
+    for (line in raw.optString("output").lineSequence()) {
+      when (line.trim()) {
+        "__DSH_ADDR__" -> { section = "addr"; continue }
+        "__DSH_LISTEN__" -> { section = "listen"; continue }
+      }
+      val trimmed = line.trim()
+      if (trimmed.isEmpty()) continue
+      if (section == "addr") {
+        val parts = trimmed.split(Regex("""\s+"""), limit = 3)
+        if (parts.isNotEmpty()) {
+          interfaces.put(
+            JSONObject()
+              .put("name", parts.getOrElse(0) { "" })
+              .put("state", parts.getOrElse(1) { "" })
+              .put("addresses", parts.getOrElse(2) { "" })
+          )
+        }
+      } else if (section == "listen") {
+        if (trimmed.startsWith("State ") || trimmed.startsWith("Netid ")) continue
+        val parts = trimmed.split(Regex("""\s+"""), limit = 7)
+        if (parts.size < 4) continue
+        val local = parts.getOrElse(3) { "" }
+        val match = Regex("""^(.*):(\d+)$""").find(local) ?: continue
+        val host = match.groupValues[1].trim('[', ']')
+        val port = match.groupValues[2].toIntOrNull() ?: continue
+        listeners.put(
+          JSONObject()
+            .put("protocol", "tcp")
+            .put("state", parts.getOrElse(0) { "" })
+            .put("host", host)
+            .put("port", port)
+            .put("local", local)
+            .put("process", parts.getOrElse(6) { "" })
+            .put("loopback", host == "127.0.0.1" || host == "::1" || host == "localhost")
+        )
+      }
+    }
+
+    val process = DEV_SERVER_PROCESS.get()
+    val alive = try { process?.isAlive == true } catch (_: Throwable) { false }
+    if (!alive && process != null) {
+      DEV_SERVER_PROCESS.compareAndSet(process, null)
+      DEV_SERVER_PORT.set(0)
+      DEV_SERVER_ROOT.set("")
+    }
+    val port = if (alive) DEV_SERVER_PORT.get() else 0
+    val devServer = JSONObject()
+      .put("running", alive)
+      .put("port", port)
+      .put("url", if (alive && port > 0) "http://127.0.0.1:$port/" else "")
+      .put("root", if (alive) DEV_SERVER_ROOT.get() else "")
+
+    return raw
+      .put("view", "network")
+      .put("interfaces", interfaces)
+      .put("listeners", listeners)
+      .put("count", listeners.length())
+      .put("devServer", devServer)
+      .toString()
+  }
+
+  private fun startLocalDevServer(portText: String, workspacePath: String?): String {
+    val port = portText.trim().toIntOrNull()
+      ?: return JSONObject().put("ok", false).put("category", "network").put("error", "Invalid port").toString()
+    if (port !in 1024..65535) {
+      return JSONObject().put("ok", false).put("category", "network").put("error", "Port must be 1024-65535").toString()
+    }
+
+    val cwd = mobileToolCwd(workspacePath)
+    if (workspacePath.isNullOrBlank() || !cwd.isDirectory) {
+      return JSONObject().put("ok", false).put("category", "network").put("error", "No active workspace").toString()
+    }
+
+    val current = DEV_SERVER_PROCESS.get()
+    if (try { current?.isAlive == true } catch (_: Throwable) { false }) {
+      val currentPort = DEV_SERVER_PORT.get()
+      return JSONObject()
+        .put("ok", false)
+        .put("category", "network")
+        .put("error", "Local dev server already running on port $currentPort")
+        .toString()
+    }
+
+    val termuxRun = File(usrDir, "libexec/dsh/termux-run")
+    if (!termuxRun.isFile) {
+      return JSONObject().put("ok", false).put("category", "network").put("error", "Embedded Termux runner is unavailable").toString()
+    }
+
+    val logDir = File(homeDir, ".dsh-mobile").apply { mkdirs() }
+    val log = File(logDir, "dev-server.log")
+    return try {
+      if (log.length() > 512 * 1024) log.writeText("")
+      val builder = ProcessBuilder(
+        termuxRun.absolutePath,
+        "python3",
+        "-m",
+        "http.server",
+        port.toString(),
+        "--bind",
+        "127.0.0.1",
+      )
+      builder.environment().putAll(engineEnv(preloadBin))
+      builder.directory(cwd)
+      builder.redirectErrorStream(true)
+      builder.redirectOutput(ProcessBuilder.Redirect.appendTo(log))
+      val process = builder.start()
+      if (process.waitFor(450, TimeUnit.MILLISECONDS)) {
+        val tail = try { log.readText().takeLast(2000) } catch (_: Throwable) { "" }
+        JSONObject()
+          .put("ok", false)
+          .put("category", "network")
+          .put("error", "Local dev server exited immediately")
+          .put("output", tail)
+          .toString()
+      } else {
+        DEV_SERVER_PROCESS.set(process)
+        DEV_SERVER_PORT.set(port)
+        DEV_SERVER_ROOT.set(cwd.absolutePath)
+        JSONObject()
+          .put("ok", true)
+          .put("category", "network")
+          .put("url", "http://127.0.0.1:$port/")
+          .put("port", port)
+          .put("root", cwd.absolutePath)
+          .put("output", "Local Python HTTP server started on 127.0.0.1:$port")
+          .toString()
+      }
+    } catch (t: Throwable) {
+      JSONObject()
+        .put("ok", false)
+        .put("category", "network")
+        .put("error", t.message ?: t.javaClass.simpleName)
+        .toString()
+    }
+  }
+
+  private fun stopLocalDevServer(): String {
+    val process = DEV_SERVER_PROCESS.getAndSet(null)
+    val port = DEV_SERVER_PORT.getAndSet(0)
+    DEV_SERVER_ROOT.set("")
+    if (process == null) {
+      return JSONObject().put("ok", true).put("category", "network").put("output", "No managed dev server is running").toString()
+    }
+    return try {
+      if (process.isAlive) {
+        process.destroy()
+        if (!process.waitFor(1200, TimeUnit.MILLISECONDS) && process.isAlive) process.destroyForcibly()
+      }
+      JSONObject()
+        .put("ok", true)
+        .put("category", "network")
+        .put("output", "Stopped local dev server on port $port")
+        .toString()
+    } catch (t: Throwable) {
+      JSONObject()
+        .put("ok", false)
+        .put("category", "network")
+        .put("error", t.message ?: t.javaClass.simpleName)
+        .toString()
+    }
   }
 
   private fun mobileSystemSnapshot(workspacePath: String?): String {
@@ -2404,6 +2576,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
      * PID to coordinate lifecycle operations.
      */
     private val ACTIVE_PROCESS = java.util.concurrent.atomic.AtomicReference<Process?>(null)
+
+    /** One managed localhost dev server for browser-preview workflows. */
+    private val DEV_SERVER_PROCESS = java.util.concurrent.atomic.AtomicReference<Process?>(null)
+    private val DEV_SERVER_PORT = java.util.concurrent.atomic.AtomicInteger(0)
+    private val DEV_SERVER_ROOT = java.util.concurrent.atomic.AtomicReference("")
 
     /** Last preflight/launch error surfaced on the standalone recovery screen. */
     @Volatile
