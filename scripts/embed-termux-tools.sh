@@ -258,11 +258,12 @@ dsh_materialize_host_entrypoint() {
     fi
   fi
 
-  rm -f -- "$dest"
   if [ "$mapped" = "$dest" ]; then
-    # Non-symlink command whose final path is already the requested path.
+    # Direct executable: the final target was copied exactly to the requested
+    # path. Keep it in place. Do NOT remove it before validation.
     :
   else
+    rm -f -- "$dest"
     relative="$(realpath -m --relative-to="$(dirname "$dest")" "$mapped")"
     ln -s "$relative" "$dest"
   fi
