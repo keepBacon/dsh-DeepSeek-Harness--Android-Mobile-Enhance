@@ -284,6 +284,54 @@ dsh_materialize_required_host_entrypoints() {
   echo "[DSH] Required Termux entrypoint materialization: OK"
 }
 
+dsh_validate_host_entrypoint_stageability() {
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local fail=0 spec cmd owner mode src resolved actual_owner
+
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r cmd owner mode <<< "$spec"
+    src="$host_prefix/bin/$cmd"
+    if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+      echo "[DSH] Early entrypoint preflight missing: $src (catalog provider: $owner)" >&2
+      fail=1
+      continue
+    fi
+    if [ ! -x "$src" ]; then
+      echo "[DSH] Early entrypoint preflight not executable: $src" >&2
+      fail=1
+      continue
+    fi
+
+    resolved="$(realpath -e "$src" 2>/dev/null || true)"
+    if [ -z "$resolved" ]; then
+      echo "[DSH] Early entrypoint preflight unresolved/broken link: $src" >&2
+      fail=1
+      continue
+    fi
+    case "$resolved" in
+      "$host_prefix"/*) ;;
+      *)
+        echo "[DSH] Early entrypoint preflight escapes Termux prefix: $src -> $resolved" >&2
+        fail=1
+        continue
+        ;;
+    esac
+
+    actual_owner="$(dsh_host_tool_owner "$cmd" || true)"
+    if [ -z "$actual_owner" ]; then
+      echo "[DSH] Early entrypoint preflight cannot resolve dpkg owner: $cmd -> $resolved" >&2
+      fail=1
+      continue
+    fi
+  done
+
+  [ "$fail" -eq 0 ] || {
+    echo "[DSH] Early Termux entrypoint stageability preflight failed before package overlay." >&2
+    return 7
+  }
+  echo "[DSH] Early Termux entrypoint stageability: OK (${#DSH_TERMUX_REQUIRED_TOOL_SPECS[@]} commands)"
+}
+
 dsh_validate_host_tool_contract() {
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local fail=0 spec cmd owner mode actual_owner
@@ -657,6 +705,7 @@ dsh_preflight_termux_tool_packages() {
   done
 
   dsh_validate_host_tool_contract || return 7
+  dsh_validate_host_entrypoint_stageability || return 7
   dsh_repair_broken_host_dynamic_tools || return 7
   dsh_host_required_tool_smoke || return 7
   DSH_TERMUX_TOOL_PREFLIGHT_DONE=1
