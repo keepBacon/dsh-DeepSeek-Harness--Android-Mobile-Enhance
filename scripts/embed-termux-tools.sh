@@ -198,8 +198,138 @@ dsh_host_tool_owner() {
   local cmd="$1"
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local path="$host_prefix/bin/$cmd"
-  [ -e "$path" ] || return 1
-  dpkg-query -S "$path" 2>/dev/null     | head -n 1     | sed -E 's/: .*//; s/:([^:]*)$//'
+  local resolved owner
+  [ -e "$path" ] || [ -L "$path" ] || return 1
+
+  owner="$(dpkg-query -S "$path" 2>/dev/null | head -n 1 | sed -E 's/: .*//; s/:([^:]*)$//' || true)"
+  if [ -z "$owner" ]; then
+    resolved="$(realpath -e "$path" 2>/dev/null || true)"
+    if [ -n "$resolved" ] && [ "$resolved" != "$path" ]; then
+      owner="$(dpkg-query -S "$resolved" 2>/dev/null | head -n 1 | sed -E 's/: .*//; s/:([^:]*)$//' || true)"
+    fi
+  fi
+  [ -n "$owner" ] || return 1
+  printf '%s\n' "$owner"
+}
+
+dsh_materialize_host_entrypoint() {
+  local stage="$1" cmd="$2"
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local src="$host_prefix/bin/$cmd"
+  local dest="$stage/usr/bin/$cmd"
+  local target resolved mapped relative
+
+  [ -x "$dest" ] && return 0
+  [ -e "$src" ] || [ -L "$src" ] || {
+    echo "[DSH] Cannot materialize missing host entrypoint: $cmd ($src)" >&2
+    return 7
+  }
+
+  mkdir -p "$(dirname "$dest")"
+  rm -f -- "$dest"
+
+  if [ -L "$src" ]; then
+    resolved="$(realpath -e "$src" 2>/dev/null || true)"
+    if [ -n "$resolved" ] && [[ "$resolved" = "$host_prefix"/* ]]; then
+      mapped="$stage/usr/${resolved#"$host_prefix"/}"
+      if [ ! -e "$mapped" ] && [ ! -L "$mapped" ]; then
+        mkdir -p "$(dirname "$mapped")"
+        cp -pL -- "$resolved" "$mapped"
+        chmod --reference="$resolved" "$mapped" 2>/dev/null || true
+        if declare -F copy_link_deps >/dev/null 2>&1; then
+          copy_link_deps "$resolved" "$stage/usr/lib"
+        fi
+      fi
+    fi
+
+    target="$(readlink "$src")"
+    if [[ "$target" = "$host_prefix"/* ]]; then
+      mapped="$stage/usr/${target#"$host_prefix"/}"
+      relative="$(realpath -m --relative-to="$(dirname "$dest")" "$mapped")"
+      ln -s "$relative" "$dest"
+    else
+      ln -s "$target" "$dest"
+    fi
+  elif [ -f "$src" ]; then
+    cp -p -- "$src" "$dest"
+    if declare -F copy_link_deps >/dev/null 2>&1; then
+      copy_link_deps "$src" "$stage/usr/lib"
+    fi
+  else
+    echo "[DSH] Host entrypoint is not a file/symlink: $src" >&2
+    return 7
+  fi
+
+  [ -x "$dest" ] || {
+    echo "[DSH] Materialized entrypoint is not executable: $dest" >&2
+    return 7
+  }
+  echo "[DSH] Materialized host entrypoint: $cmd"
+}
+
+dsh_materialize_required_host_entrypoints() {
+  local stage="$1"
+  local spec cmd owner mode fail=0
+
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r cmd owner mode <<< "$spec"
+    [ -x "$stage/usr/bin/$cmd" ] && continue
+    dsh_materialize_host_entrypoint "$stage" "$cmd" || fail=1
+  done
+
+  [ "$fail" -eq 0 ] || {
+    echo "[DSH] Failed to materialize one or more required Termux entrypoints." >&2
+    return 7
+  }
+  echo "[DSH] Required Termux entrypoint materialization: OK"
+}
+
+dsh_validate_host_entrypoint_stageability() {
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local fail=0 spec cmd owner mode src resolved actual_owner
+
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r cmd owner mode <<< "$spec"
+    src="$host_prefix/bin/$cmd"
+    if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+      echo "[DSH] Early entrypoint preflight missing: $src (catalog provider: $owner)" >&2
+      fail=1
+      continue
+    fi
+    if [ ! -x "$src" ]; then
+      echo "[DSH] Early entrypoint preflight not executable: $src" >&2
+      fail=1
+      continue
+    fi
+
+    resolved="$(realpath -e "$src" 2>/dev/null || true)"
+    if [ -z "$resolved" ]; then
+      echo "[DSH] Early entrypoint preflight unresolved/broken link: $src" >&2
+      fail=1
+      continue
+    fi
+    case "$resolved" in
+      "$host_prefix"/*) ;;
+      *)
+        echo "[DSH] Early entrypoint preflight escapes Termux prefix: $src -> $resolved" >&2
+        fail=1
+        continue
+        ;;
+    esac
+
+    actual_owner="$(dsh_host_tool_owner "$cmd" || true)"
+    if [ -z "$actual_owner" ]; then
+      echo "[DSH] Early entrypoint preflight cannot resolve dpkg owner: $cmd -> $resolved" >&2
+      fail=1
+      continue
+    fi
+  done
+
+  [ "$fail" -eq 0 ] || {
+    echo "[DSH] Early Termux entrypoint stageability preflight failed before package overlay." >&2
+    return 7
+  }
+  echo "[DSH] Early Termux entrypoint stageability: OK (${#DSH_TERMUX_REQUIRED_TOOL_SPECS[@]} commands)"
 }
 
 dsh_validate_host_tool_contract() {
@@ -575,6 +705,7 @@ dsh_preflight_termux_tool_packages() {
   done
 
   dsh_validate_host_tool_contract || return 7
+  dsh_validate_host_entrypoint_stageability || return 7
   dsh_repair_broken_host_dynamic_tools || return 7
   dsh_host_required_tool_smoke || return 7
   DSH_TERMUX_TOOL_PREFLIGHT_DONE=1
@@ -770,6 +901,13 @@ EOF_TERMUX_WRAPPER
 
   dsh_sync_staged_dynamic_abi "$stage" || return 7
   dsh_validate_staged_dynamic_abi "$stage" || return 7
+
+  # dpkg-query -L only contains package-owned payload files. Termux may expose
+  # additional command names through alternatives/provides/postinst symlinks
+  # (for example netcat-openbsd installs netcat-openbsd while the host exposes
+  # nc). Recreate every missing host entrypoint generically before the payload
+  # contract so command aliases cannot disappear from the APK staging tree.
+  dsh_materialize_required_host_entrypoints "$stage" || return 7
 
   # Validate package contents immediately. Do not spend minutes compiling
   # node-pty only to discover that a requested Termux subpackage did not
