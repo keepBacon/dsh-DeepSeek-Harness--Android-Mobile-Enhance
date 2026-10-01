@@ -90,6 +90,31 @@ jobs:
           check ffmpeg -version
           check exiftool -ver
 
+      - name: Termux generated-entrypoint staging contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/dsh-termux-tool-catalog.sh
+          source scripts/embed-termux-tools.sh
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          fake_prefix="$tmp/host/usr"
+          stage="$tmp/stage"
+          mkdir -p "$fake_prefix/bin" "$stage/usr/bin" "$stage/usr/lib"
+          cat >"$fake_prefix/bin/netcat-openbsd" <<'EOF'
+          #!/usr/bin/env bash
+          printf 'netcat-openbsd\n'
+          EOF
+          chmod +x "$fake_prefix/bin/netcat-openbsd"
+          ln -s netcat-openbsd "$fake_prefix/bin/nc"
+
+          PREFIX="$fake_prefix" dsh_materialize_host_entrypoint "$stage" nc
+          test -L "$stage/usr/bin/nc"
+          test -x "$stage/usr/bin/nc"
+          test -x "$stage/usr/bin/netcat-openbsd"
+          test "$(readlink "$stage/usr/bin/nc")" = "netcat-openbsd"
+          test "$("$stage/usr/bin/nc")" = "netcat-openbsd"
+
       - name: Validate Android patches against published DSH 0.1.5-rc.2
         shell: bash
         run: |
