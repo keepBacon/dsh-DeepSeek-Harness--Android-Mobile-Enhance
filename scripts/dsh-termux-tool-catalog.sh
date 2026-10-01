@@ -72,7 +72,7 @@ DSH_TERMUX_REQUIRED_TOOL_SPECS=(
   "lazygit|lazygit|long"
   "tig|tig|long"
   "htop|htop|long"
-  "btop|btop|long"
+  "btop|btop|android-root-conditional"
   "lsof|lsof|short-v"
   "tree|tree|long"
   "rsync|rsync|long"

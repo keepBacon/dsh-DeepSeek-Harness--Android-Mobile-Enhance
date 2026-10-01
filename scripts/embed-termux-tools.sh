@@ -383,6 +383,20 @@ dsh_run_tool_smoke() {
       set -e
       [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]
       ;;
+    android-root-conditional)
+      set +e
+      "${prefix[@]}" "$bin" --version >"$log" 2>&1
+      rc=$?
+      set -e
+      if [ "$rc" -eq 0 ]; then
+        return 0
+      fi
+      if grep -Eqi 'Termux.*without root|without root.*Termux|can.t do anything useful.*without root' "$log"; then
+        echo "[DSH] $cmd is installed and starts, but this Termux build requires root for useful runtime access." >>"$log"
+        return 0
+      fi
+      return "$rc"
+      ;;
     *) echo "[DSH] Unknown smoke mode '$mode' for $cmd" >"$log"; return 64 ;;
   esac
 }
