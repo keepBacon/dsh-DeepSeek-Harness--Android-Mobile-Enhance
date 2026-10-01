@@ -213,11 +213,11 @@ dsh_host_tool_owner() {
 }
 
 dsh_materialize_host_entrypoint() {
-  local stage="$1" cmd="$2"
+  local stage="$1" cmd="$2" copy_deps="${3:-1}"
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local src="$host_prefix/bin/$cmd"
   local dest="$stage/usr/bin/$cmd"
-  local target resolved mapped relative
+  local resolved mapped relative
 
   [ -x "$dest" ] && return 0
   [ -e "$src" ] || [ -L "$src" ] || {
@@ -225,46 +225,57 @@ dsh_materialize_host_entrypoint() {
     return 7
   }
 
-  mkdir -p "$(dirname "$dest")"
-  rm -f -- "$dest"
-
-  if [ -L "$src" ]; then
-    resolved="$(realpath -e "$src" 2>/dev/null || true)"
-    if [ -n "$resolved" ] && [[ "$resolved" = "$host_prefix"/* ]]; then
-      mapped="$stage/usr/${resolved#"$host_prefix"/}"
-      if [ ! -e "$mapped" ] && [ ! -L "$mapped" ]; then
-        mkdir -p "$(dirname "$mapped")"
-        cp -pL -- "$resolved" "$mapped"
-        chmod --reference="$resolved" "$mapped" 2>/dev/null || true
-        if declare -F copy_link_deps >/dev/null 2>&1; then
-          copy_link_deps "$resolved" "$stage/usr/lib"
-        fi
-      fi
-    fi
-
-    target="$(readlink "$src")"
-    if [[ "$target" = "$host_prefix"/* ]]; then
-      mapped="$stage/usr/${target#"$host_prefix"/}"
-      relative="$(realpath -m --relative-to="$(dirname "$dest")" "$mapped")"
-      ln -s "$relative" "$dest"
-    else
-      ln -s "$target" "$dest"
-    fi
-  elif [ -f "$src" ]; then
-    cp -p -- "$src" "$dest"
-    if declare -F copy_link_deps >/dev/null 2>&1; then
-      copy_link_deps "$src" "$stage/usr/lib"
-    fi
-  else
-    echo "[DSH] Host entrypoint is not a file/symlink: $src" >&2
+  resolved="$(realpath -e "$src" 2>/dev/null || true)"
+  if [ -z "$resolved" ]; then
+    echo "[DSH] Cannot resolve host entrypoint chain: $cmd ($src)" >&2
+    return 7
+  fi
+  case "$resolved" in
+    "$host_prefix"/*) ;;
+    *)
+      echo "[DSH] Host entrypoint resolves outside Termux prefix: $cmd -> $resolved" >&2
+      return 7
+      ;;
+  esac
+  if [ ! -f "$resolved" ] || [ ! -x "$resolved" ]; then
+    echo "[DSH] Final host entrypoint target is not executable: $cmd -> $resolved" >&2
     return 7
   fi
 
-  [ -x "$dest" ] || {
+  mapped="$stage/usr/${resolved#"$host_prefix"/}"
+  mkdir -p "$(dirname "$mapped")" "$(dirname "$dest")"
+
+  # Always stage the FINAL resolved target. This intentionally flattens
+  # alternatives/postinst symlink chains such as:
+  #   bin/nc -> etc/alternatives/nc -> bin/netcat-openbsd
+  # so the APK never depends on a host-only intermediate symlink.
+  if [ ! -x "$mapped" ]; then
+    rm -rf -- "$mapped"
+    cp -pL -- "$resolved" "$mapped"
+    chmod --reference="$resolved" "$mapped" 2>/dev/null || chmod 0755 "$mapped" || true
+    if [ "$copy_deps" = "1" ] && declare -F copy_link_deps >/dev/null 2>&1; then
+      copy_link_deps "$resolved" "$stage/usr/lib"
+    fi
+  fi
+
+  rm -f -- "$dest"
+  if [ "$mapped" = "$dest" ]; then
+    # Non-symlink command whose final path is already the requested path.
+    :
+  else
+    relative="$(realpath -m --relative-to="$(dirname "$dest")" "$mapped")"
+    ln -s "$relative" "$dest"
+  fi
+
+  if [ ! -x "$dest" ]; then
     echo "[DSH] Materialized entrypoint is not executable: $dest" >&2
+    echo "[DSH]   host: $src" >&2
+    echo "[DSH]   final: $resolved" >&2
+    echo "[DSH]   staged-final: $mapped" >&2
+    [ -L "$dest" ] && echo "[DSH]   staged-link: $(readlink "$dest")" >&2 || true
     return 7
-  }
-  echo "[DSH] Materialized host entrypoint: $cmd"
+  fi
+  echo "[DSH] Materialized host entrypoint: $cmd -> ${resolved#"$host_prefix"/}"
 }
 
 dsh_materialize_required_host_entrypoints() {
@@ -286,7 +297,11 @@ dsh_materialize_required_host_entrypoints() {
 
 dsh_validate_host_entrypoint_stageability() {
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local preflight_stage="$CACHE_DIR/entrypoint-preflight-stage"
   local fail=0 spec cmd owner mode src resolved actual_owner
+
+  rm -rf "$preflight_stage"
+  mkdir -p "$preflight_stage/usr/bin" "$preflight_stage/usr/lib"
 
   for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
     IFS='|' read -r cmd owner mode <<< "$spec"
@@ -323,13 +338,28 @@ dsh_validate_host_entrypoint_stageability() {
       fail=1
       continue
     fi
+
+    # Execute the SAME materialization algorithm used after the expensive
+    # package overlay, but skip ELF dependency closure here. This catches
+    # broken/multi-hop alternatives before hours of staging work.
+    if ! dsh_materialize_host_entrypoint "$preflight_stage" "$cmd" 0; then
+      echo "[DSH] Early materialization preflight failed: $cmd" >&2
+      fail=1
+      continue
+    fi
+    if [ ! -x "$preflight_stage/usr/bin/$cmd" ]; then
+      echo "[DSH] Early materialization produced a non-executable command: $cmd" >&2
+      fail=1
+    fi
   done
+
+  rm -rf "$preflight_stage"
 
   [ "$fail" -eq 0 ] || {
     echo "[DSH] Early Termux entrypoint stageability preflight failed before package overlay." >&2
     return 7
   }
-  echo "[DSH] Early Termux entrypoint stageability: OK (${#DSH_TERMUX_REQUIRED_TOOL_SPECS[@]} commands)"
+  echo "[DSH] Early Termux entrypoint materialization: OK (${#DSH_TERMUX_REQUIRED_TOOL_SPECS[@]} commands)"
 }
 
 dsh_validate_host_tool_contract() {

@@ -101,14 +101,16 @@ jobs:
           fake_prefix="$tmp/host/usr"
           stage="$tmp/stage"
           mkdir -p "$fake_prefix/bin" "$stage/usr/bin" "$stage/usr/lib"
+          mkdir -p "$fake_prefix/etc/alternatives"
           cat >"$fake_prefix/bin/netcat-openbsd" <<'EOF'
           #!/usr/bin/env bash
           printf 'netcat-openbsd\n'
           EOF
           chmod +x "$fake_prefix/bin/netcat-openbsd"
-          ln -s netcat-openbsd "$fake_prefix/bin/nc"
+          ln -s ../etc/alternatives/nc "$fake_prefix/bin/nc"
+          ln -s ../../bin/netcat-openbsd "$fake_prefix/etc/alternatives/nc"
 
-          PREFIX="$fake_prefix" dsh_materialize_host_entrypoint "$stage" nc
+          PREFIX="$fake_prefix" dsh_materialize_host_entrypoint "$stage" nc 0
           test -L "$stage/usr/bin/nc"
           test -x "$stage/usr/bin/nc"
           test -x "$stage/usr/bin/netcat-openbsd"
