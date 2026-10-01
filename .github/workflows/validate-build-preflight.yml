@@ -101,6 +101,31 @@ jobs:
           fake_prefix="$tmp/host/usr"
           stage="$tmp/stage"
           mkdir -p "$fake_prefix/bin" "$stage/usr/bin" "$stage/usr/lib"
+          # Case 1: direct executable (zip/unzip/http-style entrypoint).
+          cat >"$fake_prefix/bin/direct-tool" <<'EOF'
+          #!/usr/bin/env bash
+          printf 'direct-tool\n'
+          EOF
+          chmod +x "$fake_prefix/bin/direct-tool"
+          PREFIX="$fake_prefix" dsh_materialize_host_entrypoint "$stage" direct-tool 0
+          test ! -L "$stage/usr/bin/direct-tool"
+          test -x "$stage/usr/bin/direct-tool"
+          test "$("$stage/usr/bin/direct-tool")" = "direct-tool"
+
+          # Case 2: one-hop symlink.
+          cat >"$fake_prefix/bin/one-hop-real" <<'EOF'
+          #!/usr/bin/env bash
+          printf 'one-hop\n'
+          EOF
+          chmod +x "$fake_prefix/bin/one-hop-real"
+          ln -s one-hop-real "$fake_prefix/bin/one-hop"
+          PREFIX="$fake_prefix" dsh_materialize_host_entrypoint "$stage" one-hop 0
+          test -L "$stage/usr/bin/one-hop"
+          test -x "$stage/usr/bin/one-hop"
+          test "$(readlink "$stage/usr/bin/one-hop")" = "one-hop-real"
+          test "$("$stage/usr/bin/one-hop")" = "one-hop"
+
+          # Case 3: multi-hop alternatives chain (real Termux nc shape).
           mkdir -p "$fake_prefix/etc/alternatives"
           cat >"$fake_prefix/bin/netcat-openbsd" <<'EOF'
           #!/usr/bin/env bash
