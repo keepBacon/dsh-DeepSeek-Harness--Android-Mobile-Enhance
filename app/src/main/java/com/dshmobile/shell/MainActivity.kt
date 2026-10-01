@@ -606,6 +606,7 @@ class MainActivity : ComponentActivity() {
         onRunMobileTool = { category, command ->
           engineManager.runMobileToolRequest(category, command, currentWritableWorkspacePath())
         },
+        onOpenLocalUrl = { url -> openLocalPreviewUrl(url) },
         pickToken = pickToken,
       ),
       "androidBridge",
@@ -777,6 +778,24 @@ class MainActivity : ComponentActivity() {
         }
       }
       .show()
+  }
+
+  /**
+   * Open only loopback HTTP preview URLs in the user's real browser.
+   *
+   * The privileged WebView bridge must never become a generic URL launcher.
+   * Local preview is intentionally limited to ports usable by the managed
+   * developer server and common workspace dev servers.
+   */
+  private fun openLocalPreviewUrl(url: String): Boolean {
+    val uri = try { Uri.parse(url) } catch (_: Throwable) { return false }
+    if (!uri.scheme.equals("http", ignoreCase = true)) return false
+    val host = uri.host?.lowercase() ?: return false
+    if (host != "127.0.0.1" && host != "localhost" && host != "::1") return false
+    val port = uri.port
+    if (port !in 1024..65535) return false
+    runOnUiThread { openExternalUrl(uri.toString()) }
+    return true
   }
 
   /** Open a trusted external URL outside the privileged DSH WebView. */
@@ -2454,6 +2473,74 @@ class MainActivity : ComponentActivity() {
                   for (const item of result.commits) {
                     addStructuredCard(item.subject, item.hash + ' · ' + item.date, 'commit');
                   }
+                }
+              } else if (result.view === 'network') {
+                const dev = result.devServer || {};
+                if (dev.running) {
+                  addStructuredCard('Local dev server', dev.url || '', 'running');
+                  if (dev.root) addStructuredCard('Serving workspace', dev.root, 'root');
+                } else {
+                  addStructuredCard('Local dev server', 'Serve the current Workspace on 127.0.0.1', 'stopped');
+                }
+
+                if (Array.isArray(result.interfaces)) {
+                  for (const item of result.interfaces) {
+                    addStructuredCard(item.name, item.addresses || '', item.state || 'interface');
+                  }
+                }
+                if (Array.isArray(result.listeners)) {
+                  for (const item of result.listeners) {
+                    const label = (item.host || '') + ':' + String(item.port || '');
+                    addStructuredCard(label, item.process || item.state || '', item.loopback ? 'localhost' : 'listen');
+                  }
+                }
+
+                const addNetworkAction = (label, handler) => {
+                  const button = document.createElement('button');
+                  button.type = 'button';
+                  button.className = 'dsh-tool-chip';
+                  button.textContent = label;
+                  button.addEventListener('click', handler);
+                  catalog.insertBefore(button, catalog.firstChild);
+                };
+
+                if (dev.running && dev.url) {
+                  addNetworkAction('Open in Browser', () => {
+                    try {
+                      const opened = window.androidBridge
+                        && window.androidBridge.openLocalUrl(BRIDGE_CAP, String(dev.url));
+                      status.textContent = opened ? 'Opened in external browser' : 'Local URL was rejected';
+                    } catch (error) {
+                      status.textContent = String(error);
+                    }
+                  });
+                  addNetworkAction('Stop Server', () => {
+                    try {
+                      window.androidBridge
+                        && window.androidBridge.runMobileTool(BRIDGE_CAP, 'network-service-stop', '');
+                    } catch (_) {}
+                    runTool(activeTool);
+                  });
+                } else {
+                  addNetworkAction('Start Server', () => {
+                    const input = window.prompt('Local preview port (1024-65535)', '8000');
+                    if (input === null) return;
+                    let raw = '';
+                    try {
+                      raw = window.androidBridge
+                        ? window.androidBridge.runMobileTool(BRIDGE_CAP, 'network-service-start', String(input).trim())
+                        : '{"ok":false,"error":"Android bridge unavailable"}';
+                    } catch (error) {
+                      raw = JSON.stringify({ ok: false, error: String(error) });
+                    }
+                    let started;
+                    try { started = JSON.parse(raw || '{}'); } catch (_) { started = { ok: false, error: raw }; }
+                    if (!started.ok) {
+                      status.textContent = started.error || 'Failed to start local server';
+                      return;
+                    }
+                    runTool(activeTool);
+                  });
                 }
               } else if (result.view === 'system') {
                 const browser = result.browser || {};

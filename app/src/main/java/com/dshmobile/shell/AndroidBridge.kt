@@ -34,6 +34,7 @@ class AndroidBridge(
   private val onRunMobileTool: (String, String) -> String = { _, _ ->
     JSONObject().put("ok", false).put("error", "Mobile tools unavailable").toString()
   },
+  private val onOpenLocalUrl: (String) -> Boolean = { false },
   private val pickToken: String? = null,
 ) {
 
@@ -138,6 +139,10 @@ class AndroidBridge(
   fun runMobileTool(capability: String, category: String, command: String): String =
     if (authorized(capability)) onRunMobileTool(category, command)
     else JSONObject().put("ok", false).put("error", "bridge authorization failed").toString()
+
+  @JavascriptInterface
+  fun openLocalUrl(capability: String, url: String): Boolean =
+    authorized(capability) && onOpenLocalUrl(url)
 
   @JavascriptInterface
   fun getPickToken(capability: String): String? =
