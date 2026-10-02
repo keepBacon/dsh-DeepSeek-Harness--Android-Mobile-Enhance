@@ -485,26 +485,6 @@ dsh_validate_host_tool_contract() {
     fi
   done
 
-  if [ "$fail" -eq 0 ] && [ -x "$host_prefix/bin/frida" ]; then
-    if ! "$host_prefix/bin/python3" - <<'PY_DSH_FRIDA_DEPS'
-import importlib.metadata as md
-import sys
-required = ("prompt-toolkit", "colorama", "pygments", "websockets", "wcwidth")
-missing = []
-for name in required:
-    try:
-        md.distribution(name)
-    except md.PackageNotFoundError:
-        missing.append(name)
-if missing:
-    print("[DSH] Missing Frida Python runtime distributions: " + ", ".join(missing), file=sys.stderr)
-    sys.exit(7)
-PY_DSH_FRIDA_DEPS
-    then
-      fail=1
-    fi
-  fi
-
   [ "$fail" -eq 0 ] || {
     echo "[DSH] Host extended-tool preflight failed before staging." >&2
     return 7
@@ -520,45 +500,59 @@ dsh_required_tool_owner_packages() {
   done
 }
 
-dsh_copy_python_distribution_closure() {
-  local stage="$1"
-  shift
-  [ "$#" -gt 0 ] || return 0
+dsh_required_tool_commands() {
+  local spec cmd owner mode
+  for spec in "${DSH_TERMUX_REQUIRED_TOOL_SPECS[@]}"; do
+    IFS='|' read -r cmd owner mode <<< "$spec"
+    printf '%s\n' "$cmd"
+  done
+}
 
+dsh_validate_host_python_runtime_closure() {
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local host_python="$host_prefix/bin/python3"
+  local resolver="$ROOT/scripts/resolve-python-runtime-closure.py"
+  local commands=()
+
+  [ -x "$host_python" ] || {
+    echo "[DSH] Host Python missing for runtime closure validation: $host_python" >&2
+    return 7
+  }
+  [ -f "$resolver" ] || {
+    echo "[DSH] Python runtime closure resolver missing: $resolver" >&2
+    return 7
+  }
+
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] && commands+=("$cmd")
+  done < <(dsh_required_tool_commands)
+
+  if ! "$host_python" "$resolver" --prefix "$host_prefix" "${commands[@]}" >/dev/null; then
+    echo "[DSH] Host Python CLI dependency closure is incomplete." >&2
+    return 7
+  fi
+  echo "[DSH] Host Python CLI dependency closure: OK"
+}
+
+dsh_copy_required_python_runtime_closure() {
+  local stage="$1"
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local host_python="$host_prefix/bin/python3"
+  local resolver="$ROOT/scripts/resolve-python-runtime-closure.py"
   local list="$CACHE_DIR/dsh-python-runtime-files.bin"
-  : > "$list"
-
-  "$host_python" - "$host_prefix" "$@" > "$list" <<'PY_DSH_DIST'
-import importlib.metadata as md
-import pathlib
-import sys
-
-prefix = pathlib.Path(sys.argv[1]).resolve()
-files = []
-
-for name in sys.argv[2:]:
-    try:
-        dist = md.distribution(name)
-    except md.PackageNotFoundError:
-        print(f"[DSH] Missing Python runtime distribution: {name}", file=sys.stderr)
-        sys.exit(7)
-
-    for item in dist.files or ():
-        try:
-            path = pathlib.Path(dist.locate_file(item)).resolve(strict=True)
-            path.relative_to(prefix)
-        except (OSError, ValueError):
-            continue
-        if path.is_file():
-            files.append(path)
-
-for path in dict.fromkeys(files):
-    sys.stdout.buffer.write(str(path).encode("utf-8") + b"\0")
-PY_DSH_DIST
-
+  local commands=()
   local src rel dest
+
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] && commands+=("$cmd")
+  done < <(dsh_required_tool_commands)
+
+  : > "$list"
+  if ! "$host_python" "$resolver" --prefix "$host_prefix" "${commands[@]}" >"$list"; then
+    echo "[DSH] Failed to resolve required Python CLI dependency closure." >&2
+    return 7
+  fi
+
   while IFS= read -r -d '' src; do
     case "$src" in
       "$host_prefix"/*) rel="${src#"$host_prefix"/}" ;;
@@ -571,6 +565,8 @@ PY_DSH_DIST
       *.so|*.so.*) copy_link_deps "$src" "$stage/usr/lib" ;;
     esac
   done < "$list"
+
+  echo "[DSH] Staged Python CLI distribution closure: OK"
 }
 
 
@@ -862,6 +858,7 @@ dsh_preflight_termux_tool_packages() {
   dsh_validate_host_tool_contract || return 7
   dsh_validate_host_entrypoint_stageability || return 7
   dsh_host_runtime_interpreter_smoke || return 7
+  dsh_validate_host_python_runtime_closure || return 7
   dsh_repair_broken_host_dynamic_tools || return 7
   dsh_host_required_tool_smoke || return 7
   DSH_TERMUX_TOOL_PREFLIGHT_DONE=1
@@ -933,15 +930,11 @@ install_termux_tool_runtime() {
   done < "$package_list"
   touch "$stage/usr/var/lib/dpkg/available"
 
-  # frida-python installs several runtime dependencies through pip in its
-  # postinst. They are not listed by dpkg-query -L, so a pure package overlay
-  # can contain the CLI scripts but still fail when Python imports their deps.
-  if [ -x "${PREFIX:-/data/data/com.termux/files/usr}/bin/frida" ]; then
-    dsh_copy_python_distribution_closure "$stage" prompt-toolkit colorama pygments websockets wcwidth || {
-      echo "[DSH] Failed to stage Frida Python runtime dependencies." >&2
-      return 7
-    }
-  fi
+  # Python CLI packages may be installed with --no-deps or postinst pip
+  # steps, so dpkg-query -L alone is not a complete runtime graph. Resolve the
+  # installed distributions behind every required Python-backed CLI and copy
+  # their recursive Requires-Dist closure before any staged smoke runs.
+  dsh_copy_required_python_runtime_closure "$stage" || return 7
 
   [ -d "${PREFIX:-/data/data/com.termux/files/usr}/var/lib/dpkg/alternatives" ] && cp -a "${PREFIX:-/data/data/com.termux/files/usr}/var/lib/dpkg/alternatives" "$stage/usr/var/lib/dpkg/" || true
   [ -d "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt" ] && cp -a "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt" "$stage/usr/etc/" || true
