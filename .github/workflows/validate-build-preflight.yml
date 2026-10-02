@@ -142,6 +142,53 @@ jobs:
           test "$(readlink "$stage/usr/bin/nc")" = "netcat-openbsd"
           test "$("$stage/usr/bin/nc")" = "netcat-openbsd"
 
+      - name: Runtime interpreter closure contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/dsh-termux-tool-catalog.sh
+          CACHE_DIR="$RUNNER_TEMP/dsh-interpreter-contract-cache"
+          mkdir -p "$CACHE_DIR"
+          copy_link_deps() { :; }
+          source scripts/embed-termux-tools.sh
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          fake_prefix="$tmp/host/usr"
+          stage="$tmp/stage"
+          mkdir -p             "$fake_prefix/bin"             "$stage/usr/bin"             "$stage/usr/lib"             "$stage/usr/lib/jvm/java-21-openjdk/bin"             "$stage/usr/libexec/dsh/wrappers"
+
+          # Host alternatives may point to the wrong Java; embedded Runtime
+          # must ignore that and expose the staged Java 21 tree directly.
+          cat >"$fake_prefix/bin/java" <<'EOF_HOST_JAVA'
+          #!/usr/bin/env bash
+          echo host-java-17
+          EOF_HOST_JAVA
+          chmod +x "$fake_prefix/bin/java"
+
+          for cmd in java jar jarsigner keytool javac; do
+            cat >"$stage/usr/lib/jvm/java-21-openjdk/bin/$cmd" <<EOF_JAVA21
+          #!/usr/bin/env bash
+          echo java21-$cmd
+          EOF_JAVA21
+            chmod +x "$stage/usr/lib/jvm/java-21-openjdk/bin/$cmd"
+          done
+
+          cat >"$fake_prefix/bin/perl" <<'EOF_PERL'
+          #!/usr/bin/env bash
+          echo perl
+          EOF_PERL
+          chmod +x "$fake_prefix/bin/perl"
+
+          PREFIX="$fake_prefix" dsh_materialize_runtime_interpreters "$stage"
+
+          for cmd in java jar jarsigner keytool javac; do
+            test -L "$stage/usr/bin/$cmd"
+            test "$(readlink "$stage/usr/bin/$cmd")" = "../lib/jvm/java-21-openjdk/bin/$cmd"
+            test "$("$stage/usr/bin/$cmd")" = "java21-$cmd"
+          done
+          test -x "$stage/usr/bin/perl"
+
       - name: Validate Android patches against published DSH 0.1.5-rc.2
         shell: bash
         run: |
