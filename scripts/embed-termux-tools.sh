@@ -296,6 +296,92 @@ dsh_materialize_required_host_entrypoints() {
   echo "[DSH] Required Termux entrypoint materialization: OK"
 }
 
+
+dsh_materialize_runtime_interpreters() {
+  local stage="$1"
+  local cmd fail=0
+
+  for cmd in "${DSH_TERMUX_RUNTIME_ENTRYPOINTS[@]}"; do
+    if [ -x "$stage/usr/bin/$cmd" ]; then
+      continue
+    fi
+    if ! dsh_materialize_host_entrypoint "$stage" "$cmd"; then
+      echo "[DSH] Failed to materialize runtime interpreter entrypoint: $cmd" >&2
+      fail=1
+    fi
+  done
+
+  [ "$fail" -eq 0 ] || return 7
+
+  # Java-backed Android tools require an actual JDK runtime, not just their
+  # launcher scripts. Prefer the OpenJDK 21 installation required by Termux
+  # apksigner/apktool/jadx and expose a stable JAVA_HOME inside the relocated
+  # legacy-prefix view used by termux-run.
+  local java_home="$stage/usr/lib/jvm/java-21-openjdk"
+  [ -x "$java_home/bin/java" ] || {
+    echo "[DSH] Embedded OpenJDK 21 runtime missing: $java_home/bin/java" >&2
+    return 7
+  }
+
+  # Perl-backed tools (notably exiftool) require the interpreter payload too.
+  [ -x "$stage/usr/bin/perl" ] || {
+    echo "[DSH] Embedded Perl runtime missing: $stage/usr/bin/perl" >&2
+    return 7
+  }
+
+  echo "[DSH] Runtime interpreter entrypoints: OK (Java 21 + Perl + shell/Python aliases)"
+}
+
+dsh_validate_staged_interpreter_closure() {
+  local stage="$1"
+  local home="$CACHE_DIR/interpreter-smoke-home"
+  local wrappers="$stage/usr/libexec/dsh/wrappers"
+  local legacy_java_home="/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk"
+  local envv=(env
+    TERMUX__PREFIX="$stage/usr"
+    PREFIX="$stage/usr"
+    HOME="$home"
+    TMPDIR="$home/tmp"
+    PATH="$wrappers:$stage/usr/bin:/system/bin"
+    LD_LIBRARY_PATH="$stage/usr/lib"
+    JAVA_HOME="$legacy_java_home"
+    TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force
+    TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1
+  )
+
+  rm -rf "$home"
+  mkdir -p "$home/tmp"
+
+  "${envv[@]}" "$wrappers/java" -version >/dev/null 2>&1 || {
+    echo "[DSH] Embedded Java 21 interpreter smoke failed." >&2
+    return 7
+  }
+  "${envv[@]}" "$wrappers/perl" -e 'print $^V' >/dev/null 2>&1 || {
+    echo "[DSH] Embedded Perl interpreter smoke failed." >&2
+    return 7
+  }
+  "${envv[@]}" "$wrappers/python3" -c 'import sys; print(sys.version_info[:2])' >/dev/null 2>&1 || {
+    echo "[DSH] Embedded Python interpreter smoke failed." >&2
+    return 7
+  }
+
+  local cmd log="$CACHE_DIR/interpreter-backed-tools-smoke.log"
+  for cmd in "${DSH_TERMUX_JAVA_TOOL_COMMANDS[@]}"; do
+    if ! dsh_run_tool_smoke "$cmd" "$wrappers/$cmd" "$log" "${envv[@]}"; then
+      echo "[DSH] Java-backed tool smoke failed: $cmd" >&2
+      sed -n '1,160p' "$log" >&2 || true
+      return 7
+    fi
+  done
+  if ! dsh_run_tool_smoke exiftool "$wrappers/exiftool" "$log" "${envv[@]}"; then
+    echo "[DSH] Perl-backed tool smoke failed: exiftool" >&2
+    sed -n '1,160p' "$log" >&2 || true
+    return 7
+  fi
+
+  echo "[DSH] Staged interpreter closure: OK (Java/Python/Perl + dependent tools)"
+}
+
 dsh_validate_host_entrypoint_stageability() {
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local preflight_stage="$CACHE_DIR/entrypoint-preflight-stage"
@@ -710,7 +796,7 @@ dsh_preflight_termux_tool_packages() {
   [ "$DSH_TERMUX_TOOL_PREFLIGHT_DONE" = "1" ] && return 0
 
   local roots=() missing=() pkg
-  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
+  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-} ${DSH_TERMUX_RUNTIME_PACKAGES:-$DSH_TERMUX_RUNTIME_PACKAGES_DEFAULT} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
   for pkg in "${roots[@]}"; do
     [ -n "$pkg" ] || continue
     if [ "$(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || true)" != "installed" ]; then
@@ -756,7 +842,7 @@ install_termux_tool_runtime() {
 
   dsh_preflight_termux_tool_packages || return 7
   local roots=() pkg
-  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
+  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-} ${DSH_TERMUX_RUNTIME_PACKAGES:-$DSH_TERMUX_RUNTIME_PACKAGES_DEFAULT} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
 
   # Do not assume that a command is owned by the package name we seeded.
   # Termux frequently splits commands into subpackages (Frida is one example).
@@ -866,6 +952,7 @@ exec "$REAL_PREFIX/bin/proot" --link2symlink \
     HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
     TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
     LD_LIBRARY_PATH="$LEGACY_PREFIX/lib" SHELL="$LEGACY_PREFIX/bin/bash" \
+    JAVA_HOME="$LEGACY_PREFIX/lib/jvm/java-21-openjdk" \
     "$LEGACY_PREFIX/bin/$CMD" "$@"
 EOF_TERMUX_RUN
   chmod 0755 "$stage/usr/libexec/dsh/termux-run"
@@ -910,7 +997,7 @@ EOF_TERMUX_WRAPPER
   # packages were compiled/configured for, rather than hoping that every
   # binary is fully relocatable when copied into the app-private runtime.
   local spec tool_cmd tool_owner tool_mode
-  for tool_cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python pip; do
+  for tool_cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python pip java jar jarsigner keytool javac perl; do
     rm -f "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
     ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
   done
@@ -939,6 +1026,7 @@ EOF_TERMUX_WRAPPER
   # nc). Recreate every missing host entrypoint generically before the payload
   # contract so command aliases cannot disappear from the APK staging tree.
   dsh_materialize_required_host_entrypoints "$stage" || return 7
+  dsh_materialize_runtime_interpreters "$stage" || return 7
 
   # Validate package contents immediately. Do not spend minutes compiling
   # node-pty only to discover that a requested Termux subpackage did not
@@ -954,7 +1042,8 @@ validate_termux_tool_runtime() {
   local home="$CACHE_DIR/tool-runtime-smoke-home"
   rm -rf "$home"; mkdir -p "$home/tmp"
   local wrappers="$stage/usr/libexec/dsh/wrappers"
-  local common_env=(env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
+  local common_env=(env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" JAVA_HOME="/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
+  dsh_validate_staged_interpreter_closure "$stage" || return 7
   "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/dpkg-query" -W python >/dev/null 2>&1 || { echo "[DSH] Embedded dpkg database smoke test failed."; return 7; }
