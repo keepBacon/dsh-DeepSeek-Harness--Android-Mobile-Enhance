@@ -44,6 +44,8 @@ RELEASE_APK_NAME="dsh-mobile-v0.10.1.apk"
 RELEASE_APK_DOWNLOAD="/storage/emulated/0/Download/$RELEASE_APK_NAME"
 CACHE_DIR="$HOME/.cache/dsh-mobile-runtime"
 CACHE_APK="$CACHE_DIR/$RELEASE_APK_NAME"
+NPM_BUILD_CACHE="$CACHE_DIR/npm-build-cache"
+PYTHON_DEV_WHEEL_CACHE="$CACHE_DIR/python-dev-wheels"
 RELEASE_URL="https://github.com/thness/dsh-mobile/releases/download/v0.10.1/$RELEASE_APK_NAME"
 RELEASE_APK_SHA256="09b6ffcaeb48852b4e9f66516326f4f5441cfb9606e82a6cb81a41feb1bd79f7"
 PNPM_VERSION="11.7.0"
@@ -671,24 +673,107 @@ copy_link_deps() {
 
 . "$ROOT/scripts/embed-termux-tools.sh"
 
+preflight_extended_dev_tools() {
+  [ "$DSH_REFRESH_RUNTIME" = "1" ] || return 0
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local npm_cli="$host_prefix/lib/node_modules/npm/bin/npm-cli.js"
+  local npm_probe="$CACHE_DIR/npm-dev-tool-preflight"
+  local log="$CACHE_DIR/extended-dev-tools-preflight.log"
+
+  mkdir -p "$CACHE_DIR" "$NPM_BUILD_CACHE" "$PYTHON_DEV_WHEEL_CACHE"
+  : > "$log"
+
+  if [ -n "$DSH_NPM_DEV_TOOL_PACKAGES" ]; then
+    [ -f "$npm_cli" ] || {
+      echo "[DSH] Host npm CLI missing before expensive Runtime overlay: $npm_cli" >&2
+      return 7
+    }
+    node "$npm_cli" --version >>"$log" 2>&1 || {
+      echo '[DSH] Host npm CLI cannot start before expensive Runtime overlay.' >&2
+      tail -n 80 "$log" >&2 || true
+      return 7
+    }
+
+    rm -rf "$npm_probe"
+    mkdir -p "$npm_probe"
+    echo '[DSH] Pre-resolving pinned npm developer tools before expensive Runtime overlay…'
+    if ! node "$npm_cli" --prefix "$npm_probe" install       --ignore-scripts --no-audit --no-fund --prefer-offline       --cache "$NPM_BUILD_CACHE"       $DSH_NPM_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
+      echo '[DSH] Pinned npm developer-tool preflight failed before Runtime overlay.' >&2
+      tail -n 160 "$log" >&2 || true
+      return 7
+    fi
+    test -f "$npm_probe/node_modules/prettier/bin/prettier.cjs" || {
+      echo '[DSH] Prettier missing from early npm developer-tool probe.' >&2
+      return 7
+    }
+    test -f "$npm_probe/node_modules/eslint/bin/eslint.js" || {
+      echo '[DSH] ESLint missing from early npm developer-tool probe.' >&2
+      return 7
+    }
+    rm -rf "$npm_probe"
+  fi
+
+  if [ -n "$DSH_PYTHON_DEV_TOOL_PACKAGES" ]; then
+    command -v python3 >/dev/null 2>&1 || {
+      echo '[DSH] python3 missing before Python developer-tool preflight.' >&2
+      return 7
+    }
+    python3 -m pip --version >>"$log" 2>&1 || {
+      echo '[DSH] Host pip cannot start before expensive Runtime overlay.' >&2
+      tail -n 80 "$log" >&2 || true
+      return 7
+    }
+    rm -rf "$PYTHON_DEV_WHEEL_CACHE"
+    mkdir -p "$PYTHON_DEV_WHEEL_CACHE"
+    echo '[DSH] Pre-downloading pinned Python developer tools before expensive Runtime overlay…'
+    if ! python3 -m pip download       --disable-pip-version-check       --dest "$PYTHON_DEV_WHEEL_CACHE"       $DSH_PYTHON_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
+      echo '[DSH] Pinned Python developer-tool preflight failed before Runtime overlay.' >&2
+      tail -n 160 "$log" >&2 || true
+      return 7
+    fi
+  fi
+
+  echo '[DSH] Extended developer-tool preflight: OK'
+}
+
 if [ "$DSH_REFRESH_RUNTIME" = "1" ] && [ "$DSH_TERMUX_TOOLS" = "1" ]; then
   dsh_preflight_termux_tool_packages
 fi
+preflight_extended_dev_tools
 
 install_extended_dev_tools() {
   local stage="$1"
   local log="$CACHE_DIR/extended-dev-tools.log"
   echo '[DSH] Installing pinned non-APT developer tools…'
 
+  mkdir -p "$stage/home/tmp" "$NPM_BUILD_CACHE" "$PYTHON_DEV_WHEEL_CACHE"
+  : > "$log"
+
   if [ -n "$DSH_NPM_DEV_TOOL_PACKAGES" ]; then
+    [ -x "$stage/usr/bin/node" ] || {
+      echo '[DSH] Staged Node is missing before npm developer-tool install.' >&2
+      return 7
+    }
+    [ -x "$stage/usr/bin/npm" ] || {
+      echo '[DSH] Staged npm is missing before npm developer-tool install.' >&2
+      return 7
+    }
+    [ -f "$stage/usr/lib/node_modules/npm/bin/npm-cli.js" ] || {
+      echo '[DSH] Staged npm CLI payload is missing before developer-tool install.' >&2
+      return 7
+    }
+
     env \
+      TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" \
       PATH="$stage/usr/bin:/system/bin" \
       LD_LIBRARY_PATH="$stage/usr/lib" \
-      HOME="$stage/home" \
-      npm --prefix "$stage/usr" install --global --ignore-scripts --no-audit --no-fund \
+      HOME="$stage/home" TMPDIR="$stage/home/tmp" \
+      "$stage/usr/bin/npm" --prefix "$stage/usr" install --global \
+        --ignore-scripts --no-audit --no-fund --prefer-offline \
+        --cache "$NPM_BUILD_CACHE" \
         $DSH_NPM_DEV_TOOL_PACKAGES >"$log" 2>&1 || {
           echo '[DSH] npm developer-tool install failed.' >&2
-          sed -n '1,160p' "$log" >&2 || true
+          sed -n '1,200p' "$log" >&2 || true
           return 7
         }
   fi
@@ -698,7 +783,8 @@ install_extended_dev_tools() {
       PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" \
       LD_LIBRARY_PATH="$stage/usr/lib" \
       TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp" \
-      "$stage/usr/libexec/dsh/wrappers/pip3" install --no-cache-dir --disable-pip-version-check \
+      "$stage/usr/libexec/dsh/wrappers/pip3" install --disable-pip-version-check \
+        --no-index --find-links "$PYTHON_DEV_WHEEL_CACHE" \
         $DSH_PYTHON_DEV_TOOL_PACKAGES >>"$log" 2>&1 || {
           echo '[DSH] Python developer-tool install failed.' >&2
           sed -n '1,160p' "$log" >&2 || true
@@ -1540,7 +1626,6 @@ refresh_dsh_runtime() {
 
   overlay_host_node_runtime "$stage"
   install_termux_tool_runtime "$stage"
-  install_extended_dev_tools "$stage"
   install_terminal_shell_runtime "$stage"
   local node_headers
   node_headers="$(prepare_node_headers)"
@@ -1613,6 +1698,7 @@ refresh_dsh_runtime() {
   validate_ripgrep_runtime "$stage"
   copy_git_ssh_ca_runtime "$stage"
   copy_host_npm_runtime "$stage"
+  install_extended_dev_tools "$stage"
   write_runtime_pnpm_wrappers "$stage"
   validate_pnpm_runtime "$stage"
   copy_native_module_deps "$stage"
