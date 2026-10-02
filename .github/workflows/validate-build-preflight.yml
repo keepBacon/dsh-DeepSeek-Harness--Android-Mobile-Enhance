@@ -142,6 +142,79 @@ jobs:
           test "$(readlink "$stage/usr/bin/nc")" = "netcat-openbsd"
           test "$("$stage/usr/bin/nc")" = "netcat-openbsd"
 
+      - name: Python CLI recursive dependency closure contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          prefix="$tmp/prefix"
+          pyver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          site="$prefix/lib/python$pyver/site-packages"
+          mkdir -p "$prefix/bin" "$site/rootpkg" "$site/childpkg"                    "$site/rootpkg-1.0.dist-info" "$site/childpkg-2.0.dist-info"
+
+          cat >"$prefix/bin/fakepy" <<'EOF_FAKEPY'
+          #!/usr/bin/env python3
+          import rootpkg
+          print(rootpkg.VALUE)
+          EOF_FAKEPY
+          chmod +x "$prefix/bin/fakepy"
+
+          cat >"$site/rootpkg/__init__.py" <<'EOF_ROOT'
+          import childpkg
+          VALUE = "root+" + childpkg.VALUE
+          EOF_ROOT
+          cat >"$site/childpkg/__init__.py" <<'EOF_CHILD'
+          VALUE = "child"
+          EOF_CHILD
+
+          cat >"$site/rootpkg-1.0.dist-info/METADATA" <<'EOF_ROOT_META'
+          Metadata-Version: 2.1
+          Name: rootpkg
+          Version: 1.0
+          Requires-Dist: childpkg>=2
+          EOF_ROOT_META
+          cat >"$site/rootpkg-1.0.dist-info/entry_points.txt" <<'EOF_ROOT_EP'
+          [console_scripts]
+          fakepy = rootpkg:VALUE
+          EOF_ROOT_EP
+          cat >"$site/rootpkg-1.0.dist-info/RECORD" <<EOF_ROOT_RECORD
+          rootpkg/__init__.py,,
+          rootpkg-1.0.dist-info/METADATA,,
+          rootpkg-1.0.dist-info/entry_points.txt,,
+          rootpkg-1.0.dist-info/RECORD,,
+          EOF_ROOT_RECORD
+
+          cat >"$site/childpkg-2.0.dist-info/METADATA" <<'EOF_CHILD_META'
+          Metadata-Version: 2.1
+          Name: childpkg
+          Version: 2.0
+          EOF_CHILD_META
+          cat >"$site/childpkg-2.0.dist-info/RECORD" <<EOF_CHILD_RECORD
+          childpkg/__init__.py,,
+          childpkg-2.0.dist-info/METADATA,,
+          childpkg-2.0.dist-info/RECORD,,
+          EOF_CHILD_RECORD
+
+          out="$tmp/files.bin"
+          PYTHONPATH="$site" python3 scripts/resolve-python-runtime-closure.py             --prefix "$prefix" fakepy >"$out"
+
+          python3 - "$out" "$site" <<'PY_CHECK'
+          import pathlib, sys
+          raw = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
+          paths = {p.decode() for p in raw if p}
+          site = pathlib.Path(sys.argv[2])
+          required = {
+              str(site / "rootpkg/__init__.py"),
+              str(site / "childpkg/__init__.py"),
+              str(site / "rootpkg-1.0.dist-info/METADATA"),
+              str(site / "childpkg-2.0.dist-info/METADATA"),
+          }
+          missing = required - paths
+          if missing:
+              raise SystemExit("recursive Python closure missing: " + ", ".join(sorted(missing)))
+          PY_CHECK
+
       - name: Runtime interpreter closure contract
         shell: bash
         run: |
