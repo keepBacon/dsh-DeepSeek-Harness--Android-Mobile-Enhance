@@ -19,6 +19,22 @@ trap 'dsh_build_error_trap $? "$BASH_COMMAND"' ERR
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+# Repositories cloned under Android shared storage can be reported by Git as
+# having a different owner even though the current app created the files.
+# Inject a command-scope safe.directory entry for this build and all child Git
+# processes without weakening the user's global Git configuration.
+dsh_configure_git_build_context() {
+  command -v git >/dev/null 2>&1 || return 0
+  local index="${GIT_CONFIG_COUNT:-0}"
+  case "$index" in ''|*[!0-9]*) index=0 ;; esac
+  export GIT_CONFIG_COUNT="$((index + 1))"
+  export "GIT_CONFIG_KEY_$index=safe.directory"
+  export "GIT_CONFIG_VALUE_$index=$ROOT"
+  local head
+  head="$(git rev-parse HEAD 2>/dev/null || true)"
+  [ -z "$head" ] || echo "[DSH] Source revision: $head"
+}
+
 SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/android-sdk}}"
 export ANDROID_SDK_ROOT="$SDK"
 export ANDROID_HOME="$SDK"
@@ -99,6 +115,7 @@ dsh_static_build_preflight() {
 
 dsh_bootstrap_host_build_prerequisites() {
   local auto="${DSH_AUTO_INSTALL_HOST_BUILD_DEPS:-1}"
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local missing_packages=()
   local seen=" "
   local add_pkg
@@ -109,7 +126,9 @@ dsh_bootstrap_host_build_prerequisites() {
     missing_packages+=("$pkg")
   }
 
-  command -v java >/dev/null 2>&1 || add_pkg openjdk-17
+  # AGP 8.8.x is built/tested around JDK 17. Do not let whichever Java
+  # happens to own the Termux alternatives entry decide Gradle behaviour.
+  [ -x "$host_prefix/lib/jvm/java-17-openjdk/bin/java" ] || add_pkg openjdk-17
   command -v curl >/dev/null 2>&1 || add_pkg curl
   command -v unzip >/dev/null 2>&1 || add_pkg unzip
   command -v tar >/dev/null 2>&1 || add_pkg tar
@@ -121,7 +140,6 @@ dsh_bootstrap_host_build_prerequisites() {
     add_pkg nodejs-lts
   fi
 
-  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   if [ "${DSH_REFRESH_RUNTIME:-1}" = "1" ]; then
     if ! command -v npm >/dev/null 2>&1; then
       add_pkg nodejs-lts
@@ -177,6 +195,26 @@ dsh_bootstrap_host_build_prerequisites() {
   hash -r
 }
 
+dsh_select_gradle_jdk17() {
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local jdk="$host_prefix/lib/jvm/java-17-openjdk"
+  [ -x "$jdk/bin/java" ] || {
+    echo "[DSH] OpenJDK 17 was not installed correctly: $jdk/bin/java" >&2
+    return 2
+  }
+  export JAVA_HOME="$jdk"
+  export PATH="$JAVA_HOME/bin:$PATH"
+
+  local major
+  major="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -n '1s/.*version "\([0-9][0-9]*\).*/\1/p')"
+  if [ "$major" != "17" ]; then
+    echo "[DSH] Gradle JDK pin failed: expected Java 17, got ${major:-unknown}" >&2
+    "$JAVA_HOME/bin/java" -version >&2 || true
+    return 2
+  fi
+  echo "[DSH] Gradle JDK pinned: $JAVA_HOME"
+}
+
 dsh_ensure_android_sdk_platform() {
   [ -f "$SDK/platforms/android-36/android.jar" ] && return 0
   local sdkmanager=''
@@ -194,7 +232,9 @@ dsh_ensure_android_sdk_platform() {
   [ -f "$SDK/platforms/android-36/android.jar" ] || return 3
 }
 
+dsh_configure_git_build_context
 dsh_bootstrap_host_build_prerequisites
+dsh_select_gradle_jdk17
 dsh_ensure_android_sdk_platform
 # Run syntax/contract checks only after the bootstrap has guaranteed Node and
 # the other host-side prerequisites. This keeps first-run auto-repair reachable.
@@ -222,7 +262,11 @@ dsh_gradle_source_preflight() {
   set -e
   if [ "$status" -ne 0 ]; then
     echo '[DSH] Fast Android source preflight failed; Runtime rebuild was not started.' >&2
-    grep -E '(^e: |^error: |Execution failed|What went wrong|Compilation error|Unresolved reference|Cannot access|requires API|FAILURE:|Could not resolve|AAPT: error)' "$log" | tail -n 120 >&2 || true
+    echo '[DSH] Extracted Gradle diagnostics:' >&2
+    grep -E '(^e: |^error: |Execution failed|What went wrong|Compilation error|Unresolved reference|Cannot access|requires API|FAILURE:|Could not resolve|AAPT: error|Permission denied|Operation not permitted|Read-only file system|Could not create service|JAVA_HOME|Unsupported class file|Unsupported Java|daemon disappeared)' "$log" | tail -n 160 >&2 || true
+    echo '[DSH] ---- Gradle preflight log tail (last 220 lines) ----' >&2
+    tail -n 220 "$log" >&2 || true
+    echo '[DSH] ---- end Gradle preflight log ----' >&2
     echo "[DSH] Full preflight log: $log" >&2
     return "$status"
   fi
