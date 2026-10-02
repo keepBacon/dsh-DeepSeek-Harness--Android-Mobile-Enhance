@@ -1626,6 +1626,10 @@ refresh_dsh_runtime() {
 
   overlay_host_node_runtime "$stage"
   install_termux_tool_runtime "$stage"
+  # Run the complete staged Linux/TUI/interpreter smoke immediately after
+  # package overlay, before terminal/native-module compilation. This catches
+  # missing Java/Perl/Python/Shell/CLI runtime dependencies as early as possible.
+  validate_termux_tool_runtime "$stage"
   install_terminal_shell_runtime "$stage"
   local node_headers
   node_headers="$(prepare_node_headers)"
@@ -1690,7 +1694,6 @@ refresh_dsh_runtime() {
   validate_terminal_runtime "$stage"
   dsh_sync_staged_dynamic_abi "$stage"
   dsh_validate_staged_dynamic_abi "$stage"
-  validate_termux_tool_runtime "$stage"
   install_sharp_wasm "$stage" "$used_registry"
   apply_android_runtime_patches "$stage"
   validate_android_backend_parity "$stage"

@@ -4,6 +4,12 @@
 
 DSH_TERMUX_MAIN_TOOL_PACKAGES_DEFAULT="apt dpkg termux-tools termux-keyring proot python python-pip coreutils findutils grep sed gawk tar gzip bzip2 xz-utils zstd lz4 cpio unzip zip 7zip curl wget aria2 jq yq less which procps diffutils patch parallel file binutils openssl openssl-tool aapt2 libc++ llvm clang lld make cmake ninja pkg-config gdb gdbserver strace ltrace rizin radare2 git git-lfs openssh shellcheck shfmt ctags cscope htop lsof tree rsync tmux fzf bat eza ncdu duf fd sd micro neovim ranger yazi glow gum dialog lazygit tig httpie dnsutils iproute2 net-tools nmap socat netcat-openbsd whois traceroute sqlite postgresql mariadb redis imagemagick ffmpeg poppler pandoc exiftool android-tools apksigner apktool jadx"
 DSH_TERMUX_ROOT_TOOL_PACKAGES_DEFAULT="frida frida-python btop tcpdump"
+# Hidden interpreter/runtime dependencies required by user-facing tools.
+# Keep them explicit instead of relying only on transitive apt metadata:
+# apksigner/apktool/jadx require Java; exiftool requires Perl.
+DSH_TERMUX_RUNTIME_PACKAGES_DEFAULT="openjdk-21 perl"
+DSH_TERMUX_RUNTIME_ENTRYPOINTS=("java" "jar" "jarsigner" "keytool" "javac" "perl")
+DSH_TERMUX_JAVA_TOOL_COMMANDS=("apksigner" "apktool" "jadx")
 DSH_NPM_DEV_TOOL_PACKAGES_DEFAULT="prettier@3.9.9 eslint@10.10.0"
 DSH_PYTHON_DEV_TOOL_PACKAGES_DEFAULT="cmakelang==0.6.13"
 
@@ -122,7 +128,13 @@ dsh_tool_catalog_self_test() {
     case " $DSH_TERMUX_MAIN_TOOL_PACKAGES_DEFAULT " in *" $pkg "*) echo "[DSH] Tool package appears in both main/root catalogs: $pkg" >&2; return 2 ;; esac
   done
   [ "${#seen_cmd[@]}" -ge 90 ] || { echo "[DSH] Extended tool catalog unexpectedly small: ${#seen_cmd[@]}" >&2; return 2; }
-  echo "[DSH] Extended Linux/TUI tool catalog: OK (${#seen_cmd[@]} commands)"
+  for pkg in $DSH_TERMUX_RUNTIME_PACKAGES_DEFAULT; do
+    [ -n "$pkg" ] || { echo "[DSH] Empty runtime interpreter package in catalog." >&2; return 2; }
+  done
+  for cmd in "${DSH_TERMUX_JAVA_TOOL_COMMANDS[@]}"; do
+    [ -n "${seen_cmd[$cmd]+x}" ] || { echo "[DSH] Java-backed tool missing from required catalog: $cmd" >&2; return 2; }
+  done
+  echo "[DSH] Extended Linux/TUI tool catalog: OK (${#seen_cmd[@]} commands + runtime interpreters)"
 }
 
 dsh_tool_spec_for() {
