@@ -1150,6 +1150,32 @@ install_sharp_wasm() {
     echo "[DSH] sharp WASM copied version mismatch: expected=$version actual=$copied_version"
     [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
   fi
+
+  [ -f "$selected/package-lock.json" ] || {
+    echo '[DSH] sharp WASM preload lockfile is missing.'
+    [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
+    return 0
+  }
+  if ! node - "$selected/package-lock.json" "$stage/usr/lib/node_modules" <<'NODE_SHARP_TREE'
+const fs = require('fs')
+const path = require('path')
+const [lockPath, nodeModulesRoot] = process.argv.slice(2)
+const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'))
+const missing = []
+for (const key of Object.keys(lock.packages || {})) {
+  if (!key.startsWith('node_modules/')) continue
+  const rel = key.slice('node_modules/'.length)
+  const manifest = path.join(nodeModulesRoot, rel, 'package.json')
+  if (!fs.existsSync(manifest)) missing.push(rel)
+}
+if (missing.length) {
+  console.error('[DSH] sharp WASM copied dependency tree missing package(s): ' + missing.join(', '))
+  process.exit(7)
+}
+NODE_SHARP_TREE
+  then
+    [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
+  fi
   echo '[DSH] sharp WASM fallback dependency tree: OK (local verified copy, no network)'
 }
 
