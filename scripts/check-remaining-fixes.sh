@@ -25,6 +25,7 @@ ETT="$ROOT/scripts/embed-termux-tools.sh"
 TC="$ROOT/scripts/dsh-termux-tool-catalog.sh"
 TVC="$ROOT/scripts/validate-termux-tool-catalog.sh"
 ASR="$ROOT/scripts/dsh-android-sandbox-runner.sh"
+FER="$ROOT/scripts/preflight-expensive-runtime.sh"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 must() { grep -Fq -- "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
@@ -252,6 +253,20 @@ must "$BT" 'DSH_TERMUX_TOOL_PACKAGES='
 must "$BT" '. "$ROOT/scripts/embed-termux-tools.sh"'
 must "$BT" 'install_termux_tool_runtime "$stage"'
 must "$BT" 'validate_termux_tool_runtime "$stage"'
+must "$BT" '. "$ROOT/scripts/preflight-expensive-runtime.sh"'
+must "$BT" 'npm ci --offline --ignore-scripts'
+must "$BT" 'install --global \\'
+must "$BT" '--offline --ignore-scripts'
+must "$FER" 'Expensive-runtime input preflight: OK'
+must "$FER" 'Locked DSH graph cannot be downloaded and replayed offline.'
+must "$FER" 'sharp WASM fallback'
+must "$FER" 'DSH_MIN_HOME_FREE_KB'
+must "$FER" 'DSH_MIN_PROJECT_FREE_KB'
+must "$FER" 'tar -xOJf'
+must "$FER" 'npm-cli.js'
+must "$FER" 'ci \\'
+must "$FER" '--offline --ignore-scripts'
+must "$FER" 'frontload-runtime-selected'
 must "$EM" 'libexec/dsh/wrappers:'
 must "$EM" '"TERMUX_PREFIX" to usrDir.absolutePath'
 must "$EM" '"PREFIX" to usrDir.absolutePath'
