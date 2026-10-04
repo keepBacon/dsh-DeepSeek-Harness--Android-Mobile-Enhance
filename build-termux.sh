@@ -1110,16 +1110,47 @@ build_native_modules() {
 
 install_sharp_wasm() {
   local stage="$1" registry="$2" manifest version
+  local selected="$CACHE_DIR/frontload-sharp-wasm-selected"
+  local selected_version
+
   manifest="$(find "$stage/usr/lib/node_modules" -type f -path '*/sharp/package.json' -print -quit 2>/dev/null || true)"
   [ -n "$manifest" ] || { echo '[DSH] sharp 未安装，跳过 WASM fallback。'; return 0; }
   version="$(node -e 'const fs=require("fs");console.log(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).version)' "$manifest")"
-  echo "[DSH] Installing sharp WASM fallback -> @img/sharp-wasm32@$version"
-  if ! npm install --global --prefix "$stage/usr" --offline --ignore-scripts --no-audit --no-fund \
-      --cache "$NPM_BUILD_CACHE" \
-      "@img/sharp-wasm32@$version"; then
-    echo '[DSH] sharp WASM fallback 安装失败。'
+
+  [ -f "$selected/version.txt" ] || {
+    echo '[DSH] Verified sharp WASM preload tree is missing.'
+    [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
+    return 0
+  }
+  selected_version="$(head -n 1 "$selected/version.txt")"
+  if [ "$selected_version" != "$version" ]; then
+    echo "[DSH] sharp WASM preload version mismatch: staged sharp=$version preload=$selected_version"
+    [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
+    return 0
+  fi
+  [ -d "$selected/node_modules" ] || {
+    echo '[DSH] Verified sharp WASM dependency tree is missing.'
+    [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
+    return 0
+  }
+
+  echo "[DSH] Installing verified sharp WASM dependency tree -> @img/sharp-wasm32@$version"
+  mkdir -p "$stage/usr/lib/node_modules"
+  cp -RL --preserve=mode,timestamps "$selected/node_modules/." "$stage/usr/lib/node_modules/"
+
+  local wasm_manifest="$stage/usr/lib/node_modules/@img/sharp-wasm32/package.json"
+  [ -f "$wasm_manifest" ] || {
+    echo '[DSH] sharp WASM package missing after local tree copy.'
+    [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
+    return 0
+  }
+  local copied_version
+  copied_version="$(node -e 'const fs=require("fs");console.log(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).version)' "$wasm_manifest")"
+  if [ "$copied_version" != "$version" ]; then
+    echo "[DSH] sharp WASM copied version mismatch: expected=$version actual=$copied_version"
     [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
   fi
+  echo '[DSH] sharp WASM fallback dependency tree: OK (local verified copy, no network)'
 }
 
 copy_host_npm_runtime() {
