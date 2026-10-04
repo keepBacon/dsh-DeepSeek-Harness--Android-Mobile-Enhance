@@ -11,7 +11,7 @@ set -Eeuo pipefail
 : "${DSH_RELEASE_FAMILY_LOCK:?DSH_RELEASE_FAMILY_LOCK is required}"
 : "${DSH_RUNTIME_FAMILY_TOOL:?DSH_RUNTIME_FAMILY_TOOL is required}"
 
-check_free_kb() {
+dsh_check_free_space_kb() {
   local path="$1" required_kb="$2" label="$3"
   local available
   available="$(df -Pk "$path" 2>/dev/null | awk 'NR==2 {print $4}')"
@@ -45,8 +45,8 @@ dsh_frontload_expensive_runtime_main() {
   mkdir -p "$CACHE_DIR" "$NPM_BUILD_CACHE"
   : > "$log"
 
-  check_free_kb "$HOME" "$min_home_kb" "Termux HOME/runtime cache"
-  check_free_kb "$ROOT" "$min_project_kb" "project/snapshot output"
+  dsh_check_free_space_kb "$HOME" "$min_home_kb" "Termux HOME/runtime cache"
+  dsh_check_free_space_kb "$ROOT" "$min_project_kb" "project/snapshot output"
 
   [ -d "$host_prefix/include/node" ] || {
     echo "[DSH] Termux Node headers missing before expensive overlay: $host_prefix/include/node" >&2
