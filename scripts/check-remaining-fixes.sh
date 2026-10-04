@@ -455,7 +455,7 @@ must "$WST" "row.url.includes('/??')"
 must "$BT" '"corePluginTreeSmokeTest": true'
 forbid "$BT" '"@deepseek-ai/dsh@$DSH_VERSION" "pnpm@$PNPM_VERSION"'
 must "$BT" 'npm install --package-lock-only'
-must "$BT" 'npm ci --ignore-scripts'
+must "$BT" 'npm ci --offline --ignore-scripts'
 must "$BT" 'Resolving exact DSH release family'
 must "$BT" 'verify-lock "$DSH_RELEASE_FAMILY_LOCK"'
 must "$BT" 'verify-installed "$DSH_RELEASE_FAMILY_LOCK"'
