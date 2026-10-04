@@ -210,6 +210,7 @@ def main() -> int:
 
     resolved_dists: dict[str, md.Distribution] = {}
     resolved_modules: set[str] = set()
+    ignored_optional_modules: set[str] = set()
     files: list[pathlib.Path] = []
     missing: list[str] = []
 
@@ -260,7 +261,8 @@ def main() -> int:
             module, required, origin_reason = module_queue.popleft()
             if module in resolved_modules:
                 continue
-            resolved_modules.add(module)
+            if not required and module in ignored_optional_modules:
+                continue
 
             # Standard distribution mapping when available.
             mapped = package_map.get(module, ())
@@ -280,12 +282,17 @@ def main() -> int:
             # RECORD/top_level metadata.
             module_files, python_sources = module_payload(module, prefix, site_roots)
             if module_files:
+                resolved_modules.add(module)
                 files.extend(module_files)
                 for source in python_sources:
                     for imported in imported_top_level_names(source):
                         if imported not in resolved_modules:
                             module_queue.append((imported, False, f"module {module}"))
-            elif not mapped_any:
+            elif mapped_any:
+                # Distribution metadata resolved the module even if find_spec()
+                # cannot expose a concrete file directly (namespace/loader edge).
+                resolved_modules.add(module)
+            else:
                 # Ignore stdlib/builtin modules (find_spec outside site-packages),
                 # but fail closed only for names that look like third-party roots
                 # imported by our CLI/package code and cannot be resolved at all.
@@ -296,12 +303,12 @@ def main() -> int:
                 if spec is None:
                     if required:
                         missing.append(f"{origin_reason} -> unresolved module: {module}")
+                        resolved_modules.add(module)
                     else:
-                        print(
-                            f"[DSH] optional/conditional import unresolved (ignored): {module} "
-                            f"(discovered from {origin_reason})",
-                            file=sys.stderr,
-                        )
+                        ignored_optional_modules.add(module)
+                else:
+                    # Builtin/stdlib module: no site-packages payload is needed.
+                    resolved_modules.add(module)
 
     if missing:
         print("[DSH] Missing Python runtime dependencies:", file=sys.stderr)
@@ -323,7 +330,15 @@ def main() -> int:
     print(f"[DSH] Python CLI distribution roots: {root_dist_text or '(metadata-less)'}", file=sys.stderr)
     print(f"[DSH] Python CLI import roots: {root_module_text}", file=sys.stderr)
     print(f"[DSH] Python distribution closure ({len(resolved_dists)}): {closure_text}", file=sys.stderr)
-    print(f"[DSH] Python module closure ({len(resolved_modules)} top-level modules, {len(unique_files)} files)", file=sys.stderr)
+    print(f"[DSH] Python module closure ({len(resolved_modules)} resolved top-level modules, {len(unique_files)} files)", file=sys.stderr)
+    if ignored_optional_modules:
+        preview = ", ".join(sorted(ignored_optional_modules)[:12])
+        suffix = "" if len(ignored_optional_modules) <= 12 else f", ... +{len(ignored_optional_modules) - 12}"
+        print(
+            f"[DSH] Ignored optional/conditional unresolved imports ({len(ignored_optional_modules)}): "
+            f"{preview}{suffix}",
+            file=sys.stderr,
+        )
 
     for path in unique_files:
         sys.stdout.buffer.write(str(path).encode("utf-8") + b"\0")
