@@ -1658,8 +1658,14 @@ refresh_dsh_runtime() {
 
   local primary_probe="$CACHE_DIR/npm-family-primary-$DSH_VERSION"
   local fallback_probe="$CACHE_DIR/npm-family-fallback-$DSH_VERSION"
+  local frontloaded_probe="$CACHE_DIR/frontload-runtime-selected"
+  local frontloaded_registry="$CACHE_DIR/frontload-selected-registry.txt"
   echo "[DSH] Resolving exact DSH release family $DSH_VERSION before mutating the runtime…"
-  if npm_registry_resolve "$primary_registry" "$primary_probe"; then
+  if [ -f "$frontloaded_probe/package.json" ] && [ -f "$frontloaded_probe/package-lock.json" ]       && [ -s "$frontloaded_registry" ]       && node "$DSH_RUNTIME_FAMILY_TOOL" verify-lock "$DSH_RELEASE_FAMILY_LOCK"         "$frontloaded_probe/package-lock.json" "$DSH_VERSION" >/dev/null 2>&1; then
+    used_registry="$(head -n 1 "$frontloaded_registry")"
+    selected_probe="$frontloaded_probe"
+    echo "[DSH] Reusing frontloaded verified DSH graph: $used_registry"
+  elif npm_registry_resolve "$primary_registry" "$primary_probe"; then
     used_registry="$primary_registry"; selected_probe="$primary_probe"
   elif [ "$fallback_registry" != "$primary_registry" ] && npm_registry_resolve "$fallback_registry" "$fallback_probe"; then
     used_registry="$fallback_registry"; selected_probe="$fallback_probe"
@@ -1678,10 +1684,9 @@ refresh_dsh_runtime() {
   cp "$selected_probe/package.json" "$stage/usr/lib/package.json"
   cp "$selected_probe/package-lock.json" "$stage/usr/lib/package-lock.json"
   echo "[DSH] Installing one locked dependency graph from: $used_registry"
-  (cd "$stage/usr/lib" && npm ci --ignore-scripts --no-audit --no-fund --prefer-offline \
-    --include=peer --strict-peer-deps=false --loglevel=error --registry="$used_registry" \
-    --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 \
-    --fetch-retry-maxtimeout=120000 --fetch-timeout=300000) || { echo '[DSH] Locked DSH runtime install failed.'; exit 6; }
+  (cd "$stage/usr/lib" && npm ci --offline --ignore-scripts --no-audit --no-fund \
+    --include=peer --strict-peer-deps=false --loglevel=error --cache "$NPM_BUILD_CACHE") \
+    || { echo '[DSH] Locked DSH runtime offline install failed after successful frontload preflight.'; exit 6; }
 
   runtime_npm_lock_sha="$(sha256sum "$stage/usr/lib/package-lock.json" | awk '{print $1}')"
   node "$DSH_RUNTIME_FAMILY_TOOL" verify-installed "$DSH_RELEASE_FAMILY_LOCK" "$stage/usr/lib/node_modules" "$DSH_VERSION"
