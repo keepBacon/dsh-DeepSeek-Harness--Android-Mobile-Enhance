@@ -25,6 +25,7 @@ ETT="$ROOT/scripts/embed-termux-tools.sh"
 TC="$ROOT/scripts/dsh-termux-tool-catalog.sh"
 TVC="$ROOT/scripts/validate-termux-tool-catalog.sh"
 ASR="$ROOT/scripts/dsh-android-sandbox-runner.sh"
+FER="$ROOT/scripts/preflight-expensive-runtime.sh"
 
 fail() { echo "[FAIL] $*" >&2; exit 1; }
 must() { grep -Fq -- "$2" "$1" || fail "missing in $(basename "$1"): $2"; }
@@ -252,6 +253,23 @@ must "$BT" 'DSH_TERMUX_TOOL_PACKAGES='
 must "$BT" '. "$ROOT/scripts/embed-termux-tools.sh"'
 must "$BT" 'install_termux_tool_runtime "$stage"'
 must "$BT" 'validate_termux_tool_runtime "$stage"'
+must "$BT" '. "$ROOT/scripts/preflight-expensive-runtime.sh"'
+must "$BT" 'npm ci --offline --ignore-scripts'
+must "$BT" '"$stage/usr/bin/npm" --prefix "$stage/usr" install --global'
+must "$BT" '--offline --ignore-scripts'
+must "$FER" 'Expensive-runtime input preflight: OK'
+must "$FER" 'Locked DSH graph cannot be downloaded and replayed offline.'
+must "$FER" 'sharp WASM fallback'
+must "$FER" 'DSH_MIN_HOME_FREE_KB'
+must "$FER" 'DSH_MIN_PROJECT_FREE_KB'
+must "$FER" 'dsh_check_free_space_kb()'
+must "$BT" 'dsh_check_free_space_kb "$CACHE_DIR"'
+must "$BT" 'dsh_check_free_space_kb "$ROOT"'
+must "$FER" 'tar -xOJf'
+must "$FER" 'npm-cli.js'
+must "$FER" 'node "$npm_cli" ci'
+must "$FER" '--offline --ignore-scripts'
+must "$FER" 'frontload-runtime-selected'
 must "$EM" 'libexec/dsh/wrappers:'
 must "$EM" '"TERMUX_PREFIX" to usrDir.absolutePath'
 must "$EM" '"PREFIX" to usrDir.absolutePath'
@@ -440,7 +458,7 @@ must "$WST" "row.url.includes('/??')"
 must "$BT" '"corePluginTreeSmokeTest": true'
 forbid "$BT" '"@deepseek-ai/dsh@$DSH_VERSION" "pnpm@$PNPM_VERSION"'
 must "$BT" 'npm install --package-lock-only'
-must "$BT" 'npm ci --ignore-scripts'
+must "$BT" 'npm ci --offline --ignore-scripts'
 must "$BT" 'Resolving exact DSH release family'
 must "$BT" 'verify-lock "$DSH_RELEASE_FAMILY_LOCK"'
 must "$BT" 'verify-installed "$DSH_RELEASE_FAMILY_LOCK"'

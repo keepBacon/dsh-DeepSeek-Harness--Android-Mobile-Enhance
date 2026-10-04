@@ -673,6 +673,8 @@ copy_link_deps() {
 
 . "$ROOT/scripts/embed-termux-tools.sh"
 
+. "$ROOT/scripts/preflight-expensive-runtime.sh"
+
 preflight_extended_dev_tools() {
   [ "$DSH_REFRESH_RUNTIME" = "1" ] || return 0
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
@@ -769,7 +771,7 @@ install_extended_dev_tools() {
       LD_LIBRARY_PATH="$stage/usr/lib" \
       HOME="$stage/home" TMPDIR="$stage/home/tmp" \
       "$stage/usr/bin/npm" --prefix "$stage/usr" install --global \
-        --ignore-scripts --no-audit --no-fund --prefer-offline \
+        --offline --ignore-scripts --no-audit --no-fund \
         --cache "$NPM_BUILD_CACHE" \
         $DSH_NPM_DEV_TOOL_PACKAGES >"$log" 2>&1 || {
           echo '[DSH] npm developer-tool install failed.' >&2
@@ -1112,8 +1114,8 @@ install_sharp_wasm() {
   [ -n "$manifest" ] || { echo '[DSH] sharp 未安装，跳过 WASM fallback。'; return 0; }
   version="$(node -e 'const fs=require("fs");console.log(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).version)' "$manifest")"
   echo "[DSH] Installing sharp WASM fallback -> @img/sharp-wasm32@$version"
-  if ! npm install --global --prefix "$stage/usr" --ignore-scripts --no-audit --no-fund --prefer-offline \
-      --registry="$registry" --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 \
+  if ! npm install --global --prefix "$stage/usr" --offline --ignore-scripts --no-audit --no-fund \
+      --cache "$NPM_BUILD_CACHE" \
       "@img/sharp-wasm32@$version"; then
     echo '[DSH] sharp WASM fallback 安装失败。'
     [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
@@ -1656,8 +1658,14 @@ refresh_dsh_runtime() {
 
   local primary_probe="$CACHE_DIR/npm-family-primary-$DSH_VERSION"
   local fallback_probe="$CACHE_DIR/npm-family-fallback-$DSH_VERSION"
+  local frontloaded_probe="$CACHE_DIR/frontload-runtime-selected"
+  local frontloaded_registry="$CACHE_DIR/frontload-selected-registry.txt"
   echo "[DSH] Resolving exact DSH release family $DSH_VERSION before mutating the runtime…"
-  if npm_registry_resolve "$primary_registry" "$primary_probe"; then
+  if [ -f "$frontloaded_probe/package.json" ] && [ -f "$frontloaded_probe/package-lock.json" ]       && [ -s "$frontloaded_registry" ]       && node "$DSH_RUNTIME_FAMILY_TOOL" verify-lock "$DSH_RELEASE_FAMILY_LOCK"         "$frontloaded_probe/package-lock.json" "$DSH_VERSION" >/dev/null 2>&1; then
+    used_registry="$(head -n 1 "$frontloaded_registry")"
+    selected_probe="$frontloaded_probe"
+    echo "[DSH] Reusing frontloaded verified DSH graph: $used_registry"
+  elif npm_registry_resolve "$primary_registry" "$primary_probe"; then
     used_registry="$primary_registry"; selected_probe="$primary_probe"
   elif [ "$fallback_registry" != "$primary_registry" ] && npm_registry_resolve "$fallback_registry" "$fallback_probe"; then
     used_registry="$fallback_registry"; selected_probe="$fallback_probe"
@@ -1676,10 +1684,9 @@ refresh_dsh_runtime() {
   cp "$selected_probe/package.json" "$stage/usr/lib/package.json"
   cp "$selected_probe/package-lock.json" "$stage/usr/lib/package-lock.json"
   echo "[DSH] Installing one locked dependency graph from: $used_registry"
-  (cd "$stage/usr/lib" && npm ci --ignore-scripts --no-audit --no-fund --prefer-offline \
-    --include=peer --strict-peer-deps=false --loglevel=error --registry="$used_registry" \
-    --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 \
-    --fetch-retry-maxtimeout=120000 --fetch-timeout=300000) || { echo '[DSH] Locked DSH runtime install failed.'; exit 6; }
+  (cd "$stage/usr/lib" && npm ci --offline --ignore-scripts --no-audit --no-fund \
+    --include=peer --strict-peer-deps=false --loglevel=error --cache "$NPM_BUILD_CACHE") \
+    || { echo '[DSH] Locked DSH runtime offline install failed after successful frontload preflight.'; exit 6; }
 
   runtime_npm_lock_sha="$(sha256sum "$stage/usr/lib/package-lock.json" | awk '{print $1}')"
   node "$DSH_RUNTIME_FAMILY_TOOL" verify-installed "$DSH_RELEASE_FAMILY_LOCK" "$stage/usr/lib/node_modules" "$DSH_VERSION"
@@ -1789,6 +1796,24 @@ NODE_REQ
       echo '[DSH] mandatory node-addon-require-builtin compatibility patch missing.'; exit 7
     fi
   fi
+
+  # Final mutation barrier: normalize links now and rerun the complete
+  # Linux/TUI/interpreter smoke after every DSH/native/npm/pnpm/dev-tool change.
+  # This catches a late overwrite or symlink regression before compression.
+  echo '[DSH] Final post-normalization Runtime smoke before snapshot packing…'
+  normalize_snapshot_symlinks "$stage"
+  validate_termux_tool_runtime "$stage"
+  validate_pnpm_runtime "$stage"
+  validate_reusable_node_pty "$stage"
+  validate_terminal_runtime "$stage"
+
+  # Compression needs additional temporary/output space after the large staged
+  # tree already exists. Estimate conservatively from the actual final stage.
+  local stage_kb pack_required_kb
+  stage_kb="$(du -sk "$stage" | awk '{print $1}')"
+  pack_required_kb="$((stage_kb / 2 + 524288))"
+  dsh_check_free_space_kb "$CACHE_DIR" "$pack_required_kb" "final snapshot compression" || exit 7
+  dsh_check_free_space_kb "$ROOT" "$pack_required_kb" "final snapshot copy/APK packaging" || exit 7
 
   local rebuilt="$CACHE_DIR/snapshot-dsh-$DSH_VERSION-android.tar.xz"
   rm -f "$rebuilt"
