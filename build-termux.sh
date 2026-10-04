@@ -673,7 +673,7 @@ copy_link_deps() {
 
 . "$ROOT/scripts/embed-termux-tools.sh"
 
-bash "$ROOT/scripts/preflight-expensive-runtime.sh"
+. "$ROOT/scripts/preflight-expensive-runtime.sh"
 
 preflight_extended_dev_tools() {
   [ "$DSH_REFRESH_RUNTIME" = "1" ] || return 0
