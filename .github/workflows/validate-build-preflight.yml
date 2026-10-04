@@ -142,6 +142,49 @@ jobs:
           test "$(readlink "$stage/usr/bin/nc")" = "netcat-openbsd"
           test "$("$stage/usr/bin/nc")" = "netcat-openbsd"
 
+      - name: Metadata-less Python CLI import closure contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          prefix="$tmp/prefix"
+          pyver="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          site="$prefix/lib/python$pyver/site-packages"
+          mkdir -p "$prefix/bin" "$site/frida_tools" "$site/colorama"
+
+          cat >"$prefix/bin/frida" <<'EOF_FRIDA'
+          #!/usr/bin/env python3
+          import frida_tools.repl
+          EOF_FRIDA
+          chmod +x "$prefix/bin/frida"
+
+          cat >"$site/frida_tools/__init__.py" <<'EOF_FT_INIT'
+          EOF_FT_INIT
+          cat >"$site/frida_tools/repl.py" <<'EOF_FT_REPL'
+          from colorama import Fore
+          EOF_FT_REPL
+          cat >"$site/colorama/__init__.py" <<'EOF_COLORAMA'
+          Fore = object()
+          EOF_COLORAMA
+
+          out="$tmp/files.bin"
+          PYTHONPATH="$site" python3 scripts/resolve-python-runtime-closure.py             --prefix "$prefix" frida >"$out"
+
+          python3 - "$out" "$site" <<'PY_CHECK'
+          import pathlib, sys
+          raw = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
+          paths = {p.decode() for p in raw if p}
+          site = pathlib.Path(sys.argv[2])
+          required = {
+              str(site / "frida_tools/repl.py"),
+              str(site / "colorama/__init__.py"),
+          }
+          missing = required - paths
+          if missing:
+              raise SystemExit("metadata-less import closure missing: " + ", ".join(sorted(missing)))
+          PY_CHECK
+
       - name: Python CLI recursive dependency closure contract
         shell: bash
         run: |
