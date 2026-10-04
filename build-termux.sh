@@ -673,6 +673,8 @@ copy_link_deps() {
 
 . "$ROOT/scripts/embed-termux-tools.sh"
 
+bash "$ROOT/scripts/preflight-expensive-runtime.sh"
+
 preflight_extended_dev_tools() {
   [ "$DSH_REFRESH_RUNTIME" = "1" ] || return 0
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
@@ -769,7 +771,7 @@ install_extended_dev_tools() {
       LD_LIBRARY_PATH="$stage/usr/lib" \
       HOME="$stage/home" TMPDIR="$stage/home/tmp" \
       "$stage/usr/bin/npm" --prefix "$stage/usr" install --global \
-        --ignore-scripts --no-audit --no-fund --prefer-offline \
+        --offline --ignore-scripts --no-audit --no-fund \
         --cache "$NPM_BUILD_CACHE" \
         $DSH_NPM_DEV_TOOL_PACKAGES >"$log" 2>&1 || {
           echo '[DSH] npm developer-tool install failed.' >&2
@@ -1112,8 +1114,8 @@ install_sharp_wasm() {
   [ -n "$manifest" ] || { echo '[DSH] sharp 未安装，跳过 WASM fallback。'; return 0; }
   version="$(node -e 'const fs=require("fs");console.log(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).version)' "$manifest")"
   echo "[DSH] Installing sharp WASM fallback -> @img/sharp-wasm32@$version"
-  if ! npm install --global --prefix "$stage/usr" --ignore-scripts --no-audit --no-fund --prefer-offline \
-      --registry="$registry" --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 \
+  if ! npm install --global --prefix "$stage/usr" --offline --ignore-scripts --no-audit --no-fund \
+      --cache "$NPM_BUILD_CACHE" \
       "@img/sharp-wasm32@$version"; then
     echo '[DSH] sharp WASM fallback 安装失败。'
     [ "$DSH_ALLOW_DEGRADED" = "1" ] || exit 7
