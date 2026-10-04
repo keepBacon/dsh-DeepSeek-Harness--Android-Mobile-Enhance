@@ -28,7 +28,7 @@ check_free_kb() {
   echo "[DSH] Free space $label: $((available / 1024)) MiB"
 }
 
-main() {
+dsh_frontload_expensive_runtime_main() {
   [ "${DSH_REFRESH_RUNTIME:-1}" = "1" ] || return 0
 
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
@@ -167,4 +167,4 @@ main() {
   echo "[DSH]   Node headers/tar/xz/disk: OK"
 }
 
-main "$@"
+dsh_frontload_expensive_runtime_main "$@"
