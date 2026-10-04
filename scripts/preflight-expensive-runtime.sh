@@ -128,12 +128,49 @@ dsh_frontload_expensive_runtime_main() {
   ' "$probe/node_modules" 2>/dev/null || true)"
 
   if [ -n "$sharp_version" ]; then
-    echo "[DSH] Preloading sharp WASM fallback: @img/sharp-wasm32@$sharp_version"
-    node "$npm_cli" cache add "@img/sharp-wasm32@$sharp_version"       --cache "$NPM_BUILD_CACHE" --registry="$registry" >>"$log" 2>&1 || {
-        echo "[DSH] sharp WASM fallback prefetch failed." >&2
-        tail -n 120 "$log" >&2 || true
-        return 7
-      }
+    local sharp_probe="$CACHE_DIR/frontload-sharp-wasm"
+    local sharp_selected="$CACHE_DIR/frontload-sharp-wasm-selected"
+    echo "[DSH] Preloading complete sharp WASM dependency tree: @img/sharp-wasm32@$sharp_version"
+
+    rm -rf "$sharp_probe" "$sharp_selected"
+    mkdir -p "$sharp_probe"
+
+    cat >"$sharp_probe/package.json" <<EOF_SHARP
+{"private":true,"dependencies":{"@img/sharp-wasm32":"$sharp_version"}}
+EOF_SHARP
+
+    if ! (cd "$sharp_probe" && node "$npm_cli" install       --ignore-scripts --no-audit --no-fund --prefer-offline       --cache "$NPM_BUILD_CACHE" --registry="$registry"       --fetch-retries=3 --fetch-retry-factor=2       --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=60000       --fetch-timeout=180000) >>"$log" 2>&1; then
+      echo "[DSH] sharp WASM dependency-tree prefetch failed." >&2
+      tail -n 160 "$log" >&2 || true
+      return 7
+    fi
+
+    test -f "$sharp_probe/node_modules/@img/sharp-wasm32/package.json" || {
+      echo "[DSH] sharp WASM package missing after prefetch." >&2
+      return 7
+    }
+
+    # Prove the entire transitive tree is present in npm cache.
+    rm -rf "$sharp_probe/node_modules"
+    if ! (cd "$sharp_probe" && node "$npm_cli" ci       --offline --ignore-scripts --no-audit --no-fund       --cache "$NPM_BUILD_CACHE") >>"$log" 2>&1; then
+      echo "[DSH] sharp WASM dependency tree is not replayable offline." >&2
+      tail -n 160 "$log" >&2 || true
+      return 7
+    fi
+
+    test -f "$sharp_probe/node_modules/@img/sharp-wasm32/package.json" || {
+      echo "[DSH] sharp WASM package missing after offline replay." >&2
+      return 7
+    }
+
+    # Keep the verified node_modules tree itself. The expensive build stage will
+    # copy this tree directly and will not invoke npm again.
+    mkdir -p "$sharp_selected"
+    cp -RL --preserve=mode,timestamps "$sharp_probe/node_modules" "$sharp_selected/node_modules"
+    cp "$sharp_probe/package.json" "$sharp_selected/package.json"
+    cp "$sharp_probe/package-lock.json" "$sharp_selected/package-lock.json"
+    printf '%s\n' "$sharp_version" > "$sharp_selected/version.txt"
+    rm -rf "$sharp_probe"
   fi
 
   mkdir -p "$(dirname "$PNPM_TGZ")"
@@ -162,7 +199,7 @@ dsh_frontload_expensive_runtime_main() {
 
   echo "[DSH] Expensive-runtime input preflight: OK"
   echo "[DSH]   DSH graph: offline-replayable"
-  echo "[DSH]   sharp WASM: cached"
+  echo "[DSH]   sharp WASM: complete dependency tree cached + offline-replayed"
   echo "[DSH]   pnpm: cached + archive-validated"
   echo "[DSH]   Node headers/tar/xz/disk: OK"
 }
