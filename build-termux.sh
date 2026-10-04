@@ -1797,6 +1797,24 @@ NODE_REQ
     fi
   fi
 
+  # Final mutation barrier: normalize links now and rerun the complete
+  # Linux/TUI/interpreter smoke after every DSH/native/npm/pnpm/dev-tool change.
+  # This catches a late overwrite or symlink regression before compression.
+  echo '[DSH] Final post-normalization Runtime smoke before snapshot packing…'
+  normalize_snapshot_symlinks "$stage"
+  validate_termux_tool_runtime "$stage"
+  validate_pnpm_runtime "$stage"
+  validate_reusable_node_pty "$stage"
+  validate_terminal_runtime "$stage"
+
+  # Compression needs additional temporary/output space after the large staged
+  # tree already exists. Estimate conservatively from the actual final stage.
+  local stage_kb pack_required_kb
+  stage_kb="$(du -sk "$stage" | awk '{print $1}')"
+  pack_required_kb="$((stage_kb / 2 + 524288))"
+  dsh_check_free_space_kb "$CACHE_DIR" "$pack_required_kb" "final snapshot compression" || exit 7
+  dsh_check_free_space_kb "$ROOT" "$pack_required_kb" "final snapshot copy/APK packaging" || exit 7
+
   local rebuilt="$CACHE_DIR/snapshot-dsh-$DSH_VERSION-android.tar.xz"
   rm -f "$rebuilt"
   repack_snapshot_stage "$stage" "$rebuilt"
