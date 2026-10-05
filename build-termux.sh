@@ -700,8 +700,9 @@ preflight_extended_dev_tools() {
 
     rm -rf "$NPM_DEV_SELECTED"
     mkdir -p "$NPM_DEV_SELECTED"
+    printf '{"private":true}\n' > "$NPM_DEV_SELECTED/package.json"
     echo '[DSH] Materializing pinned npm developer tools before expensive Runtime overlay…'
-    if ! node "$npm_cli" --prefix "$NPM_DEV_SELECTED" install       --ignore-scripts --no-audit --no-fund --prefer-offline       --cache "$NPM_BUILD_CACHE"       $DSH_NPM_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
+    if ! node "$npm_cli" --prefix "$NPM_DEV_SELECTED" install       --save-exact --ignore-scripts --no-audit --no-fund --prefer-offline       --cache "$NPM_BUILD_CACHE"       $DSH_NPM_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
       echo '[DSH] Pinned npm developer-tool materialization failed before Runtime overlay.' >&2
       tail -n 180 "$log" >&2 || true
       return 7
