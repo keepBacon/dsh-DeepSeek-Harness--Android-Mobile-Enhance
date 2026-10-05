@@ -45,7 +45,9 @@ RELEASE_APK_DOWNLOAD="/storage/emulated/0/Download/$RELEASE_APK_NAME"
 CACHE_DIR="$HOME/.cache/dsh-mobile-runtime"
 CACHE_APK="$CACHE_DIR/$RELEASE_APK_NAME"
 NPM_BUILD_CACHE="$CACHE_DIR/npm-build-cache"
+NPM_DEV_SELECTED="$CACHE_DIR/frontload-npm-dev-tools-selected"
 PYTHON_DEV_WHEEL_CACHE="$CACHE_DIR/python-dev-wheels"
+PYTHON_DEV_SELECTED="$CACHE_DIR/frontload-python-dev-tools-selected"
 RELEASE_URL="https://github.com/thness/dsh-mobile/releases/download/v0.10.1/$RELEASE_APK_NAME"
 RELEASE_APK_SHA256="09b6ffcaeb48852b4e9f66516326f4f5441cfb9606e82a6cb81a41feb1bd79f7"
 PNPM_VERSION="11.7.0"
@@ -679,8 +681,8 @@ preflight_extended_dev_tools() {
   [ "$DSH_REFRESH_RUNTIME" = "1" ] || return 0
   local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
   local npm_cli="$host_prefix/lib/node_modules/npm/bin/npm-cli.js"
-  local npm_probe="$CACHE_DIR/npm-dev-tool-preflight"
   local log="$CACHE_DIR/extended-dev-tools-preflight.log"
+  local python_site python_bin
 
   mkdir -p "$CACHE_DIR" "$NPM_BUILD_CACHE" "$PYTHON_DEV_WHEEL_CACHE"
   : > "$log"
@@ -696,23 +698,41 @@ preflight_extended_dev_tools() {
       return 7
     }
 
-    rm -rf "$npm_probe"
-    mkdir -p "$npm_probe"
-    echo '[DSH] Pre-resolving pinned npm developer tools before expensive Runtime overlay…'
-    if ! node "$npm_cli" --prefix "$npm_probe" install       --ignore-scripts --no-audit --no-fund --prefer-offline       --cache "$NPM_BUILD_CACHE"       $DSH_NPM_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
-      echo '[DSH] Pinned npm developer-tool preflight failed before Runtime overlay.' >&2
-      tail -n 160 "$log" >&2 || true
+    rm -rf "$NPM_DEV_SELECTED"
+    mkdir -p "$NPM_DEV_SELECTED"
+    printf '{"private":true}\n' > "$NPM_DEV_SELECTED/package.json"
+    echo '[DSH] Materializing pinned npm developer tools before expensive Runtime overlay…'
+    if ! node "$npm_cli" --prefix "$NPM_DEV_SELECTED" install       --save-exact --ignore-scripts --no-audit --no-fund --prefer-offline       --cache "$NPM_BUILD_CACHE"       $DSH_NPM_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
+      echo '[DSH] Pinned npm developer-tool materialization failed before Runtime overlay.' >&2
+      tail -n 180 "$log" >&2 || true
       return 7
     fi
-    test -f "$npm_probe/node_modules/prettier/bin/prettier.cjs" || {
-      echo '[DSH] Prettier missing from early npm developer-tool probe.' >&2
+
+    test -f "$NPM_DEV_SELECTED/node_modules/prettier/bin/prettier.cjs" || {
+      echo '[DSH] Prettier missing from frontloaded npm developer-tool tree.' >&2
       return 7
     }
-    test -f "$npm_probe/node_modules/eslint/bin/eslint.js" || {
-      echo '[DSH] ESLint missing from early npm developer-tool probe.' >&2
+    test -f "$NPM_DEV_SELECTED/node_modules/eslint/bin/eslint.js" || {
+      echo '[DSH] ESLint missing from frontloaded npm developer-tool tree.' >&2
       return 7
     }
-    rm -rf "$npm_probe"
+    test -f "$NPM_DEV_SELECTED/package-lock.json" || {
+      echo '[DSH] npm developer-tool lockfile missing after materialization.' >&2
+      return 7
+    }
+
+    # Prove the npm cache can reconstruct the exact tree with no network, then
+    # preserve that verified tree for a pure-copy formal staging step.
+    rm -rf "$NPM_DEV_SELECTED/node_modules"
+    if ! (cd "$NPM_DEV_SELECTED" && node "$npm_cli" ci       --offline --ignore-scripts --no-audit --no-fund       --cache "$NPM_BUILD_CACHE") >>"$log" 2>&1; then
+      echo '[DSH] npm developer-tool tree is not replayable offline.' >&2
+      tail -n 180 "$log" >&2 || true
+      return 7
+    fi
+    test -f "$NPM_DEV_SELECTED/node_modules/prettier/bin/prettier.cjs" || return 7
+    test -f "$NPM_DEV_SELECTED/node_modules/eslint/bin/eslint.js" || return 7
+    node "$NPM_DEV_SELECTED/node_modules/prettier/bin/prettier.cjs" --version >>"$log" 2>&1 || return 7
+    node "$NPM_DEV_SELECTED/node_modules/eslint/bin/eslint.js" --version >>"$log" 2>&1 || return 7
   fi
 
   if [ -n "$DSH_PYTHON_DEV_TOOL_PACKAGES" ]; then
@@ -725,17 +745,47 @@ preflight_extended_dev_tools() {
       tail -n 80 "$log" >&2 || true
       return 7
     }
-    rm -rf "$PYTHON_DEV_WHEEL_CACHE"
-    mkdir -p "$PYTHON_DEV_WHEEL_CACHE"
-    echo '[DSH] Pre-downloading pinned Python developer tools before expensive Runtime overlay…'
-    if ! python3 -m pip download       --disable-pip-version-check       --dest "$PYTHON_DEV_WHEEL_CACHE"       $DSH_PYTHON_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
-      echo '[DSH] Pinned Python developer-tool preflight failed before Runtime overlay.' >&2
-      tail -n 160 "$log" >&2 || true
+
+    rm -rf "$PYTHON_DEV_WHEEL_CACHE" "$PYTHON_DEV_SELECTED"
+    mkdir -p "$PYTHON_DEV_WHEEL_CACHE" "$PYTHON_DEV_SELECTED"
+
+    # Build/download a complete local wheelhouse first. This keeps every build
+    # dependency/network failure ahead of the multi-hour Runtime overlay.
+    echo '[DSH] Building complete Python developer-tool wheelhouse before expensive Runtime overlay…'
+    if ! python3 -m pip wheel       --disable-pip-version-check       --wheel-dir "$PYTHON_DEV_WHEEL_CACHE"       $DSH_PYTHON_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
+      echo '[DSH] Pinned Python developer-tool wheelhouse build failed before Runtime overlay.' >&2
+      tail -n 180 "$log" >&2 || true
       return 7
     fi
+
+    # Materialize from the wheelhouse only. The formal staging phase will copy
+    # this verified tree and will never ask staged pip to see a host cache path.
+    if ! python3 -m pip install       --disable-pip-version-check       --no-index --find-links "$PYTHON_DEV_WHEEL_CACHE"       --prefix "$PYTHON_DEV_SELECTED"       $DSH_PYTHON_DEV_TOOL_PACKAGES >>"$log" 2>&1; then
+      echo '[DSH] Offline Python developer-tool materialization failed.' >&2
+      tail -n 180 "$log" >&2 || true
+      return 7
+    fi
+
+    python_site="$(find "$PYTHON_DEV_SELECTED/lib" -type d -path '*/site-packages' -print -quit 2>/dev/null || true)"
+    python_bin="$PYTHON_DEV_SELECTED/bin/cmake-format"
+    [ -n "$python_site" ] && [ -d "$python_site" ] || {
+      echo '[DSH] Python developer-tool site-packages tree missing after materialization.' >&2
+      return 7
+    }
+    [ -x "$python_bin" ] || {
+      echo '[DSH] cmake-format console entry missing after Python developer-tool materialization.' >&2
+      return 7
+    }
+
+    PYTHONPATH="$python_site" python3 "$python_bin" --version >>"$log" 2>&1 || {
+      echo '[DSH] Materialized cmake-format cannot execute with the host Python ABI.' >&2
+      tail -n 120 "$log" >&2 || true
+      return 7
+    }
+    python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'       > "$PYTHON_DEV_SELECTED/python-version.txt"
   fi
 
-  echo '[DSH] Extended developer-tool preflight: OK'
+  echo '[DSH] Extended developer-tool preflight: OK (fully materialized local trees)'
 }
 
 if [ "$DSH_REFRESH_RUNTIME" = "1" ] && [ "$DSH_TERMUX_TOOLS" = "1" ]; then
@@ -746,97 +796,110 @@ preflight_extended_dev_tools
 install_extended_dev_tools() {
   local stage="$1"
   local log="$CACHE_DIR/extended-dev-tools.log"
-  echo '[DSH] Installing pinned non-APT developer tools…'
+  local npm_dest="$stage/usr/lib/dsh-dev-tools/node_modules"
+  local py_site py_version staged_py_version py_dest="$stage/usr/lib/dsh-python-dev-tools/site-packages"
+  local real_cmake="$stage/usr/libexec/dsh/dev-tools/cmake-format-real"
+  echo '[DSH] Installing pinned non-APT developer tools from verified local trees…'
 
-  mkdir -p "$stage/home/tmp" "$NPM_BUILD_CACHE" "$PYTHON_DEV_WHEEL_CACHE"
+  mkdir -p "$stage/home/tmp" "$stage/usr/bin" "$stage/usr/libexec/dsh/dev-tools"
   : > "$log"
 
   if [ -n "$DSH_NPM_DEV_TOOL_PACKAGES" ]; then
-    [ -x "$stage/usr/bin/node" ] || {
-      echo '[DSH] Staged Node is missing before npm developer-tool install.' >&2
+    [ -d "$NPM_DEV_SELECTED/node_modules" ] || {
+      echo '[DSH] Frontloaded npm developer-tool tree is missing.' >&2
       return 7
     }
-    [ -x "$stage/usr/bin/npm" ] || {
-      echo '[DSH] Staged npm is missing before npm developer-tool install.' >&2
-      return 7
-    }
-    [ -f "$stage/usr/lib/node_modules/npm/bin/npm-cli.js" ] || {
-      echo '[DSH] Staged npm CLI payload is missing before developer-tool install.' >&2
-      return 7
-    }
+    [ -f "$NPM_DEV_SELECTED/node_modules/prettier/bin/prettier.cjs" ] || return 7
+    [ -f "$NPM_DEV_SELECTED/node_modules/eslint/bin/eslint.js" ] || return 7
 
-    env \
-      TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" \
-      PATH="$stage/usr/bin:/system/bin" \
-      LD_LIBRARY_PATH="$stage/usr/lib" \
-      HOME="$stage/home" TMPDIR="$stage/home/tmp" \
-      "$stage/usr/bin/npm" --prefix "$stage/usr" install --global \
-        --offline --ignore-scripts --no-audit --no-fund \
-        --cache "$NPM_BUILD_CACHE" \
-        $DSH_NPM_DEV_TOOL_PACKAGES >"$log" 2>&1 || {
-          echo '[DSH] npm developer-tool install failed.' >&2
-          sed -n '1,200p' "$log" >&2 || true
-          return 7
-        }
+    rm -rf "$stage/usr/lib/dsh-dev-tools"
+    mkdir -p "$npm_dest"
+    cp -RL --preserve=mode,timestamps "$NPM_DEV_SELECTED/node_modules/." "$npm_dest/"
+
+    # Keep developer-only JS dependencies isolated from the locked DSH graph.
+    # This prevents ESLint/Prettier dependencies from overwriting runtime packages.
+    rm -f "$stage/usr/bin/prettier" "$stage/usr/bin/eslint"
+    cat >"$stage/usr/bin/prettier" <<'EOF_PRETTIER'
+#!/system/bin/sh
+prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
+[ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
+exec "$prefix/bin/node" "$prefix/lib/dsh-dev-tools/node_modules/prettier/bin/prettier.cjs" "$@"
+EOF_PRETTIER
+    cat >"$stage/usr/bin/eslint" <<'EOF_ESLINT'
+#!/system/bin/sh
+prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
+[ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
+exec "$prefix/bin/node" "$prefix/lib/dsh-dev-tools/node_modules/eslint/bin/eslint.js" "$@"
+EOF_ESLINT
+    chmod 0755 "$stage/usr/bin/prettier" "$stage/usr/bin/eslint"
   fi
 
   if [ -n "$DSH_PYTHON_DEV_TOOL_PACKAGES" ]; then
-    env \
-      PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" \
-      LD_LIBRARY_PATH="$stage/usr/lib" \
-      TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp" \
-      "$stage/usr/libexec/dsh/wrappers/pip3" install --disable-pip-version-check \
-        --no-index --find-links "$PYTHON_DEV_WHEEL_CACHE" \
-        $DSH_PYTHON_DEV_TOOL_PACKAGES >>"$log" 2>&1 || {
-          echo '[DSH] Python developer-tool install failed.' >&2
-          sed -n '1,160p' "$log" >&2 || true
-          return 7
-        }
+    py_site="$(find "$PYTHON_DEV_SELECTED/lib" -type d -path '*/site-packages' -print -quit 2>/dev/null || true)"
+    [ -n "$py_site" ] && [ -d "$py_site" ] || {
+      echo '[DSH] Frontloaded Python developer-tool site-packages tree is missing.' >&2
+      return 7
+    }
+    [ -x "$PYTHON_DEV_SELECTED/bin/cmake-format" ] || {
+      echo '[DSH] Frontloaded cmake-format entry is missing.' >&2
+      return 7
+    }
+    [ -s "$PYTHON_DEV_SELECTED/python-version.txt" ] || {
+      echo '[DSH] Frontloaded Python developer-tool ABI marker is missing.' >&2
+      return 7
+    }
+
+    py_version="$(head -n 1 "$PYTHON_DEV_SELECTED/python-version.txt")"
+    staged_py_version="$(env       TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp"       PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib"       "$stage/usr/libexec/dsh/wrappers/python3" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'       2>/dev/null || true)"
+    if [ "$staged_py_version" != "$py_version" ]; then
+      echo "[DSH] Python developer-tool ABI mismatch: preload=$py_version staged=${staged_py_version:-unknown}" >&2
+      return 7
+    fi
+
+    rm -rf "$stage/usr/lib/dsh-python-dev-tools"
+    mkdir -p "$py_dest"
+    cp -RL --preserve=mode,timestamps "$py_site/." "$py_dest/"
+    cp -Lf "$PYTHON_DEV_SELECTED/bin/cmake-format" "$real_cmake"
+    chmod 0755 "$real_cmake"
+
+    # Copy any native-extension dependencies contributed by the materialized
+    # Python tree. Pure-Python cmakelang normally needs none, but this keeps the
+    # mechanism safe if a dependency gains an Android extension later.
+    while IFS= read -r -d '' py_native; do
+      copy_link_deps "$py_native" "$stage/usr/lib"
+    done < <(find "$py_dest" -type f \( -name '*.so' -o -name '*.so.*' \) -print0 2>/dev/null)
+
+    rm -f "$stage/usr/bin/cmake-format"
+    cat >"$stage/usr/bin/cmake-format" <<'EOF_CMAKE_FORMAT'
+#!/system/bin/sh
+prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
+[ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
+export PYTHONPATH="$prefix/lib/dsh-python-dev-tools/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+exec "$prefix/bin/python3" "$prefix/libexec/dsh/dev-tools/cmake-format-real" "$@"
+EOF_CMAKE_FORMAT
+    chmod 0755 "$stage/usr/bin/cmake-format"
+    rm -f "$stage/usr/libexec/dsh/wrappers/cmake-format"
+    ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/cmake-format"
   fi
 
-  test -f "$stage/usr/lib/node_modules/prettier/bin/prettier.cjs" || {
-    echo '[DSH] Prettier package entry missing after npm install.' >&2
+  test -f "$npm_dest/prettier/bin/prettier.cjs" || {
+    echo '[DSH] Prettier package entry missing after local developer-tool copy.' >&2
     return 7
   }
-  test -f "$stage/usr/lib/node_modules/eslint/bin/eslint.js" || {
-    echo '[DSH] ESLint package entry missing after npm install.' >&2
+  test -f "$npm_dest/eslint/bin/eslint.js" || {
+    echo '[DSH] ESLint package entry missing after local developer-tool copy.' >&2
     return 7
   }
-
-  # npm CLI shims commonly use /usr/bin/env node, which Android does not
-  # guarantee. Replace only the executable shims with Android-safe trampolines;
-  # package contents remain untouched.
-  rm -f "$stage/usr/bin/prettier" "$stage/usr/bin/eslint"
-  cat >"$stage/usr/bin/prettier" <<'EOF_PRETTIER'
-#!/system/bin/sh
-prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
-[ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
-exec "$prefix/bin/node" "$prefix/lib/node_modules/prettier/bin/prettier.cjs" "$@"
-EOF_PRETTIER
-  cat >"$stage/usr/bin/eslint" <<'EOF_ESLINT'
-#!/system/bin/sh
-prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
-[ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
-exec "$prefix/bin/node" "$prefix/lib/node_modules/eslint/bin/eslint.js" "$@"
-EOF_ESLINT
-  chmod 0755 "$stage/usr/bin/prettier" "$stage/usr/bin/eslint"
-
   test -x "$stage/usr/bin/cmake-format" || {
-    echo '[DSH] cmake-format missing after Python package install.' >&2
+    echo '[DSH] cmake-format wrapper missing after local developer-tool copy.' >&2
     return 7
   }
-  rm -f "$stage/usr/libexec/dsh/wrappers/cmake-format"
-  ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/cmake-format"
 
-  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" PATH="$stage/usr/bin:/system/bin" \
-    LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/prettier" --version >/dev/null
-  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" PATH="$stage/usr/bin:/system/bin" \
-    LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/eslint" --version >/dev/null
-  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp" \
-    PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" \
-    "$stage/usr/libexec/dsh/wrappers/cmake-format" --version >/dev/null
+  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" PATH="$stage/usr/bin:/system/bin"     LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/prettier" --version >/dev/null
+  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" PATH="$stage/usr/bin:/system/bin"     LD_LIBRARY_PATH="$stage/usr/lib" "$stage/usr/bin/eslint" --version >/dev/null
+  env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$stage/home" TMPDIR="$stage/home/tmp"     PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib"     "$stage/usr/libexec/dsh/wrappers/cmake-format" --version >/dev/null
 
-  echo '[DSH] Extended developer tools: OK (prettier + eslint + cmake-format)'
+  echo '[DSH] Extended developer tools: OK (verified local copies; no late package resolution)'
 }
 
 install_terminal_shell_runtime() {
