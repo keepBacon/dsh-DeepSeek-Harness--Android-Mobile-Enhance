@@ -3,6 +3,89 @@
 # Embedded Termux-like package/tool runtime for DSH Mobile.
 # Sourced by build-termux.sh after copy_link_deps() is defined.
 
+dsh_repairable_compiler_alias_target() {
+  case "$1" in
+    cc) printf '%s\n' clang ;;
+    c++) printf '%s\n' clang++ ;;
+    gcc) printf '%s\n' clang ;;
+    g++) printf '%s\n' clang++ ;;
+    *) return 1 ;;
+  esac
+}
+
+dsh_repair_staged_compiler_aliases() {
+  local stage="$1" alias target
+  for alias in cc c++ gcc g++; do
+    target="$(dsh_repairable_compiler_alias_target "$alias" || true)"
+    [ -n "$target" ] || continue
+    [ -x "$stage/usr/bin/$target" ] || continue
+    rm -f -- "$stage/usr/bin/$alias"
+    ln -s "$target" "$stage/usr/bin/$alias"
+  done
+  echo "[DSH] Staged compiler aliases: OK (cc/c++/gcc/g++ -> clang family)"
+}
+
+dsh_validate_host_package_symlink_closure() {
+  local host_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+  local roots=() pkg src target resolved alias_target fail=0
+  read -r -a roots <<< "${DSH_TERMUX_TOOL_PACKAGES:-} ${DSH_TERMUX_ROOT_TOOL_PACKAGES:-} ${DSH_TERMUX_RUNTIME_PACKAGES:-$DSH_TERMUX_RUNTIME_PACKAGES_DEFAULT} ${DSH_EXTRA_TERMUX_PACKAGES:-}"
+
+  declare -A seen=()
+  for pkg in "${roots[@]}"; do [ -n "$pkg" ] && seen["$pkg"]=1; done
+  local owner
+  while IFS= read -r owner; do
+    [ -n "$owner" ] || continue
+    if [ -z "${seen[$owner]+x}" ]; then
+      roots+=("$owner")
+      seen["$owner"]=1
+    fi
+  done < <(dsh_required_tool_owner_packages)
+
+  local closure="$CACHE_DIR/dsh-termux-symlink-preflight-packages.txt"
+  resolve_termux_package_closure "${roots[@]}" > "$closure" || return 7
+
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    while IFS= read -r src; do
+      [ -L "$src" ] || continue
+      target="$(readlink "$src")"
+      case "$target" in
+        "$host_prefix"/*|/system/bin/sh) continue ;;
+        /*)
+          alias_target="$(dsh_repairable_compiler_alias_target "${src##*/}" || true)"
+          if [ -n "$alias_target" ] && [ -x "$host_prefix/bin/$alias_target" ]; then
+            echo "[DSH] Host package symlink will be sanitized: ${src#"$host_prefix"/} -> $target => bin/$alias_target"
+            continue
+          fi
+          echo "[DSH] Unsafe package-owned absolute symlink before overlay: ${src#"$host_prefix"/} -> $target (package=$pkg)" >&2
+          fail=1
+          ;;
+        *)
+          resolved="$(realpath -m "$(dirname "$src")/$target")"
+          case "$resolved" in
+            "$host_prefix"/*) ;;
+            *)
+              alias_target="$(dsh_repairable_compiler_alias_target "${src##*/}" || true)"
+              if [ -n "$alias_target" ] && [ -x "$host_prefix/bin/$alias_target" ]; then
+                echo "[DSH] Host package symlink will be sanitized: ${src#"$host_prefix"/} -> $target => bin/$alias_target"
+              else
+                echo "[DSH] Unsafe package-owned relative symlink escapes Termux prefix: ${src#"$host_prefix"/} -> $target (package=$pkg)" >&2
+                fail=1
+              fi
+              ;;
+          esac
+          ;;
+      esac
+    done < <(dpkg-query -L "$pkg" 2>/dev/null || true)
+  done < "$closure"
+
+  [ "$fail" -eq 0 ] || {
+    echo "[DSH] Package symlink closure preflight failed before expensive overlay." >&2
+    return 7
+  }
+  echo "[DSH] Package symlink closure preflight: OK"
+}
+
 resolve_termux_package_closure() {
   local roots=("$@")
   local dependency_output='' pkg
@@ -63,12 +146,31 @@ copy_termux_package_payload() {
       mkdir -p "$(dirname "$dest")"
       [ ! -e "$dest" ] && [ ! -L "$dest" ] || rm -rf -- "$dest"
       target="$(readlink "$src")"
-      if [[ "$target" = "$host_prefix"/* ]]; then
+      local alias_target resolved_target
+      alias_target="$(dsh_repairable_compiler_alias_target "${src##*/}" || true)"
+      if [ -n "$alias_target" ] && [ -x "$host_prefix/bin/$alias_target" ]; then
+        ln -s "$alias_target" "$dest"
+      elif [[ "$target" = "$host_prefix"/* ]]; then
         mapped="$stage/usr/${target#"$host_prefix"/}"
         relative="$(realpath -m --relative-to="$(dirname "$dest")" "$mapped")"
         ln -s "$relative" "$dest"
+      elif [[ "$target" = /* ]]; then
+        case "$target" in
+          /system/bin/sh) ln -s "$target" "$dest" ;;
+          *)
+            echo "[DSH] Refusing package-owned host absolute symlink during overlay: ${src#"$host_prefix"/} -> $target" >&2
+            return 7
+            ;;
+        esac
       else
-        ln -s "$target" "$dest"
+        resolved_target="$(realpath -m "$(dirname "$src")/$target")"
+        case "$resolved_target" in
+          "$host_prefix"/*) ln -s "$target" "$dest" ;;
+          *)
+            echo "[DSH] Refusing package-owned relative symlink escaping Termux prefix: ${src#"$host_prefix"/} -> $target" >&2
+            return 7
+            ;;
+        esac
       fi
     elif [ -d "$src" ]; then
       if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -d "$dest" ]; }; then
@@ -857,6 +959,7 @@ dsh_preflight_termux_tool_packages() {
 
   dsh_validate_host_tool_contract || return 7
   dsh_validate_host_entrypoint_stageability || return 7
+  dsh_validate_host_package_symlink_closure || return 7
   dsh_host_runtime_interpreter_smoke || return 7
   dsh_validate_host_python_runtime_closure || return 7
   dsh_repair_broken_host_dynamic_tools || return 7
@@ -1059,6 +1162,7 @@ EOF_TERMUX_WRAPPER
   # contract so command aliases cannot disappear from the APK staging tree.
   dsh_materialize_required_host_entrypoints "$stage" || return 7
   dsh_materialize_runtime_interpreters "$stage" || return 7
+  dsh_repair_staged_compiler_aliases "$stage" || return 7
 
   # Validate package contents immediately. Do not spend minutes compiling
   # node-pty only to discover that a requested Termux subpackage did not

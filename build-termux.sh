@@ -338,8 +338,14 @@ normalize_snapshot_symlinks() {
   local stage="$1"
   local legacy_prefix="/data/data/com.termux/files/usr"
   local link target mapped relative
+  local links=() invalid=() survivor=()
 
-  while IFS= read -r -d '' link; do
+  # Materialize the complete list first. Never return from a live
+  # `find -print0` producer under pipefail; doing so SIGPIPEs find and turns
+  # one real symlink error into a misleading secondary exit=141.
+  mapfile -d '' -t links < <(find "$stage" -type l -print0)
+
+  for link in "${links[@]}"; do
     target="$(readlink "$link")"
     case "$target" in
       "$legacy_prefix"/*)
@@ -349,27 +355,31 @@ normalize_snapshot_symlinks() {
         ln -s "$relative" "$link"
         ;;
       /system/bin/sh)
-        # Exact Android system-shell target is intentionally supported.
         ;;
       /*)
-        echo "[DSH] Refusing snapshot absolute symlink: ${link#"$stage"/} -> $target" >&2
-        return 4
+        invalid+=("${link#"$stage"/} -> $target")
         ;;
     esac
-  done < <(find "$stage" -type l -print0)
+  done
 
-  # Build-time invariant: no Termux-prefix absolute links may survive into the
-  # APK. Android extraction also contains a relocation fallback, but a clean
-  # archive is the primary defense against first-run extraction failures.
-  local survivor=""
-  while IFS= read -r -d '' link; do
+  if [ "${#invalid[@]}" -gt 0 ]; then
+    echo "[DSH] Refusing snapshot absolute symlink(s):" >&2
+    printf '[DSH]   %s\n' "${invalid[@]}" >&2
+    return 4
+  fi
+
+  # Re-read only after all rewrites are complete and report every survivor.
+  links=()
+  mapfile -d '' -t links < <(find "$stage" -type l -print0)
+  for link in "${links[@]}"; do
     target="$(readlink "$link")"
     case "$target" in
-      "$legacy_prefix"/*) survivor="${link#"$stage"/} -> $target"; break ;;
+      "$legacy_prefix"/*) survivor+=("${link#"$stage"/} -> $target") ;;
     esac
-  done < <(find "$stage" -type l -print0)
-  if [ -n "$survivor" ]; then
-    echo "[DSH] legacy Termux absolute symlink survived normalization: $survivor" >&2
+  done
+  if [ "${#survivor[@]}" -gt 0 ]; then
+    echo "[DSH] legacy Termux absolute symlink(s) survived normalization:" >&2
+    printf '[DSH]   %s\n' "${survivor[@]}" >&2
     return 4
   fi
 }

@@ -142,6 +142,61 @@ jobs:
           test "$(readlink "$stage/usr/bin/nc")" = "netcat-openbsd"
           test "$("$stage/usr/bin/nc")" = "netcat-openbsd"
 
+      - name: Termux package symlink sanitization contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/dsh-termux-tool-catalog.sh
+          CACHE_DIR="$RUNNER_TEMP/dsh-symlink-contract-cache"
+          mkdir -p "$CACHE_DIR"
+          copy_link_deps() { :; }
+          source scripts/embed-termux-tools.sh
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          fake_prefix="$tmp/host/usr"
+          stage="$tmp/stage"
+          mkdir -p "$fake_prefix/bin" "$stage/usr/bin"
+
+          cat >"$fake_prefix/bin/clang" <<'EOF_CLANG'
+          #!/usr/bin/env bash
+          printf 'clang\n'
+          EOF_CLANG
+          cat >"$fake_prefix/bin/clang++" <<'EOF_CLANGXX'
+          #!/usr/bin/env bash
+          printf 'clang++\n'
+          EOF_CLANGXX
+          chmod +x "$fake_prefix/bin/clang" "$fake_prefix/bin/clang++"
+          ln -s /data/data/com.termux/files/home/cc "$fake_prefix/bin/cc"
+          ln -s /data/data/com.termux/files/home/cxx "$fake_prefix/bin/c++"
+
+          dpkg-query() {
+            if [ "$1" = "-L" ]; then
+              printf '%s\n' "$fake_prefix/bin/clang" "$fake_prefix/bin/clang++" "$fake_prefix/bin/cc" "$fake_prefix/bin/c++"
+              return 0
+            fi
+            command dpkg-query "$@"
+          }
+
+          PREFIX="$fake_prefix" copy_termux_package_payload "$stage" fake-clang
+          test -L "$stage/usr/bin/cc"
+          test "$(readlink "$stage/usr/bin/cc")" = "clang"
+          test -L "$stage/usr/bin/c++"
+          test "$(readlink "$stage/usr/bin/c++")" = "clang++"
+
+          ln -sf /tmp/host-only-tool "$fake_prefix/bin/badtool"
+          dpkg-query() {
+            if [ "$1" = "-L" ]; then
+              printf '%s\n' "$fake_prefix/bin/badtool"
+              return 0
+            fi
+            command dpkg-query "$@"
+          }
+          if PREFIX="$fake_prefix" copy_termux_package_payload "$stage" fake-bad; then
+            echo "unsafe absolute package symlink was accepted" >&2
+            exit 1
+          fi
+
       - name: Metadata-less Python CLI import closure contract
         shell: bash
         run: |
