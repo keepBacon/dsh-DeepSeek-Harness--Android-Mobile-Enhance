@@ -409,7 +409,7 @@ must "$ETT" 'dsh_validate_host_package_symlink_closure()'
 must "$ETT" 'dsh_repair_staged_compiler_aliases()'
 must "$ETT" 'Staged compiler aliases: OK'
 must "$ETT" 'Unsafe package-owned absolute symlink before overlay'
-must "$BT" 'mapfile -d '\''' '\'''-t links < <(find "$stage" -type l -print0)'
+must "$BT" "mapfile -d '' -t links < <(find \"\$stage\" -type l -print0)"
 must "$BT" 'Refusing snapshot absolute symlink(s):'
 forbid "$BT" 'done < <(find "$stage" -type l -print0)'
 must "$ETT" 'dsh_materialize_required_host_entrypoints()'
