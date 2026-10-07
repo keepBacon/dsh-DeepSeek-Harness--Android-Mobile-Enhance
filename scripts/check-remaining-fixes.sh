@@ -49,6 +49,15 @@ must "$EM" 'packageDeclaresBundle(name, profile)'
 must "$EM" '没有声明 dsh.bundle.patch，不能作为 profile 层启用'
 must "$MA" 'isEnabled = info.bundle'
 
+# M-04b Codex subscription keeps backend/model directory capabilities while
+# Android DSH owns the composer model-picker slot.
+must "$EM" 'applyAndroidCodexModelPickerCompat'
+must "$EM" 'DSH Android compat: native model picker owns conversation.input.model'
+must "$EM" 'dsh-codex-subscription-en'
+must "$EM" 'scope.slots.inject(\"conversation.input.model\"'
+must "$EM" 'CodexModelSelect'
+must "$EM" 'applyAndroidCodexModelPickerCompat("web").forEach'
+
 # M-05/M-06 mobile shim must be event/mutation driven, not polling/full-body text scanning.
 forbid "$MA" 'body.innerText'
 forbid "$MA" 'setInterval(sync'

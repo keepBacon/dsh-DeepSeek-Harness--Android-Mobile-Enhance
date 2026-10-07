@@ -1357,6 +1357,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
       ensurePluginWorkspaceCompat("web")
+      applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
       val mcpPatch = mcpConfigManager.ensureRuntimePatch()
       val args = arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
@@ -2016,6 +2017,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
     val after = listPluginBundles(profile)
     val added = after.filter { !before.containsKey(it.name) }
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
     val validation = validateProfileConfig(profile)
     if (!validation.ok) {
       val disabled = mutableListOf<String>()
@@ -2037,6 +2039,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       ))
     }
 
+    if (compatNotes.isNotEmpty()) {
+      result = result.copy(output = buildString {
+        append(result.output.trim())
+        append("\n\n[Android compatibility]\n")
+        compatNotes.forEach { append("• ").append(it).append('\n') }
+      }.trim())
+    }
     val warnings = added.flatMap { pluginMetadataWarnings(it.name, profile) }
     if (warnings.isNotEmpty()) {
       result = result.copy(output = buildString {
@@ -2109,8 +2118,16 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val clean = name.trim()
     if (!safePluginToken(clean)) return PluginCommandResult(false, -1, "插件名称无效")
     val wasEnabled = listPluginBundles(profile).firstOrNull { it.name == clean }?.enabled == true
-    val result = runPluginCommandWithRetry(profile, listOf("update", clean), timeoutMinutes = 20)
+    var result = runPluginCommandWithRetry(profile, listOf("update", clean), timeoutMinutes = 20)
     if (!result.ok) return result
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
+    if (compatNotes.isNotEmpty()) {
+      result = result.copy(output = buildString {
+        append(result.output.trim())
+        append("\n\n[Android compatibility]\n")
+        compatNotes.forEach { append("• ").append(it).append('\n') }
+      }.trim())
+    }
     val validation = validateProfileConfig(profile)
     if (validation.ok) return result
     if (wasEnabled) setBundleEnabledRaw(clean, false, profile)
@@ -2124,8 +2141,16 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   /** Update every mutable dependency in the selected profile. */
   fun updateAllPlugins(profile: String = "web"): PluginCommandResult {
-    val result = runPluginCommandWithRetry(profile, listOf("update"), timeoutMinutes = 25)
+    var result = runPluginCommandWithRetry(profile, listOf("update"), timeoutMinutes = 25)
     if (!result.ok) return result
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
+    if (compatNotes.isNotEmpty()) {
+      result = result.copy(output = buildString {
+        append(result.output.trim())
+        append("\n\n[Android compatibility]\n")
+        compatNotes.forEach { append("• ").append(it).append('\n') }
+      }.trim())
+    }
     val validation = validateProfileConfig(profile)
     if (validation.ok) return result
     val recovery = disableThirdPartyBundles(profile)
@@ -2149,6 +2174,98 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun safePackageName(value: String): Boolean {
     if (value.isEmpty() || value.length > 214) return false
     return Regex("""^(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$""").matches(value)
+  }
+
+  /**
+   * Android keeps DSH's native conversation.input.model slot authoritative.
+   *
+   * dsh-codex-subscription registers its own CodexModelSelect on the same slot
+   * with priority -10. That client-only override is useful on desktop, but on
+   * Android WebView it can make the composer model control non-interactive.
+   * Keep the plugin backend/provider/model directory/quota/search/image features
+   * intact and remove only that one client slot registration from the installed
+   * profile copy before the Host boots.
+   *
+   * This is intentionally package-specific and idempotent. Unknown plugins are
+   * never rewritten. If a future plugin release changes its bundle shape, we
+   * log and leave the file untouched rather than guessing.
+   */
+  private fun applyAndroidCodexModelPickerCompat(profile: String = "web"): List<String> {
+    val packageNames = listOf(
+      "dsh-codex-subscription-en",
+      "dsh-codex-subscription",
+      "@mamdouh-aboammar/dsh-codex-subscription",
+    )
+    val marker = "DSH Android compat: native model picker owns conversation.input.model"
+    val notes = mutableListOf<String>()
+
+    for (packageName in packageNames) {
+      val root = File(profileDir(profile), "node_modules/$packageName")
+      val manifest = File(root, "package.json")
+      val client = File(root, "lib/client.js")
+      if (!manifest.isFile || !client.isFile) continue
+
+      val text = try { client.readText() } catch (t: Throwable) {
+        Log.w(TAG, "read Codex client bundle failed: ${client.absolutePath}", t)
+        notes += "$packageName: client bundle unreadable"
+        continue
+      }
+      if (text.contains(marker)) {
+        notes += "$packageName: Android native model picker compat already applied"
+        continue
+      }
+
+      val doubleAnchor = "scope.slots.inject(\"conversation.input.model\""
+      val singleAnchor = "scope.slots.inject('conversation.input.model'"
+      val starts = buildList {
+        var from = 0
+        while (true) {
+          val a = text.indexOf(doubleAnchor, from)
+          val b = text.indexOf(singleAnchor, from)
+          val next = listOf(a, b).filter { it >= 0 }.minOrNull() ?: break
+          add(next)
+          from = next + 1
+        }
+      }
+      if (starts.isEmpty()) {
+        // Newer releases may already have removed the override themselves.
+        notes += "$packageName: no conversation.input.model override found"
+        continue
+      }
+      if (starts.size != 1) {
+        Log.w(TAG, "Codex model slot anchor count changed for $packageName: ${starts.size}")
+        notes += "$packageName: ambiguous model-slot override (${starts.size})"
+        continue
+      }
+
+      val start = starts.single()
+      val tailRegex = Regex("""\}\s*,\s*CodexModelSelect\s*\)\s*\)\s*;?""")
+      val tail = tailRegex.find(text, start)
+      if (tail == null) {
+        Log.w(TAG, "Codex model slot tail changed for $packageName")
+        notes += "$packageName: model-slot tail changed"
+        continue
+      }
+
+      val replacement = "/* $marker */"
+      val patched = text.substring(0, start) + replacement + text.substring(tail.range.last + 1)
+      if (patched.contains("scope.slots.inject(\"conversation.input.model\"") ||
+          patched.contains("scope.slots.inject('conversation.input.model'")) {
+        Log.w(TAG, "Codex model slot override survived compat patch for $packageName")
+        notes += "$packageName: model-slot override survived patch"
+        continue
+      }
+
+      try {
+        writeTextAtomic(client, patched)
+        notes += "$packageName: kept Provider/model directory; restored native DSH model picker"
+        Log.i(TAG, "Applied Android Codex model-picker compatibility: $packageName")
+      } catch (t: Throwable) {
+        Log.w(TAG, "write Codex client compat failed: ${client.absolutePath}", t)
+        notes += "$packageName: client compat write failed"
+      }
+    }
+    return notes
   }
 
   private fun profileDir(profile: String = "web"): File = File(homeDir, ".dsh/profiles/$profile")
