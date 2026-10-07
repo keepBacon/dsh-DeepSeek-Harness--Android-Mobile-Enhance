@@ -58,6 +58,20 @@ must "$EM" 'scope.slots.inject(\"conversation.input.model\"'
 must "$EM" 'CodexModelSelect'
 must "$EM" 'applyAndroidCodexModelPickerCompat("web").forEach'
 
+# Android Tools: Chinese presentation and shell-interpreted Termux runner.
+must "$MA" "title.textContent = '工具'"
+must "$MA" "subtitle.textContent = 'Android 运行时工具'"
+must "$MA" "back.textContent = '返回'"
+must "$MA" "refresh.textContent = '刷新'"
+must "$MA" "appendSectionLabel('DSH 桌面功能')"
+must "$EM" 'ProcessBuilder('
+must "$EM" '"/system/bin/sh",'
+must "$EM" 'termuxRun.absolutePath,'
+must "$EM" '"bash",'
+must "$EM" '"python3",'
+forbid "$EM" 'ProcessBuilder(\n        termuxRun.absolutePath,'
+must "$EM" '"文件搜索", "作业", "技能", "子代理"'
+
 # M-05/M-06 mobile shim must be event/mutation driven, not polling/full-body text scanning.
 forbid "$MA" 'body.innerText'
 forbid "$MA" 'setInterval(sync'
