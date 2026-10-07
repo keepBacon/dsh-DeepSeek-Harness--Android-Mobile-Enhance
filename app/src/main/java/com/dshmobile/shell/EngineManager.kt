@@ -872,6 +872,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "node-pty 原生模块不可用；构建端需安装 clang/cmake/make/python 后重新构建。"
     text.contains("sharp", ignoreCase = true) && text.contains("android", ignoreCase = true) ->
       "Sharp Android 原生绑定不可用；v0.1 兼容构建会安装 @img/sharp-wasm32 回退。"
+    text.contains("UNSUPPORTED_SCHEMA", ignoreCase = true) || text.contains("schema.type must be one of", ignoreCase = true) ->
+      "检测到社区插件使用旧版工具输出 JSON Schema；Android 宿主会在工具注册边界做非破坏式兼容规范化，不改写插件源码或用户数据。"
     text.contains("installSettingsSection", ignoreCase = true) || text.contains("settingsNamespace", ignoreCase = true) ->
       "检测到旧版社区插件 Settings API；请更新插件，或使用 v0.1 的 legacy settings compatibility shim。"
     text.contains("git", ignoreCase = true) && (text.contains("not found", ignoreCase = true) || text.contains("ENOENT", ignoreCase = true)) ->
