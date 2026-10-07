@@ -54,7 +54,7 @@ must "$MA" 'isEnabled = info.bundle'
 must "$EM" 'applyAndroidCodexModelPickerCompat'
 must "$EM" 'DSH Android compat: native model picker owns conversation.input.model'
 must "$EM" 'dsh-codex-subscription-en'
-must "$EM" 'scope.slots.inject(\\\"conversation.input.model\\\"'
+must "$EM" 'scope.slots.inject(\"conversation.input.model\"'
 must "$EM" 'CodexModelSelect'
 must "$EM" 'applyAndroidCodexModelPickerCompat("web").forEach'
 
