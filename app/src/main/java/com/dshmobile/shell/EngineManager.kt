@@ -241,13 +241,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
             JSONObject()
               .put("ok", false)
               .put("category", normalized)
-              .put("error", "Command is empty")
+              .put("error", "命令不能为空")
               .toString()
           } else if (value.length > 4096) {
             JSONObject()
               .put("ok", false)
               .put("category", normalized)
-              .put("error", "Command exceeds 4096 characters")
+              .put("error", "命令长度超过 4096 个字符")
               .toString()
           } else {
             runMobileToolShell(normalized, value, workspacePath, timeoutSeconds = 20)
@@ -264,7 +264,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         else -> JSONObject()
           .put("ok", false)
           .put("category", normalized)
-          .put("error", "Unknown tool category")
+          .put("error", "未知工具分类")
           .toString()
       }
     } catch (t: Throwable) {
@@ -387,7 +387,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         .put("ok", false)
         .put("category", "files")
         .put("cwd", cwd.absolutePath)
-        .put("error", "No active workspace")
+        .put("error", "当前没有可用工作区")
         .toString()
     }
 
@@ -629,14 +629,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   private fun startLocalDevServer(portText: String, workspacePath: String?): String {
     val port = portText.trim().toIntOrNull()
-      ?: return JSONObject().put("ok", false).put("category", "network").put("error", "Invalid port").toString()
+      ?: return JSONObject().put("ok", false).put("category", "network").put("error", "端口无效").toString()
     if (port !in 1024..65535) {
-      return JSONObject().put("ok", false).put("category", "network").put("error", "Port must be 1024-65535").toString()
+      return JSONObject().put("ok", false).put("category", "network").put("error", "端口必须位于 1024–65535").toString()
     }
 
     val cwd = mobileToolCwd(workspacePath)
     if (workspacePath.isNullOrBlank() || !cwd.isDirectory) {
-      return JSONObject().put("ok", false).put("category", "network").put("error", "No active workspace").toString()
+      return JSONObject().put("ok", false).put("category", "network").put("error", "当前没有可用工作区").toString()
     }
 
     val current = DEV_SERVER_PROCESS.get()
@@ -645,13 +645,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       return JSONObject()
         .put("ok", false)
         .put("category", "network")
-        .put("error", "Local dev server already running on port $currentPort")
+        .put("error", "本地开发服务器已在端口 $currentPort 运行")
         .toString()
     }
 
     val termuxRun = File(usrDir, "libexec/dsh/termux-run")
     if (!termuxRun.isFile) {
-      return JSONObject().put("ok", false).put("category", "network").put("error", "Embedded Termux runner is unavailable").toString()
+      return JSONObject().put("ok", false).put("category", "network").put("error", "内置 Termux 执行器不可用").toString()
     }
 
     val logDir = File(homeDir, ".dsh-mobile").apply { mkdirs() }
@@ -659,6 +659,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     return try {
       if (log.length() > 512 * 1024) log.writeText("")
       val builder = ProcessBuilder(
+        "/system/bin/sh",
         termuxRun.absolutePath,
         "python3",
         "-m",
@@ -677,7 +678,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         JSONObject()
           .put("ok", false)
           .put("category", "network")
-          .put("error", "Local dev server exited immediately")
+          .put("error", "本地开发服务器启动后立即退出")
           .put("output", tail)
           .toString()
       } else {
@@ -690,7 +691,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
           .put("url", "http://127.0.0.1:$port/")
           .put("port", port)
           .put("root", cwd.absolutePath)
-          .put("output", "Local Python HTTP server started on 127.0.0.1:$port")
+          .put("output", "本地 Python HTTP 服务器已启动：127.0.0.1:$port")
           .toString()
       }
     } catch (t: Throwable) {
@@ -707,7 +708,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val port = DEV_SERVER_PORT.getAndSet(0)
     DEV_SERVER_ROOT.set("")
     if (process == null) {
-      return JSONObject().put("ok", true).put("category", "network").put("output", "No managed dev server is running").toString()
+      return JSONObject().put("ok", true).put("category", "network").put("output", "当前没有由应用管理的开发服务器").toString()
     }
     return try {
       if (process.isAlive) {
@@ -717,7 +718,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       JSONObject()
         .put("ok", true)
         .put("category", "network")
-        .put("output", "Stopped local dev server on port $port")
+        .put("output", "已停止端口 $port 上的本地开发服务器")
         .toString()
     } catch (t: Throwable) {
       JSONObject()
@@ -809,7 +810,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         .put("ok", false)
         .put("category", category)
         .put("cwd", cwd.absolutePath)
-        .put("error", "Embedded Termux runner is unavailable")
+        .put("error", "内置 Termux 执行器不可用")
         .toString()
     }
 
@@ -817,6 +818,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     var process: Process? = null
     return try {
       val builder = ProcessBuilder(
+        "/system/bin/sh",
         termuxRun.absolutePath,
         "bash",
         "-lc",
@@ -843,7 +845,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         .put("timedOut", !finished)
         .put("output", output)
         .apply {
-          if (!finished) put("error", "Command timed out after $timeoutSeconds seconds")
+          if (!finished) put("error", "命令执行超时（$timeoutSeconds 秒）")
         }
         .toString()
     } catch (t: Throwable) {
