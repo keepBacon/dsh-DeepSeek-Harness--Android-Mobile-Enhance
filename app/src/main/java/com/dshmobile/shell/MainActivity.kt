@@ -2245,25 +2245,25 @@ class MainActivity : ComponentActivity() {
         };
 
         const TOOL_DEFS = [
-          { id: 'terminal', label: 'Terminal', hint: 'Shell and persistent terminal sessions' },
-          { id: 'files', label: 'Files', hint: 'Workspace files and file operations' },
-          { id: 'processes', label: 'Processes', hint: 'Process and runtime inspection' },
-          { id: 'packages', label: 'Packages', hint: 'pkg, apt, dpkg and installed tools' },
-          { id: 'git', label: 'Git', hint: 'Repository status and source control' },
-          { id: 'network', label: 'Network', hint: 'Interfaces, sockets, DNS and HTTP' },
-          { id: 'system', label: 'System', hint: 'Android and runtime environment' }
+          { id: 'terminal', label: '终端', hint: 'Shell 与持久终端会话' },
+          { id: 'files', label: '文件', hint: '工作区文件与文件操作' },
+          { id: 'processes', label: '进程', hint: '进程与运行时检查' },
+          { id: 'packages', label: '软件包', hint: 'pkg、apt、dpkg 与已安装工具' },
+          { id: 'git', label: 'Git', hint: '仓库状态与源码管理' },
+          { id: 'network', label: '网络', hint: '网络接口、套接字、DNS 与 HTTP' },
+          { id: 'system', label: '系统', hint: 'Android 与运行时环境' }
         ];
 
         const DSH_SURFACE_DEFS = [
-          { id: 'workspace', label: 'Workspace', hint: 'Official DSH workspace and files', tests: ['workspace', '工作区'] },
-          { id: 'jobs', label: 'Jobs', hint: 'Official DSH background jobs', tests: ['jobs', '作业', '任务'] },
-          { id: 'skills', label: 'Skills', hint: 'Official DSH Skills surface', tests: ['skills', '技能'] },
-          { id: 'subagents', label: 'Subagents', hint: 'Official DSH subagent controls', tests: ['subagents', 'sub-agents', 'subagent', '子代理', '子智能体'] },
-          { id: 'workflow', label: 'Workflow', hint: 'Official DSH workflow runs', tests: ['workflows', 'workflow', '工作流'] },
-          { id: 'plugins', label: 'Plugins', hint: 'Official DSH plugin inventory', tests: ['plugins', 'plugin', '插件'] },
-          { id: 'models', label: 'Models', hint: 'Official DSH model settings', tests: ['models', 'model', '模型'] },
-          { id: 'agent-presets', label: 'Agent Presets', hint: 'Official DSH agent preset settings', tests: ['agent presets', 'agent preset', 'agent 预设'] },
-          { id: 'settings', label: 'Settings', hint: 'Official DSH settings', tests: ['settings', 'general', '设置', '通用设置'] }
+          { id: 'workspace', label: '工作区', hint: 'DSH 官方工作区与文件', tests: ['workspace', '工作区'] },
+          { id: 'jobs', label: '作业', hint: 'DSH 官方后台作业', tests: ['jobs', '作业', '任务'] },
+          { id: 'skills', label: '技能', hint: 'DSH 官方 Skills 页面', tests: ['skills', '技能'] },
+          { id: 'subagents', label: '子代理', hint: 'DSH 官方子代理控制', tests: ['subagents', 'sub-agents', 'subagent', '子代理', '子智能体'] },
+          { id: 'workflow', label: '工作流', hint: 'DSH 官方工作流运行记录', tests: ['workflows', 'workflow', '工作流'] },
+          { id: 'plugins', label: '插件', hint: 'DSH 官方插件管理', tests: ['plugins', 'plugin', '插件'] },
+          { id: 'models', label: '模型', hint: 'DSH 官方模型设置', tests: ['models', 'model', '模型'] },
+          { id: 'agent-presets', label: 'Agent 预设', hint: 'DSH 官方 Agent 预设设置', tests: ['agent presets', 'agent preset', 'agent 预设'] },
+          { id: 'settings', label: '设置', hint: 'DSH 官方设置', tests: ['settings', 'general', '设置', '通用设置'] }
         ];
 
         const closeToolsPanel = () => {
@@ -2314,7 +2314,7 @@ class MainActivity : ComponentActivity() {
           if (!document.getElementById(TOOLS_PANEL_ID)) {
             const panel = document.createElement('aside');
             panel.id = TOOLS_PANEL_ID;
-            panel.setAttribute('aria-label', 'Tools');
+            panel.setAttribute('aria-label', '工具');
 
             const header = document.createElement('div');
             header.className = 'dsh-tools-header';
@@ -2322,22 +2322,22 @@ class MainActivity : ComponentActivity() {
             const heading = document.createElement('div');
             heading.className = 'dsh-tools-title';
             const title = document.createElement('strong');
-            title.textContent = 'Tools';
+            title.textContent = '工具';
             const subtitle = document.createElement('span');
-            subtitle.textContent = 'Android runtime utilities';
+            subtitle.textContent = 'Android 运行时工具';
             heading.append(title, subtitle);
 
             const close = document.createElement('button');
             close.type = 'button';
             close.className = 'dsh-tools-close';
-            close.setAttribute('aria-label', 'Close tools');
+            close.setAttribute('aria-label', '关闭工具');
             close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
             close.addEventListener('click', closeToolsPanel);
             header.append(heading, close);
 
             const list = document.createElement('nav');
             list.className = 'dsh-tools-list';
-            list.setAttribute('aria-label', 'Tool categories');
+            list.setAttribute('aria-label', '工具分类');
 
             const detail = document.createElement('section');
             detail.className = 'dsh-tool-detail';
@@ -2347,13 +2347,13 @@ class MainActivity : ComponentActivity() {
             const back = document.createElement('button');
             back.type = 'button';
             back.className = 'dsh-tool-back';
-            back.textContent = 'Back';
+            back.textContent = '返回';
             const detailTitle = document.createElement('div');
             detailTitle.className = 'dsh-tool-detail-title';
             const refresh = document.createElement('button');
             refresh.type = 'button';
             refresh.className = 'dsh-tool-refresh';
-            refresh.textContent = 'Refresh';
+            refresh.textContent = '刷新';
             detailHead.append(back, detailTitle, refresh);
 
             const terminalRow = document.createElement('div');
@@ -2363,11 +2363,11 @@ class MainActivity : ComponentActivity() {
             command.type = 'text';
             command.autocomplete = 'off';
             command.spellcheck = false;
-            command.placeholder = 'Enter command';
+            command.placeholder = '输入命令';
             const run = document.createElement('button');
             run.type = 'button';
             run.className = 'dsh-tool-run';
-            run.textContent = 'Run';
+            run.textContent = '运行';
             terminalRow.append(command, run);
 
             const catalogSummary = document.createElement('div');
@@ -2380,7 +2380,7 @@ class MainActivity : ComponentActivity() {
 
             const output = document.createElement('pre');
             output.className = 'dsh-tool-output';
-            output.textContent = 'Select a tool.';
+            output.textContent = '请选择一个工具。';
             const status = document.createElement('div');
             status.className = 'dsh-tool-status';
             detail.append(detailHead, terminalRow, catalogSummary, catalog, structured, output, status);
@@ -2400,9 +2400,9 @@ class MainActivity : ComponentActivity() {
                 ? runtimeCatalog.desktopCapabilities.join(' · ')
                 : '';
               catalogSummary.textContent =
-                String(runtimeCatalog.total || 0) + ' runtime commands'
+                String(runtimeCatalog.total || 0) + ' 个运行时命令'
                 + (runtimeCatalog.dshVersion ? ' · DSH ' + runtimeCatalog.dshVersion : '')
-                + (caps ? '\nDesktop parity: ' + caps : '');
+                + (caps ? '\n桌面能力：' + caps : '');
             }
 
             let activeTool = null;
@@ -2462,36 +2462,36 @@ class MainActivity : ComponentActivity() {
                 }
               } else if (result.view === 'git') {
                 if (result.root || result.branch) {
-                  addStructuredCard(result.branch || 'detached HEAD', result.root || '', 'repository');
+                  addStructuredCard(result.branch || 'detached HEAD', result.root || '', '仓库');
                 }
                 if (Array.isArray(result.changes)) {
                   for (const item of result.changes) {
-                    addStructuredCard(item.path, item.code, 'change');
+                    addStructuredCard(item.path, item.code, '变更');
                   }
                 }
                 if (Array.isArray(result.commits)) {
                   for (const item of result.commits) {
-                    addStructuredCard(item.subject, item.hash + ' · ' + item.date, 'commit');
+                    addStructuredCard(item.subject, item.hash + ' · ' + item.date, '提交');
                   }
                 }
               } else if (result.view === 'network') {
                 const dev = result.devServer || {};
                 if (dev.running) {
-                  addStructuredCard('Local dev server', dev.url || '', 'running');
-                  if (dev.root) addStructuredCard('Serving workspace', dev.root, 'root');
+                  addStructuredCard('本地开发服务器', dev.url || '', '运行中');
+                  if (dev.root) addStructuredCard('服务工作区', dev.root, '根目录');
                 } else {
-                  addStructuredCard('Local dev server', 'Serve the current Workspace on 127.0.0.1', 'stopped');
+                  addStructuredCard('本地开发服务器', '在 127.0.0.1 上提供当前工作区预览', '已停止');
                 }
 
                 if (Array.isArray(result.interfaces)) {
                   for (const item of result.interfaces) {
-                    addStructuredCard(item.name, item.addresses || '', item.state || 'interface');
+                    addStructuredCard(item.name, item.addresses || '', item.state || '接口');
                   }
                 }
                 if (Array.isArray(result.listeners)) {
                   for (const item of result.listeners) {
                     const label = (item.host || '') + ':' + String(item.port || '');
-                    addStructuredCard(label, item.process || item.state || '', item.loopback ? 'localhost' : 'listen');
+                    addStructuredCard(label, item.process || item.state || '', item.loopback ? '本机' : '监听');
                   }
                 }
 
@@ -2505,16 +2505,16 @@ class MainActivity : ComponentActivity() {
                 };
 
                 if (dev.running && dev.url) {
-                  addNetworkAction('Open in Browser', () => {
+                  addNetworkAction('在浏览器打开', () => {
                     try {
                       const opened = window.androidBridge
                         && window.androidBridge.openLocalUrl(BRIDGE_CAP, String(dev.url));
-                      status.textContent = opened ? 'Opened in external browser' : 'Local URL was rejected';
+                      status.textContent = opened ? '已在外部浏览器打开' : '本地地址被拒绝';
                     } catch (error) {
                       status.textContent = String(error);
                     }
                   });
-                  addNetworkAction('Stop Server', () => {
+                  addNetworkAction('停止服务器', () => {
                     try {
                       window.androidBridge
                         && window.androidBridge.runMobileTool(BRIDGE_CAP, 'network-service-stop', '');
@@ -2522,8 +2522,8 @@ class MainActivity : ComponentActivity() {
                     runTool(activeTool);
                   });
                 } else {
-                  addNetworkAction('Start Server', () => {
-                    const input = window.prompt('Local preview port (1024-65535)', '8000');
+                  addNetworkAction('启动服务器', () => {
+                    const input = window.prompt('本地预览端口（1024–65535）', '8000');
                     if (input === null) return;
                     let raw = '';
                     try {
@@ -2536,7 +2536,7 @@ class MainActivity : ComponentActivity() {
                     let started;
                     try { started = JSON.parse(raw || '{}'); } catch (_) { started = { ok: false, error: raw }; }
                     if (!started.ok) {
-                      status.textContent = started.error || 'Failed to start local server';
+                      status.textContent = started.error || '本地服务器启动失败';
                       return;
                     }
                     runTool(activeTool);
@@ -2547,32 +2547,32 @@ class MainActivity : ComponentActivity() {
                 const runtime = result.runtimeEnvironment || {};
                 addStructuredCard(
                   browser.engine || 'Chromium WebView',
-                  (browser.provider || 'unknown') + (browser.version ? ' · ' + browser.version : ''),
-                  'browser'
+                  (browser.provider || '未知') + (browser.version ? ' · ' + browser.version : ''),
+                  '浏览器'
                 );
                 if (browser.userAgent) {
-                  addStructuredCard('User-Agent', browser.userAgent, 'browser');
+                  addStructuredCard('User-Agent', browser.userAgent, '浏览器');
                 }
                 addStructuredCard(
-                  'Browser policy',
+                  '浏览器策略',
                   [
-                    browser.safeBrowsing ? 'Safe Browsing' : 'Safe Browsing off',
-                    browser.cookies ? 'cookies' : 'cookies off',
-                    browser.thirdPartyCookies ? '3P cookies' : '3P cookies off',
+                    browser.safeBrowsing ? '安全浏览' : '安全浏览关闭',
+                    browser.cookies ? 'Cookie' : 'Cookie 关闭',
+                    browser.thirdPartyCookies ? '第三方 Cookie' : '第三方 Cookie 关闭',
                     'mixed=' + (browser.mixedContent || 'unknown'),
-                    browser.fileAccess ? 'file access' : 'file access blocked'
+                    browser.fileAccess ? '文件访问' : '文件访问已阻止'
                   ].join(' · '),
-                  'policy'
+                  '策略'
                 );
                 addStructuredCard(
-                  'Shell / terminal',
+                  'Shell / 终端',
                   (runtime.shell || '') + ' · TERM=' + (runtime.term || '') + ' · ' + (runtime.colorTerm || ''),
-                  'runtime'
+                  '运行时'
                 );
                 addStructuredCard(
                   'HOME / PREFIX',
                   (runtime.home || '') + ' · ' + (runtime.prefix || ''),
-                  'runtime'
+                  '运行时'
                 );
                 addStructuredCard(
                   'XDG',
@@ -2582,14 +2582,14 @@ class MainActivity : ComponentActivity() {
                     runtime.xdgState,
                     runtime.xdgCache
                   ].filter(Boolean).join(' · '),
-                  'runtime'
+                  '运行时'
                 );
               } else {
                 return false;
               }
 
               if (!structured.children.length) {
-                addStructuredCard('No items', 'Nothing to display.', '');
+                addStructuredCard('没有项目', '没有可显示的内容。', '');
               }
               structured.setAttribute('data-active', 'true');
               output.style.display = 'none';
@@ -2599,17 +2599,17 @@ class MainActivity : ComponentActivity() {
             const renderResult = (raw) => {
               let result;
               try { result = JSON.parse(raw || '{}'); }
-              catch (_) { result = { ok: false, error: 'Invalid tool response', output: String(raw || '') }; }
+              catch (_) { result = { ok: false, error: '工具响应无效', output: String(raw || '') }; }
               const lines = [];
-              if (result.cwd) lines.push('cwd: ' + result.cwd);
-              if (Number.isInteger(result.exitCode)) lines.push('exit: ' + result.exitCode);
-              if (result.timedOut) lines.push('timed out');
-              if (Number.isInteger(result.count)) lines.push('items: ' + result.count);
+              if (result.cwd) lines.push('工作目录：' + result.cwd);
+              if (Number.isInteger(result.exitCode)) lines.push('退出码：' + result.exitCode);
+              if (result.timedOut) lines.push('执行超时');
+              if (Number.isInteger(result.count)) lines.push('项目数：' + result.count);
               status.textContent = lines.join(' · ');
 
               clearStructured();
               if (!renderStructured(result)) {
-                output.textContent = result.output || result.error || (result.ok ? 'Done.' : 'No output.');
+                output.textContent = result.output || result.error || (result.ok ? '完成。' : '没有输出。');
               }
             };
 
@@ -2624,18 +2624,18 @@ class MainActivity : ComponentActivity() {
                 chip.type = 'button';
                 chip.className = 'dsh-tool-chip';
                 chip.textContent = name;
-                chip.setAttribute('aria-label', 'Open ' + name + ' in Terminal');
+                chip.setAttribute('aria-label', '在终端中打开 ' + name);
                 chip.addEventListener('click', () => {
                   const terminal = TOOL_DEFS.find((item) => item.id === 'terminal');
                   if (!terminal) return;
                   activeTool = terminal;
                   panel.dataset.tool = 'terminal';
                   panel.dataset.detailOpen = 'true';
-                  detailTitle.textContent = 'Terminal';
+                  detailTitle.textContent = '终端';
                   command.value = name + ' ';
                   renderCatalog(terminal);
-                  output.textContent = 'Ready to run ' + name + '. Add arguments if needed.';
-                  status.textContent = 'runtime tool: ' + name;
+                  output.textContent = '已准备运行 ' + name + '，可继续添加参数。';
+                  status.textContent = '运行时工具：' + name;
                   requestAnimationFrame(() => {
                     command.focus();
                     command.setSelectionRange(command.value.length, command.value.length);
@@ -2652,7 +2652,7 @@ class MainActivity : ComponentActivity() {
               panel.dataset.detailOpen = 'true';
               detailTitle.textContent = tool.label;
               renderCatalog(tool);
-              output.textContent = 'Loading…';
+              output.textContent = '正在加载…';
               status.textContent = '';
               let raw = '';
               try {
@@ -2680,7 +2680,7 @@ class MainActivity : ComponentActivity() {
             refresh.addEventListener('click', () => {
               if (!activeTool) return;
               if (activeTool.id === 'terminal') {
-                status.textContent = 'Run a command to refresh terminal output.';
+                status.textContent = '运行一条命令以刷新终端输出。';
                 return;
               }
               runTool(activeTool);
@@ -2727,12 +2727,12 @@ class MainActivity : ComponentActivity() {
               list.appendChild(button);
             };
 
-            appendSectionLabel('Runtime');
+            appendSectionLabel('运行时');
             TOOL_DEFS.forEach((tool) => {
               appendToolButton(tool, () => runTool(tool));
             });
 
-            appendSectionLabel('DSH Desktop');
+            appendSectionLabel('DSH 桌面功能');
             DSH_SURFACE_DEFS.forEach((surface) => {
               appendToolButton(surface, (button) => {
                 openDshSurface(surface, () => {
@@ -2742,9 +2742,8 @@ class MainActivity : ComponentActivity() {
                   detailTitle.textContent = surface.label;
                   catalog.replaceChildren();
                   output.textContent =
-                    surface.label + ' is part of the preserved desktop DSH capability set, ' +
-                    'but this DSH build did not expose a matching navigation control in the current DOM.';
-                  status.textContent = 'Official DSH surface unavailable in current view';
+                    surface.label + ' 属于已保留的 DSH 桌面能力，但当前 DSH 页面没有提供可匹配的导航入口。';
+                  status.textContent = '当前页面无法打开对应的 DSH 官方功能';
                 });
               });
             });
