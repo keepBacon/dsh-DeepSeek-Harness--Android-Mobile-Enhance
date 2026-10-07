@@ -592,4 +592,14 @@ finally:
 print(f'[OK] parsed XML + checked {len(scripts)} injected JS blocks + askpass helper')
 PY
 
+# A malformed legacy plugin output schema must not take down the Android Host,
+# and runtime repair must keep the existing HOME authoritative.
+must "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: legacy tool output schema fail-soft'
+must "$ROOT/scripts/android-runtime-patch.mjs" 'androidSchemaError.code === "UNSUPPORTED_SCHEMA"'
+must "$EM" 'private fun shouldPreserveUserHome()'
+must "$EM" 'val stageRoot = File(context.filesDir, ".runtime-stage-"'
+must "$EM" 'seedHomeFromStage(stageHome)'
+bash "$ROOT/scripts/check-plugin-schema-datasafe-fix.sh"
+
+
 echo '[OK] remaining medium/low regression checks passed'
