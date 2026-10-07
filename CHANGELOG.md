@@ -1,3 +1,6 @@
+- 修复 DSH 0.1.5-rc.2 在社区/旧插件注册工具时因 output JSON Schema 的 legacy `type` 不属于强制子集而导致 Cordis loader 整体失败、引擎启动后退出：Android Runtime 只在 `UNSUPPORTED_SCHEMA` 且确认为旧式 output type 时克隆并规范化该 schema，再次交给 DSH 原生校验；参数 schema 和其他非法结构仍保持严格失败。
+- 该兼容层不修改插件源码、不自动停用/删除插件，也不迁移插件目录；注册后的 definition 使用规范化副本，避免执行期与注册期 schema 不一致。
+- 数据保护继续沿用当前主线的 staged Runtime 事务：snapshot 先进入 `.runtime-stage-*`，已有 HOME 始终权威，运行时修复只提交 `usr/`；聊天、模型配置、插件、Skills、附件、工作区及公共 `Documents/dshdata` 不参与 runtime 替换。
 - Phase 1 补齐非 APT 开发工具：固定安装 Prettier 3.9.9、ESLint 10.10.0 与 cmake-format(cmakelang 0.6.13)，并在 staging 阶段真实执行版本 smoke。npm/Python 工具与 Termux apt 工具分层管理，避免把非系统包错误塞进 apt catalog。
 - Phase 1 — Extended Linux/TUI Tool Runtime：新增统一工具 catalog，并已接入正式构建。默认纳入系统/TUI、开发、网络、数据库、压缩、文档、媒体、Git/代码索引与 Android APK/DEX CLI；host 端会在 Runtime 重建前一次性安装/验证，staging 自动发现实际 provider 包，PRoot wrapper 与 staged smoke 由同一 catalog 驱动。root repository 工具包括 Frida、btop、tcpdump。官方 Termux 没有 ARM64 zipalign/dexdump/apkanalyzer 独立包，因此 Android 工具链采用 aapt2 + apktool + jadx + rizin/radare2 + apksigner，不打包不可执行的桌面 SDK 二进制。
 - 清理 Android 源码预检警告：EngineManager 的 Termux root/data dir 改为 nullable-safe fallback；Skill discovery 不再对 `File.parentFile` 做不安全调用；MainActivity 从 deprecated `onBackPressed()` 迁移到 `OnBackPressedDispatcher`，保留 Web overlay/Escape、WebView history 与 Activity finish 的原行为。
