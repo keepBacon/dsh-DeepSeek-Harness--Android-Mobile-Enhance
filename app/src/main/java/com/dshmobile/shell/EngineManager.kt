@@ -352,8 +352,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
     val desktopCapabilities = JSONArray()
     for (name in listOf(
-      "Bash", "Files", "FS Search", "Jobs", "Skills", "Subagents",
-      "Workflow", "Web", "Present", "Todo", "Goal / Plan",
+      "Bash", "文件", "文件搜索", "作业", "技能", "子代理",
+      "工作流", "网页", "展示", "待办", "目标 / 计划",
     )) desktopCapabilities.put(name)
 
     return JSONObject()
