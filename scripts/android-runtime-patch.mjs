@@ -155,6 +155,7 @@ const requireBuiltinMandatory = versionAtLeast(targetVersion, '0.1.6-alpha.2')
 const androidStableStorageMandatory = versionAtLeast(targetVersion, '0.1.5-rc.1')
 const androidFlockMandatory = versionAtLeast(targetVersion, '0.1.5-rc.1')
 const androidPermissionPresetGuardMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2')
+const androidLegacyToolOutputSchemaCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2')
 const androidCodeModeCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2') && !versionAtLeast(targetVersion, '0.1.6-alpha.0')
 const warn = (msg) => console.error(`[DSH Android compat] WARN: ${msg}`)
 const info = (name, status, file = '') => report.push({ name, status, file: file ? path.relative(prefix, file) : '' })
@@ -508,6 +509,72 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
     write(file, txt.replace(assignment, replacement))
     return 'patched'
   }, { mandatory: androidPermissionPresetGuardMandatory })
+
+// Some community/legacy plugins publish output JSON Schemas using a broader
+// vocabulary than DSH 0.1.5-rc.2's enforced subset. Upstream throws during
+// tool registration, and Cordis then treats that one entry as a profile boot
+// failure. Keep parameter schemas strict; only legacy *output* type nodes get
+// a non-destructive Android compatibility normalization. Plugin files are never
+// rewritten, disabled, deleted, or migrated.
+eachPackage('@deepseek-ai/dsh-tools', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: legacy tool output schema fail-soft'
+  if (txt.includes(marker)) return 'already'
+
+  const anchor = 'assertSupportedJsonSchema(output.schema);'
+  const matches = txt.split(anchor).length - 1
+  if (matches !== 1) {
+    if (androidLegacyToolOutputSchemaCompatMandatory) throw new Error(`dsh-tools register schema anchor changed (${matches} matches): ${file}`)
+    warn(`dsh-tools register schema anchor changed (${matches} matches): ${file}`)
+    return 'anchor-missing'
+  }
+
+  const replacement = `// ${marker}.
+		try {
+			assertSupportedJsonSchema(output.schema);
+		} catch (androidSchemaError) {
+			if (!(androidSchemaError && typeof androidSchemaError === "object" && androidSchemaError.code === "UNSUPPORTED_SCHEMA")) throw androidSchemaError;
+			const allowedTypes = new Set(["object", "array", "string", "number", "integer", "boolean", "null"]);
+			let changed = false;
+			const normalizeLegacyOutputSchema = (node, seen = new WeakMap()) => {
+				if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+				if (seen.has(node)) return seen.get(node);
+				const clone = { ...node };
+				seen.set(node, clone);
+				if (Object.prototype.hasOwnProperty.call(clone, "type")
+					&& !Array.isArray(clone.type)
+					&& (typeof clone.type !== "string" || !allowedTypes.has(clone.type))) {
+					delete clone.type;
+					delete clone.properties;
+					delete clone.required;
+					delete clone.additionalProperties;
+					delete clone.items;
+					delete clone.enum;
+					delete clone.const;
+					changed = true;
+					return clone;
+				}
+				if (clone.properties && typeof clone.properties === "object" && !Array.isArray(clone.properties)) {
+					const properties = { ...clone.properties };
+					for (const key of Object.keys(properties)) properties[key] = normalizeLegacyOutputSchema(properties[key], seen);
+					clone.properties = properties;
+				}
+				if (Object.prototype.hasOwnProperty.call(clone, "items")) clone.items = normalizeLegacyOutputSchema(clone.items, seen);
+				if (Array.isArray(clone.oneOf)) clone.oneOf = clone.oneOf.map((branch) => normalizeLegacyOutputSchema(branch, seen));
+				return clone;
+			};
+			const normalizedSchema = normalizeLegacyOutputSchema(output.schema);
+			if (!changed) throw androidSchemaError;
+			assertSupportedJsonSchema(normalizedSchema);
+			definition = { ...definition, output: { ...output, schema: normalizedSchema } };
+			console.warn(\`[DSH Android compat] normalized legacy output schema for tool "\${name}"; plugin source was left untouched.\`);
+		}`;
+
+  txt = txt.replace(anchor, replacement)
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: androidLegacyToolOutputSchemaCompatMandatory })
 
   // DSH 0.1.6-alpha.2: profile resolution loads node-addon-require-builtin in
 // host preparation, but that package publishes no android-arm64 binary.  The
