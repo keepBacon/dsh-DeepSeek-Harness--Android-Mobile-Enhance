@@ -156,6 +156,7 @@ const androidStableStorageMandatory = versionAtLeast(targetVersion, '0.1.5-rc.1'
 const androidFlockMandatory = versionAtLeast(targetVersion, '0.1.5-rc.1')
 const androidPermissionPresetGuardMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2')
 const androidLegacyToolOutputSchemaCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2')
+const androidDuplicateLoaderCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2') && !versionAtLeast(targetVersion, '0.1.6-alpha.0')
 const androidCodeModeCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2') && !versionAtLeast(targetVersion, '0.1.6-alpha.0')
 const warn = (msg) => console.error(`[DSH Android compat] WARN: ${msg}`)
 const info = (name, status, file = '') => report.push({ name, status, file: file ? path.relative(prefix, file) : '' })
@@ -201,6 +202,7 @@ const wanted = new Set([
   '@deepseek-ai/dsh-client-modules',
   '@deepseek-ai/dsh-code-runtime-worker-thread',
   '@deepseek-ai/dsh-tools',
+  '@deepseek-ai/cordis-plugin-loader',
   '@deepseek-ai/dsh-sandbox-local',
   '@deepseek-ai/dsh-subprocess-local',
   '@deepseek-ai/dsh-terminal-bash',
@@ -509,6 +511,65 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
     write(file, txt.replace(assignment, replacement))
     return 'patched'
   }, { mandatory: androidPermissionPresetGuardMandatory })
+
+// Cordis 1.0.3 treats any duplicate loader entry id as fatal before plugin
+// code runs. On Android, the same plugin can be composed twice by an old
+// hand-written profile insert plus the plugin's current bundle patch. Preserve
+// upstream's fail-loud behavior for *conflicting* duplicates, but collapse a
+// duplicate only when both entry declarations are structurally identical.
+// This is runtime-only: profile YAML, package manifests, plugin files and user
+// data are not rewritten.
+eachPackage('@deepseek-ai/cordis-plugin-loader', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: identical duplicate loader entry collapse'
+  if (txt.includes(marker)) return 'already'
+
+  const duplicateGuard = /const\s+seen\s*=\s*new\s+Set\(\)\s*;\s*for\s*\(const\s+options\s+of\s+config\)\s*\{\s*const\s+id\s*=\s*this\.tree\.ensureId\(options\)\s*;\s*if\s*\(seen\.has\(id\)\)\s*throw\s+new\s+TypeError\(\`duplicate loader entry id:\s*\$\{id\}\`\)\s*;\s*seen\.add\(id\)\s*;\s*\}/m
+  const matches = txt.match(new RegExp(duplicateGuard.source, 'gm')) ?? []
+  if (matches.length !== 1) {
+    if (androidDuplicateLoaderCompatMandatory) throw new Error(`cordis loader duplicate-id anchor changed (${matches.length} matches): ${file}`)
+    warn(`cordis loader duplicate-id anchor changed (${matches.length} matches): ${file}`)
+    return 'anchor-missing'
+  }
+
+  const replacement = `// ${marker}.
+		const stableEntryValue = (value, stack = new WeakSet()) => {
+			if (value === null) return "null";
+			const kind = typeof value;
+			if (kind === "undefined") return "undefined";
+			if (kind === "function" || kind === "symbol" || kind === "bigint") return kind + ":" + String(value);
+			if (kind !== "object") return JSON.stringify(value);
+			if (stack.has(value)) throw new TypeError("circular loader entry cannot be compared safely");
+			stack.add(value);
+			let out;
+			if (Array.isArray(value)) {
+				out = "[" + value.map((item) => stableEntryValue(item, stack)).join(",") + "]";
+			} else {
+				out = "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + stableEntryValue(value[key], stack)).join(",") + "}";
+			}
+			stack.delete(value);
+			return out;
+		};
+		const seen = new Map();
+		const normalizedConfig = [];
+		for (const options of config) {
+			const id = this.tree.ensureId(options);
+			if (seen.has(id)) {
+				const previous = seen.get(id);
+				if (stableEntryValue(previous) !== stableEntryValue(options)) throw new TypeError(\`duplicate loader entry id: \${id}\`);
+				this.ctx.logger?.warn?.(\`[DSH Android compat] collapsed identical duplicate loader entry id: \${id}\`);
+				continue;
+			}
+			seen.set(id, options);
+			normalizedConfig.push(options);
+		}
+		config = normalizedConfig;`;
+
+  txt = txt.replace(duplicateGuard, replacement)
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { requiredIfPresent: androidDuplicateLoaderCompatMandatory })
 
 // Some community/legacy plugins publish output JSON Schemas using a broader
 // vocabulary than DSH 0.1.5-rc.2's enforced subset. Upstream throws during
