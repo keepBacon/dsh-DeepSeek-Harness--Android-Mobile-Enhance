@@ -600,6 +600,9 @@ must "$EM" 'private fun shouldPreserveUserHome()'
 must "$EM" 'val stageRoot = File(context.filesDir, ".runtime-stage-"'
 must "$EM" 'seedHomeFromStage(stageHome)'
 bash "$ROOT/scripts/check-plugin-schema-datasafe-fix.sh"
+must "$ROOT/scripts/android-runtime-patch.mjs" 'DSH Android compat: identical duplicate loader entry collapse'
+must "$ROOT/scripts/android-runtime-patch.mjs" '@deepseek-ai/cordis-plugin-loader'
+bash "$ROOT/scripts/check-duplicate-loader-entry-fix.sh"
 
 
 echo '[OK] remaining medium/low regression checks passed'
