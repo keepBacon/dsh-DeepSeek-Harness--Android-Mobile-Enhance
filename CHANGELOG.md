@@ -1,3 +1,5 @@
+- 修复 `duplicate loader entry id: <id>` 导致整个 DSH 插件树在启动阶段退出：Android Runtime 现在仅对**结构完全一致**的重复 loader 声明做运行时去重（典型场景：旧手工 `cordis.patch.yml` insert 与插件 bundle patch 同时存在）；同 id 但 name/config 等内容不同的冲突仍保持 Cordis 原生 fail-loud，避免静默覆盖错误配置。
+- 此兼容修复只作用于内置 `@deepseek-ai/cordis-plugin-loader` 的运行时组合结果，不修改 `cordis.patch.yml`、插件源码、package.json、聊天、模型配置、Skills、附件或工作区；新增回归测试同时验证冲突重复仍会报错、用户 profile 文件 SHA-256 不变。
 - 修复 DSH 0.1.5-rc.2 在社区/旧插件注册工具时因 output JSON Schema 的 legacy `type` 不属于强制子集而导致 Cordis loader 整体失败、引擎启动后退出：Android Runtime 只在 `UNSUPPORTED_SCHEMA` 且确认为旧式 output type 时克隆并规范化该 schema，再次交给 DSH 原生校验；参数 schema 和其他非法结构仍保持严格失败。
 - 该兼容层不修改插件源码、不自动停用/删除插件，也不迁移插件目录；注册后的 definition 使用规范化副本，避免执行期与注册期 schema 不一致。
 - 数据保护继续沿用当前主线的 staged Runtime 事务：snapshot 先进入 `.runtime-stage-*`，已有 HOME 始终权威，运行时修复只提交 `usr/`；聊天、模型配置、插件、Skills、附件、工作区及公共 `Documents/dshdata` 不参与 runtime 替换。
