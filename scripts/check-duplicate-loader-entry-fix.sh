@@ -16,7 +16,7 @@ must "$PATCH" "androidUnique"
 must "$ENGINE" "检测到重复 loader entry id"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+trap 'status=$?; if [ "$status" -ne 0 ]; then echo "[FAIL] duplicate loader regression (exit $status)" >&2; for log in "$TMP"/*.stderr; do [ -f "$log" ] && { echo "[DSH] $log" >&2; cat "$log" >&2; }; done; fi; rm -rf "$TMP"' EXIT
 PKG="$TMP/usr/lib/node_modules/@deepseek-ai/cordis-plugin-loader"
 mkdir -p "$PKG/lib" "$TMP/home/.dsh/profiles/web"
 
