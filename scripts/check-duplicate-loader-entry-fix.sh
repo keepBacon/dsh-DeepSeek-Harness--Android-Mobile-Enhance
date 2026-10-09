@@ -74,26 +74,27 @@ JS
 printf '%s\n' '- insert:' '  - id: fujiang-armor' '    name: fujiang-armor' > "$TMP/home/.dsh/profiles/web/cordis.patch.yml"
 BEFORE="$(sha256sum "$TMP/home/.dsh/profiles/web/cordis.patch.yml" | awk '{print $1}')"
 
+# Save original source to exercise more than one loader export form.
+cp "$PKG/lib/index.js" "$TMP/loader-pristine.js"
+
+# Check real rc.2 loader shape before the expensive native build.
+DSH_COMPAT_PREFLIGHT_ONLY=1 DSH_TARGET_VERSION=0.1.5-rc.2 \
+  node "$PATCH" "$TMP/usr" >/dev/null 2>"$TMP/preflight-before.stderr"
+
 # Keep unrelated mandatory patches off while exercising the discovered loader.
 DSH_TARGET_VERSION=0.1.0 node "$PATCH" "$TMP/usr" >/dev/null 2>"$TMP/patch.stderr"
 node --check "$PKG/lib/index.js"
 node "$PKG/lib/index.js"
-# Also assert the exact released-style entrypoint can be found before the
-# expensive native addon build.
-DSH_COMPAT_PREFLIGHT_ONLY=1 DSH_TARGET_VERSION=0.1.5-rc.2 \
-  node "$PATCH" "$TMP/usr" >/dev/null 2>"$TMP/preflight.stderr"
-
 # A transpiled "var EntryGroup = class" is a different published form.
 ALT="$TMP/alt/usr/lib/node_modules/@deepseek-ai/cordis-plugin-loader"
 mkdir -p "$ALT/lib"
 cp "$PKG/package.json" "$ALT/package.json"
-sed 's/^class EntryGroup {/var EntryGroup = class {/' "$PKG/lib/index.js" \
-  | sed 's/    \/\/ DSH Android compat: identical duplicate loader entry collapse/    \/\/ DSH Android compat: identical duplicate loader entry collapse/' > "$ALT/lib/index.js"
-# Force fresh patching by using the pristine fixture saved below.
+sed 's/^class EntryGroup {/var EntryGroup = class {/' "$TMP/loader-pristine.js" > "$ALT/lib/index.js"
 DSH_COMPAT_PREFLIGHT_ONLY=1 DSH_TARGET_VERSION=0.1.5-rc.2 \
   node "$PATCH" "$TMP/alt/usr" >/dev/null 2>"$TMP/alt-preflight.stderr"
+DSH_TARGET_VERSION=0.1.0 node "$PATCH" "$TMP/alt/usr" >/dev/null 2>"$TMP/alt-patch.stderr"
 node --check "$ALT/lib/index.js"
-
+node "$ALT/lib/index.js"
 
 AFTER="$(sha256sum "$TMP/home/.dsh/profiles/web/cordis.patch.yml" | awk '{print $1}')"
 [ "$BEFORE" = "$AFTER" ] || { echo "[FAIL] user profile data was modified" >&2; exit 1; }
