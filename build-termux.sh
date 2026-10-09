@@ -1824,6 +1824,10 @@ refresh_dsh_runtime() {
   ln -sfn ../lib/node_modules/.bin/dsh "$stage/usr/bin/dsh"
   rm -f "$stage/usr/lib/package.json" "$stage/usr/lib/package-lock.json"
 
+  # Detect published Cordis loader changes BEFORE the expensive node-pty build.
+  echo '[DSH] Early Cordis runtime compatibility preflight…'
+  DSH_COMPAT_PREFLIGHT_ONLY=1 DSH_TARGET_VERSION="$DSH_VERSION" \
+    node "$ROOT/scripts/android-runtime-patch.mjs" "$stage/usr"
   # Build only the native packages DSH actually needs.  The rest of the graph
   # stays install-script-free, which avoids accidental desktop-only postinstalls.
   build_native_modules "$stage" "$node_headers"
