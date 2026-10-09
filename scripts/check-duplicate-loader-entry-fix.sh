@@ -11,8 +11,8 @@ must() {
 
 must "$PATCH" "@deepseek-ai/cordis-plugin-loader"
 must "$PATCH" "DSH Android compat: identical duplicate loader entry collapse"
-must "$PATCH" "stableEntryValue"
-must "$PATCH" "normalizedConfig"
+must "$PATCH" "androidEntryCanonical"
+must "$PATCH" "androidUnique"
 must "$ENGINE" "检测到重复 loader entry id"
 
 TMP="$(mktemp -d)"
