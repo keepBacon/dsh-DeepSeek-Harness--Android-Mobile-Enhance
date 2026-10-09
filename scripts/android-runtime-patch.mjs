@@ -538,6 +538,23 @@ function locateEntryGroupUpdate(source, targetFile) {
   return from + first.index + first[0].length
 }
 
+const androidDuplicateLoaderInjection = "// DSH Android compat: identical duplicate loader entry collapse\n    // Reject ambiguous duplicates. The upstream guard remains in place.\n    const androidEntryCanonical = (value, trail = new WeakSet()) => {\n      if (value === null) return \"null\";\n      const kind = typeof value;\n      if (kind === \"undefined\") return \"undefined\";\n      if (kind === \"bigint\" || kind === \"symbol\" || kind === \"function\") return kind + \":\" + String(value);\n      if (kind !== \"object\") return JSON.stringify(value);\n      if (trail.has(value)) throw new TypeError(\"circular loader entry cannot be compared safely\");\n      trail.add(value);\n      let result;\n      if (Array.isArray(value)) {\n        result = \"[\" + value.map((entry) => androidEntryCanonical(entry, trail)).join(\",\") + \"]\";\n      } else {\n        result = \"{\" + Object.keys(value).sort().map((key) =>\n          JSON.stringify(key) + \":\" + androidEntryCanonical(value[key], trail)).join(\",\") + \"}\";\n      }\n      trail.delete(value);\n      return result;\n    };\n    const androidSeen = new Map();\n    const androidUnique = [];\n    for (const androidEntry of config) {\n      const androidId = this.tree.ensureId(androidEntry);\n      if (androidSeen.has(androidId)) {\n        if (androidEntryCanonical(androidSeen.get(androidId)) !== androidEntryCanonical(androidEntry)) {\n          throw new TypeError(\"duplicate loader entry id: \" + androidId);\n        }\n        this.ctx.logger?.warn?.(\"[DSH Android compat] collapsed identical loader entry: \" + androidId);\n        continue;\n      }\n      androidSeen.set(androidId, androidEntry);\n      androidUnique.push(androidEntry);\n    }\n    config = androidUnique;"
+
+function checkAndroidGeneratedLoaderCompatibility(source, targetFile) {
+  const offset = locateEntryGroupUpdate(source, targetFile)
+  const candidate = source.slice(0, offset) + '\n' + androidDuplicateLoaderInjection + '\n' + source.slice(offset)
+  const syntax = spawnSync(process.execPath, ['--input-type=module', '--check', '-'], {
+    input: candidate,
+    encoding: 'utf8',
+    maxBuffer: 2 * 1024 * 1024
+  })
+  if (syntax.status !== 0) {
+    throw new Error('Cordis loader compatibility generates invalid JavaScript in ' + targetFile +
+      '\n' + (syntax.stderr || syntax.stdout || '(no compiler diagnostic)'))
+  }
+  return candidate
+}
+
 if (process.env.DSH_COMPAT_PREFLIGHT_ONLY === '1') {
   const loaders = byName.get('@deepseek-ai/cordis-plugin-loader') ?? []
   if (androidDuplicateLoaderCompatMandatory && !loaders.length) {
@@ -548,7 +565,11 @@ if (process.env.DSH_COMPAT_PREFLIGHT_ONLY === '1') {
     if (!fs.existsSync(file)) throw new Error('Android compatibility preflight: missing ' + file)
     const txt = read(file)
     if (!txt.includes('DSH Android compat: identical duplicate loader entry collapse')) {
-      locateEntryGroupUpdate(txt, file)
+      // Match the exact installed runtime and syntax-check the result without
+      // changing a byte. This runs before native node-pty compilation.
+      checkAndroidGeneratedLoaderCompatibility(txt, file)
+    } else {
+      checkPatchedJavaScript(file)
     }
   }
   console.log('[DSH] Cordis loader compatibility preflight: OK (' + loaders.length + ' installation(s))')
@@ -559,9 +580,8 @@ eachPackage('@deepseek-ai/cordis-plugin-loader', 'lib/index.js', (file) => {
   const txt = read(file)
   const marker = 'DSH Android compat: identical duplicate loader entry collapse'
   if (txt.includes(marker)) return 'already'
-  const insertAt = locateEntryGroupUpdate(txt, file)
-  const injection = "// DSH Android compat: identical duplicate loader entry collapse\n    // Reject ambiguous duplicates. The upstream guard remains in place.\n    const androidEntryCanonical = (value, trail = new WeakSet()) => {\n      if (value === null) return \"null\";\n      const kind = typeof value;\n      if (kind === \"undefined\") return \"undefined\";\n      if (kind === \"bigint\" || kind === \"symbol\" || kind === \"function\") return kind + \":\" + String(value);\n      if (kind !== \"object\") return JSON.stringify(value);\n      if (trail.has(value)) throw new TypeError(\"circular loader entry cannot be compared safely\");\n      trail.add(value);\n      let result;\n      if (Array.isArray(value)) {\n        result = \"[\" + value.map((entry) => androidEntryCanonical(entry, trail)).join(\",\") + \"]\";\n      } else {\n        result = \"{\" + Object.keys(value).sort().map((key) =>\n          JSON.stringify(key) + \":\" + androidEntryCanonical(value[key], trail)).join(\",\") + \"}\";\n      }\n      trail.delete(value);\n      return result;\n    };\n    const androidSeen = new Map();\n    const androidUnique = [];\n    for (const androidEntry of config) {\n      const androidId = this.tree.ensureId(androidEntry);\n      if (androidSeen.has(androidId)) {\n        if (androidEntryCanonical(androidSeen.get(androidId)) !== androidEntryCanonical(androidEntry)) {\n          throw new TypeError(\"duplicate loader entry id: \" + androidId);\n        }\n        this.ctx.logger?.warn?.(\"[DSH Android compat] collapsed identical loader entry: \" + androidId);\n        continue;\n      }\n      androidSeen.set(androidId, androidEntry);\n      androidUnique.push(androidEntry);\n    }\n    config = androidUnique;"
-  const patched = txt.slice(0, insertAt) + '\n' + injection + '\n' + txt.slice(insertAt)
+  // The identical preflight transformation is used for the real write.
+  const patched = checkAndroidGeneratedLoaderCompatibility(txt, file)
   write(file, patched)
   try { checkPatchedJavaScript(file) } catch (error) { write(file, txt); throw error }
   return 'patched'
