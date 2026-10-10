@@ -26,6 +26,8 @@ const tools=[
  {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
  {name:'tool_registry_list',description:'List tools exposed by this mobile MCP server (read-only).',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'tool_inspect',description:'Inspect the name, description and input schema of a mobile MCP tool.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
+ {name:'plugin_source_read',description:'Read one UTF-8 source file belonging to an installed Web-profile plugin. Read-only and size bounded.',inputSchema:{type:'object',properties:{name:{type:'string'},path:{type:'string'},maxBytes:{type:'integer',minimum:1,maximum:262144,default:65536}},required:['name','path'],additionalProperties:false}},
+ {name:'tool_validate',description:'Validate the declared input-schema shape of a mobile MCP tool without invoking it.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name'],additionalProperties:false}},
  {name:'fs_read',description:'Read a UTF-8 text file. Paths may be absolute or relative to the MCP cwd. Use startLine/endLine for focused source reads.',inputSchema:{type:'object',properties:{path:{type:'string'},startLine:{type:'integer',minimum:1},endLine:{type:'integer',minimum:1},maxBytes:{type:'integer',minimum:1,maximum:1048576,default:262144}},required:['path'],additionalProperties:false}},
  {name:'fs_list',description:'List one directory level with stable structured entries. Defaults to the MCP cwd; hidden entries are off unless requested.',inputSchema:{type:'object',properties:{path:{type:'string',default:'.'},showHidden:{type:'boolean',default:false},maxEntries:{type:'integer',minimum:1,maximum:2000,default:500}},additionalProperties:false}},
  {name:'fs_search',description:'Search source/text with embedded ripgrep and return structured path/line/column matches. Literal, case-sensitive search is the default; regex and context are optional.',inputSchema:{type:'object',properties:{query:{type:'string'},path:{type:'string',default:'.'},glob:{type:'string'},regex:{type:'boolean',default:false},caseSensitive:{type:'boolean',default:true},showHidden:{type:'boolean',default:false},maxResults:{type:'integer',minimum:1,maximum:200,default:80},contextLines:{type:'integer',minimum:0,maximum:5,default:2}},required:['query'],additionalProperties:false}},
@@ -278,6 +280,28 @@ async function closeDebug(session){if(session.closed)return;try{if(session.attac
 async function call(name,a={}){
  switch(name){
   case 'tool_registry_list': return {server:'mobile_tools',tools:tools.map(t=>({name:t.name,description:t.description})),total:tools.length};
+  case 'tool_validate': {
+    const t=tools.find(tool=>tool.name===String(a.name||''));
+    if(!t)throw new Error('tool not found');
+    const schema=t.inputSchema;
+    const errors=[];
+    if(!schema||schema.type!=='object'||!schema.properties||typeof schema.properties!=='object')errors.push('inputSchema must define object properties');
+    if(schema?.required&&(!Array.isArray(schema.required)||schema.required.some(k=>!(k in (schema.properties||{})))))errors.push('required refers to unknown property');
+    return {name:t.name,valid:errors.length===0,errors,executed:false};
+  }
+  case 'plugin_source_read': {
+    const name=String(a.name||'');
+    const relative=String(a.path||'');
+    if(!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(name))throw new Error('invalid package name');
+    if(!relative || relative.startsWith('/') || relative.split('/').some(n=>n==='..') || relative.includes('\\'))throw new Error('invalid relative file path');
+    const root=await realpath(resolve(process.env.HOME||'', '.dsh/profiles/web/node_modules',name));
+    const target=await realpath(resolve(root,relative));
+    if(!target.startsWith(root+'/'))throw new Error('source path escapes plugin');
+    const size=int(a.maxBytes,65536,1,262144);
+    const file=await stat(target);
+    if(!file.isFile()||file.size>size)throw new Error('not a regular text file or exceeds maxBytes');
+    return {plugin:name,path:relative,source:await readFile(target,'utf8'),bytes:file.size,readOnly:true};
+  }
   case 'tool_inspect': {
     const target=String(a.name||'');
     const found=tools.find(t=>t.name===target);
