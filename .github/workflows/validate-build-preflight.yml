@@ -34,6 +34,15 @@ jobs:
           done < <(find scripts -maxdepth 1 -type f -name '*.mjs' -print0)
           node scripts/validate-desktop-web-parity.mjs --self-test
           node scripts/validate-agent-preset-parity.mjs --self-test
+          node --check app/src/main/assets/dsh-tool-call-monitor.js
+          node --check scripts/dsh-mobile-toolbox-mcp.mjs
+          grep -Fq 'data-chat-call-id' app/src/main/assets/dsh-tool-call-monitor.js
+          grep -Fq 'dsh-android-tool-observed' app/src/main/assets/dsh-tool-call-monitor.js
+          grep -Fq 'font:500 10px/' app/src/main/assets/dsh-tool-call-monitor.js
+          if grep -nE 'fetch\(|XMLHttpRequest|sendBeacon|localStorage|sessionStorage' app/src/main/assets/dsh-tool-call-monitor.js; then
+            echo 'Passive monitor must not fetch, upload or persist tool data' >&2
+            exit 1
+          fi
 
       - name: Build contract regression guards
         shell: bash
