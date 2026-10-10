@@ -39,11 +39,19 @@
     const old = rows.get(id);
     const status = ['running', 'success', 'failure'].includes(item.status)
       ? item.status : (old?.status || 'running');
+    // A DOM poll with unchanged data must not redraw the UI; otherwise the
+    // pill mutation would schedule another observation frame indefinitely.
+    const normalizedName = short(item.name || old?.name || 'tool', 90);
+    const normalizedOperation = short(item.operation ?? old?.operation ?? '', 160);
+    const normalizedInput = item.input === undefined ? (old?.input || '（界面未公开输入）') : redact(item.input);
+    const normalizedResult = item.result === undefined ? (old?.result || '（界面未公开结果）') : redact(item.result);
+    if (old && old.name === normalizedName && old.operation === normalizedOperation &&
+        old.status === status && old.input === normalizedInput && old.result === normalizedResult) return;
     rows.set(id, {
-      id, status, name: short(item.name || old?.name || 'tool', 90),
-      operation: short(item.operation ?? old?.operation ?? '', 160),
-      input: item.input === undefined ? (old?.input || '（界面未公开输入）') : redact(item.input),
-      result: item.result === undefined ? (old?.result || '（界面未公开结果）') : redact(item.result),
+      id, status, name: normalizedName,
+      operation: normalizedOperation,
+      input: normalizedInput,
+      result: normalizedResult,
       source: short(item.source || old?.source || 'DSH 工具', 90),
       startedAt: old?.startedAt || item.startedAt || Date.now(),
       endedAt: status === 'running' ? null : (old?.endedAt || Date.now())
