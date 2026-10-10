@@ -21,6 +21,11 @@ const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
 const tools=[
+// Read-only introspection of existing profile plugins and live MCP catalogue.
+ {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
+ {name:'tool_registry_list',description:'List tools exposed by this mobile MCP server (read-only).',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'tool_inspect',description:'Inspect the name, description and input schema of a mobile MCP tool.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
  {name:'fs_read',description:'Read a UTF-8 text file. Paths may be absolute or relative to the MCP cwd. Use startLine/endLine for focused source reads.',inputSchema:{type:'object',properties:{path:{type:'string'},startLine:{type:'integer',minimum:1},endLine:{type:'integer',minimum:1},maxBytes:{type:'integer',minimum:1,maximum:1048576,default:262144}},required:['path'],additionalProperties:false}},
  {name:'fs_list',description:'List one directory level with stable structured entries. Defaults to the MCP cwd; hidden entries are off unless requested.',inputSchema:{type:'object',properties:{path:{type:'string',default:'.'},showHidden:{type:'boolean',default:false},maxEntries:{type:'integer',minimum:1,maximum:2000,default:500}},additionalProperties:false}},
  {name:'fs_search',description:'Search source/text with embedded ripgrep and return structured path/line/column matches. Literal, case-sensitive search is the default; regex and context are optional.',inputSchema:{type:'object',properties:{query:{type:'string'},path:{type:'string',default:'.'},glob:{type:'string'},regex:{type:'boolean',default:false},caseSensitive:{type:'boolean',default:true},showHidden:{type:'boolean',default:false},maxResults:{type:'integer',minimum:1,maximum:200,default:80},contextLines:{type:'integer',minimum:0,maximum:5,default:2}},required:['query'],additionalProperties:false}},
@@ -272,6 +277,45 @@ async function closeDebug(session){if(session.closed)return;try{if(session.attac
 
 async function call(name,a={}){
  switch(name){
+  case 'tool_registry_list': return {server:'mobile_tools',tools:tools.map(t=>({name:t.name,description:t.description})),total:tools.length};
+  case 'tool_inspect': {
+    const target=String(a.name||'');
+    const found=tools.find(t=>t.name===target);
+    if(!found)throw new Error('tool not found: '+target);
+    return found;
+  }
+  case 'plugin_list': {
+    const dir=resolve(process.env.HOME||'', '.dsh/profiles/web/node_modules');
+    const entries=[];
+    const names=await readdir(dir,{withFileTypes:true}).catch(()=>[]);
+    for(const ent of names.slice(0,500)) {
+      if(ent.name.startsWith('.')||ent.name.startsWith('@'))continue;
+      const metadata=resolve(dir,ent.name,'package.json');
+      try {
+        const payload=JSON.parse(await readFile(metadata,'utf8'));
+        entries.push({name:payload.name||ent.name,version:payload.version||'unknown'});
+      } catch(_){}
+    }
+    // Scoped packages are installed under @scope/name.
+    for(const ent of names.filter(n=>n.name.startsWith('@')).slice(0,50)){
+      const ns=await readdir(resolve(dir,ent.name),{withFileTypes:true}).catch(()=>[]);
+      for(const sub of ns.slice(0,200)){
+        try {
+          const payload=JSON.parse(await readFile(resolve(dir,ent.name,sub.name,'package.json'),'utf8'));
+          entries.push({name:payload.name||ent.name+'/'+sub.name,version:payload.version||'unknown'});
+        } catch(_){}
+      }
+    }
+    return {profile:'web',packages:entries.sort((a,b)=>a.name.localeCompare(b.name)),total:entries.length,note:'Installed dependencies; enabled state is owned by Cordis and is not inferred'};
+  }
+  case 'plugin_inspect': {
+    const name=String(a.name||'');
+    if(!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(name))throw new Error('invalid package name');
+    const root=resolve(process.env.HOME||'', '.dsh/profiles/web/node_modules');
+    const metadata=resolve(root,name,'package.json');
+    const data=JSON.parse(await readFile(metadata,'utf8'));
+    return {name:data.name,version:data.version,description:data.description||'',main:data.main||'',exports:data.exports||null,dependencies:data.dependencies||{},readOnly:true,enabled:'unknown'};
+  }
   case 'fs_read': {
    const f=await readTextFile(a.path),maxBytes=int(a.maxBytes,262144,1,MAX_TEXT),start=int(a.startLine,1,1,Number.MAX_SAFE_INTEGER),all=f.text.split(/\r?\n/),end=a.endLine==null?all.length:int(a.endLine,all.length,1,Number.MAX_SAFE_INTEGER)
    if(end<start)throw new Error('endLine must be >= startLine')
