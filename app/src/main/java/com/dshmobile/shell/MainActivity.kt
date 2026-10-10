@@ -474,6 +474,7 @@ class MainActivity : ComponentActivity() {
         authRecoveryRunning.set(false)
         pushSystemDark(view)
         installMobileUiBridge(view)
+        installPassiveToolCallMonitor(view)
       }
     }
     // WebView 下载：会话日志导出（/api/session.export）与其余引擎源下载
@@ -3330,6 +3331,20 @@ class MainActivity : ComponentActivity() {
       })();
     """.trimIndent()
     try { view.evaluateJavascript(script, null) } catch (_: Throwable) {}
+  }
+
+  /** Side-channel UI observation only: does not send model requests or mutate DSH prompts. */
+  private fun installPassiveToolCallMonitor(view: WebView) {
+    if (!isEngineSource(view.url ?: "")) return
+    val script = try {
+      assets.open("dsh-tool-call-monitor.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+    } catch (t: Throwable) {
+      Log.w("DSH", "Passive tool monitor asset unavailable", t)
+      return
+    }
+    try { view.evaluateJavascript(script, null) } catch (t: Throwable) {
+      Log.w("DSH", "Passive tool monitor injection failed", t)
+    }
   }
 
   /**
