@@ -1076,15 +1076,71 @@ shift
 # Do NOT fake uid 0 here. Termux apt/pkg are intentionally designed to run
 # as the app uid because the prefix is app-writable, and current Termux builds
 # explicitly reject uid 0 for safety. PRoot is used only for path translation.
-exec "$REAL_PREFIX/bin/proot" --link2symlink \
-  -b "$REAL_PREFIX:$LEGACY_PREFIX" \
-  -b "$REAL_HOME:$LEGACY_HOME" \
-  -b /proc \
-  -b /dev \
-  -w "$PWD" \
+# Android APKs run as com.dshmobile.shell, not com.termux.
+# A missing legacy /data/data/com.termux/files tree is not proof that Termux
+# was uninstalled. For real Termux builds keep the original fast path.
+if [ -d "$LEGACY_ROOT" ]; then
+  exec "$REAL_PREFIX/bin/proot" --link2symlink \
+    -b "$REAL_PREFIX:$LEGACY_PREFIX" -b "$REAL_HOME:$LEGACY_HOME" \
+    -b /proc -b /dev -w "$PWD" /system/bin/env \
+      DSH_TERMUX_INNER=1 \
+      HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
+      TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
+      LD_LIBRARY_PATH="$LEGACY_PREFIX/lib" SHELL="$LEGACY_PREFIX/bin/bash" \
+      JAVA_HOME="$LEGACY_PREFIX/lib/jvm/java-21-openjdk" \
+      "$LEGACY_PREFIX/bin/$CMD" "$@"
+fi
+if [ ! -x "$REAL_PREFIX/bin/proot" ]; then
+  echo "DSH_TERMUX_PROOT_MISSING: embedded proot binary is missing" >&2
+  exit 125
+fi
+case "$REAL_PREFIX" in
+  /*/usr) ;;
+  *) echo "DSH_TERMUX_INVALID_PREFIX: $REAL_PREFIX" >&2; exit 125 ;;
+esac
+REAL_ROOT="$(cd "$REAL_PREFIX/.." && pwd -P)"
+case "$REAL_HOME" in
+  /*) ;;
+  *) echo "DSH_TERMUX_INVALID_HOME: $REAL_HOME" >&2; exit 125 ;;
+esac
+# This tree contains mountpoint placeholders only, not user data.
+# It is reusable across updates and never deletes HOME, DSH settings,
+# plugins, conversations or the public Documents/dshdata directory.
+GUEST="$REAL_ROOT/.dsh-proot-guest"
+/system/bin/mkdir -p "$GUEST/data/data/com.termux/files/usr" \
+  "$GUEST/data/data/com.termux/files/home" \
+  "$GUEST$REAL_ROOT" "$GUEST$REAL_HOME" \
+  "$GUEST/system" "$GUEST/apex" "$GUEST/proc" "$GUEST/dev" \
+  "$GUEST/tmp" "$GUEST/storage" "$GUEST/sdcard" "$GUEST/mnt" || {
+    echo "DSH_TERMUX_GUEST_SETUP_FAILED: cannot create private guest tree" >&2
+    exit 125
+  }
+case "$PWD" in
+  /*) /system/bin/mkdir -p "$GUEST$PWD" || exit 125 ;;
+  *) echo "DSH_TERMUX_INVALID_CWD: $PWD" >&2; exit 125 ;;
+esac
+# Binds expose only app-owned REAL_ROOT and explicit Android OS paths.
+# PRoot never needs /data/data/com.termux/files on the actual filesystem.
+if [ -d /apex ]; then
+  exec "$REAL_PREFIX/bin/proot" --link2symlink -r "$GUEST" \
+    -b "$REAL_ROOT:$REAL_ROOT" \
+    -b "$REAL_PREFIX:$LEGACY_PREFIX" -b "$REAL_HOME:$LEGACY_HOME" \
+    -b /system -b /apex -b /proc -b /dev -b "$PWD:$PWD" -w "$PWD" \
+    /system/bin/env \
+      DSH_TERMUX_INNER=1 HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" \
+      TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
+      TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
+      LD_LIBRARY_PATH="$LEGACY_PREFIX/lib" SHELL="$LEGACY_PREFIX/bin/bash" \
+      JAVA_HOME="$LEGACY_PREFIX/lib/jvm/java-21-openjdk" \
+      "$LEGACY_PREFIX/bin/$CMD" "$@"
+fi
+exec "$REAL_PREFIX/bin/proot" --link2symlink -r "$GUEST" \
+  -b "$REAL_ROOT:$REAL_ROOT" \
+  -b "$REAL_PREFIX:$LEGACY_PREFIX" -b "$REAL_HOME:$LEGACY_HOME" \
+  -b /system -b /proc -b /dev -b "$PWD:$PWD" -w "$PWD" \
   /system/bin/env \
-    DSH_TERMUX_INNER=1 \
-    HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
+    DSH_TERMUX_INNER=1 HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" \
+    TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
     TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
     LD_LIBRARY_PATH="$LEGACY_PREFIX/lib" SHELL="$LEGACY_PREFIX/bin/bash" \
     JAVA_HOME="$LEGACY_PREFIX/lib/jvm/java-21-openjdk" \
