@@ -1073,6 +1073,17 @@ case "$CMD" in
 esac
 shift
 /system/bin/mkdir -p "$REAL_HOME" "$REAL_HOME/tmp"
+# PRoot uses its own *host-side* scratch directory before the guest rootfs
+# and -b mounts exist. The Termux build otherwise defaults to the compiled
+# /data/data/com.termux/files/usr/tmp path, which an Android APK cannot own.
+# This is distinct from the guest's TMPDIR. Never point PROOT_TMP_DIR at
+# the legacy com.termux path or at a guest-only mountpoint.
+PROOT_TMP_DIR="$REAL_HOME/tmp"
+export PROOT_TMP_DIR
+[ -d "$PROOT_TMP_DIR" ] && [ -w "$PROOT_TMP_DIR" ] || {
+  echo "DSH_TERMUX_HOST_TMP_UNUSABLE: $PROOT_TMP_DIR" >&2
+  exit 125
+}
 # The host's termux-exec LD_PRELOAD library targets the *real* app prefix.
 # Letting it intercept PRoot's own execve calls can corrupt guest path
 # rewriting or prevent the sandboxed interpreter from starting at all.
