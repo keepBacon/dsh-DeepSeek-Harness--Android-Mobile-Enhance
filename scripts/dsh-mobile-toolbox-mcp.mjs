@@ -303,6 +303,14 @@ async function call(name,a={}){
         probes[name]={ok:r.exitCode===0,exitCode:r.exitCode,stdout:r.stdout.slice(0,512),stderr:r.stderr.slice(0,512)};
       }
     }
+    if(a.probeExecutables!==false){
+      const runner=paths.termuxRunner;
+      const probesToRun=[['proot',paths.proot,['--version']],['shellViaProot','/system/bin/sh',[runner,'bash','-lc','printf DSH_SHELL_OK']],['pythonViaProot','/system/bin/sh',[runner,'python3','--version']]];
+      for(const [name,p,args] of probesToRun){
+        const r=await runProcess(p,args,{timeoutMs:8000,maxOutputBytes:4096});
+        probes[name]={ok:r.exitCode===0,exitCode:r.exitCode,timedOut:r.timedOut,stdout:r.stdout.slice(0,512),stderr:r.stderr.slice(0,1200)};
+      }
+    }
     const legacy=files.hostLegacyTermux?.exists===true;
     return {mode:'read-only',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,
       diagnosis:!files.runtimeRoot?.exists?'DSH_RUNTIME_MISSING':!files.bash?.exists?'DSH_BASH_MISSING':!files.proot?.exists?'DSH_PROOT_MISSING':!legacy?'LEGACY_TERMUX_PATH_ABSENT_EXPECTED_IN_APK':'LEGACY_TERMUX_PATH_PRESENT',
