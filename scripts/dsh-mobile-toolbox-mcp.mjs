@@ -21,7 +21,7 @@ const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
 const tools=[
- {name:'android_shell_health',description:'Read-only diagnosis of embedded DSH shell, Node, Bash, PRoot wrapper and relocated Termux filesystem. No commands or file mutations.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
+ {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
@@ -286,6 +286,7 @@ async function call(name,a={}){
       runtimeRoot:root,
       prefix:PREFIX,
       home:process.env.HOME||null,
+      prootHostTemp:resolve(process.env.HOME||root,'tmp'),
       bash:resolve(PREFIX,'bin/bash'),
       node:resolve(PREFIX,'bin/node'),
       proot:resolve(PREFIX,'bin/proot'),
@@ -312,9 +313,20 @@ async function call(name,a={}){
       }
     }
     const legacy=files.hostLegacyTermux?.exists===true;
-    return {mode:'read-only',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,
-      diagnosis:!files.runtimeRoot?.exists?'DSH_RUNTIME_MISSING':!files.bash?.exists?'DSH_BASH_MISSING':!files.proot?.exists?'DSH_PROOT_MISSING':!legacy?'LEGACY_TERMUX_PATH_ABSENT_EXPECTED_IN_APK':'LEGACY_TERMUX_PATH_PRESENT',
-      warning:'A missing com.termux path does not imply that Termux or user data was uninstalled. Private proot guest should supply the legacy path.'};
+    const shell=probes.shellViaProot;
+    const shellLog=shell ? [shell.stderr,shell.stdout].join('\n') : '';
+    const invalidScratch=/can't canonicalize[^\\n]*\/data\/data\/com\.termux\/files\/usr\/tmp|can't create temporary directory|PROOT_TMP_DIR/i.test(shellLog);
+    const diagnosis=!files.runtimeRoot?.exists?'DSH_RUNTIME_MISSING'
+      :!files.bash?.exists?'DSH_BASH_MISSING'
+      :!files.proot?.exists?'DSH_PROOT_MISSING'
+      :!files.prootHostTemp?.isDirectory?'DSH_HOST_TMP_MISSING'
+      :invalidScratch?'PROOT_HOST_TMP_CANONICALIZATION_FAILED'
+      :!shell?'PROOT_NOT_PROBED'
+      :shell.ok && shell.stdout.includes('DSH_SHELL_OK')?'PROOT_BASH_OK'
+      :'PROOT_BASH_FAILED';
+    return {mode:'diagnostic',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,
+      diagnosis,hostLegacyTermuxPresent:legacy,expectedProotTmpDir:paths.prootHostTemp,
+      warning:'PROOT_TMP_DIR must resolve to the real app HOME/tmp before entering the guest. A missing com.termux path alone does not imply user data was uninstalled.'};
   }
   case 'tool_registry_list': return {server:'mobile_tools',tools:tools.map(t=>({name:t.name,description:t.description})),total:tools.length};
   case 'tool_validate': {
