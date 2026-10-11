@@ -1073,6 +1073,11 @@ case "$CMD" in
 esac
 shift
 /system/bin/mkdir -p "$REAL_HOME" "$REAL_HOME/tmp"
+# The host's termux-exec LD_PRELOAD library targets the *real* app prefix.
+# Letting it intercept PRoot's own execve calls can corrupt guest path
+# rewriting or prevent the sandboxed interpreter from starting at all.
+# Set the guest library path explicitly below; do not inherit this preload.
+unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT || true
 # Do NOT fake uid 0 here. Termux apt/pkg are intentionally designed to run
 # as the app uid because the prefix is app-writable, and current Termux builds
 # explicitly reject uid 0 for safety. PRoot is used only for path translation.
@@ -1188,7 +1193,7 @@ EOF_TERMUX_WRAPPER
   # packages were compiled/configured for, rather than hoping that every
   # binary is fully relocatable when copied into the app-private runtime.
   local spec tool_cmd tool_owner tool_mode
-  for tool_cmd in apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python pip java jar jarsigner keytool javac perl; do
+  for tool_cmd in bash apt apt-get apt-cache apt-config dpkg dpkg-query dpkg-deb pkg python pip java jar jarsigner keytool javac perl; do
     rm -f "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
     ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$tool_cmd"
   done
