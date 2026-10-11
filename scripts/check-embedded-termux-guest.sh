@@ -30,7 +30,12 @@ printf '%s\n' "$PROOT_TMP_DIR" > "$DSH_MOCK_PROOT_CAPTURE.tmp"
 EOF_MOCK
 chmod 0700 "$PREFIX/bin/proot"
 # The fake command is never executed by mock proot.
-touch "$PREFIX/bin/bash" "$PREFIX/bin/env"
+touch "$PREFIX/bin/bash"
+cat > "$PREFIX/bin/env" <<'EOF_ENV'
+#!/usr/bin/env sh
+exit 0
+EOF_ENV
+chmod 0700 "$PREFIX/bin/env"
 
 # The test runner does not own /data/data/com.termux/files: exercise the APK
 # fallback with app-private mountpoints, not the real Termux host branch.
