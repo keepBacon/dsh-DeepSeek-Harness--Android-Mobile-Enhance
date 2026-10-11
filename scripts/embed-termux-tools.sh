@@ -1098,7 +1098,7 @@ unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL_
 if [ -d "$LEGACY_ROOT" ]; then
   exec "$REAL_PREFIX/bin/proot" --link2symlink \
     -b "$REAL_PREFIX:$LEGACY_PREFIX" -b "$REAL_HOME:$LEGACY_HOME" \
-    -b /proc -b /dev -w "$PWD" /system/bin/env \
+    -b /proc -b /dev -w "$PWD" "$LEGACY_PREFIX/bin/env" \
       DSH_TERMUX_INNER=1 \
       HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
       TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
@@ -1108,6 +1108,14 @@ if [ -d "$LEGACY_ROOT" ]; then
 fi
 if [ ! -x "$REAL_PREFIX/bin/proot" ]; then
   echo "DSH_TERMUX_PROOT_MISSING: embedded proot binary is missing" >&2
+  exit 125
+fi
+# The Android guest may not expose /system/bin/env inside a PRoot -r
+# namespace even if the host has it. Launch the embedded coreutils env
+# through the guaranteed legacy-prefix bind instead. This gives the
+# target command the guest variables *after* PRoot has initialized.
+if [ ! -x "$REAL_PREFIX/bin/env" ]; then
+  echo "DSH_TERMUX_GUEST_ENV_MISSING: embedded coreutils env is absent" >&2
   exit 125
 fi
 case "$REAL_PREFIX" in
@@ -1142,7 +1150,7 @@ if [ -d /apex ]; then
     -b "$REAL_ROOT:$REAL_ROOT" \
     -b "$REAL_PREFIX:$LEGACY_PREFIX" -b "$REAL_HOME:$LEGACY_HOME" \
     -b /system -b /apex -b /proc -b /dev -b "$PWD:$PWD" -w "$PWD" \
-    /system/bin/env \
+    "$LEGACY_PREFIX/bin/env" \
       DSH_TERMUX_INNER=1 HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" \
       TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
       TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
@@ -1154,7 +1162,7 @@ exec "$REAL_PREFIX/bin/proot" --link2symlink -r "$GUEST" \
   -b "$REAL_ROOT:$REAL_ROOT" \
   -b "$REAL_PREFIX:$LEGACY_PREFIX" -b "$REAL_HOME:$LEGACY_HOME" \
   -b /system -b /proc -b /dev -b "$PWD:$PWD" -w "$PWD" \
-  /system/bin/env \
+  "$LEGACY_PREFIX/bin/env" \
     DSH_TERMUX_INNER=1 HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" \
     TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
     TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
@@ -1234,6 +1242,12 @@ EOF_TERMUX_WRAPPER
   # contract so command aliases cannot disappear from the APK staging tree.
   dsh_materialize_required_host_entrypoints "$stage" || return 7
   dsh_materialize_runtime_interpreters "$stage" || return 7
+  # The PRoot guest entrypoint now uses the embedded coreutils env.
+  # Fail while staging if it is missing, not after the APK is installed.
+  if [ ! -x "$stage/usr/bin/env" ]; then
+    echo '[DSH] Embedded guest entrypoint missing usr/bin/env (coreutils).' >&2
+    return 7
+  fi
   dsh_repair_staged_compiler_aliases "$stage" || return 7
 
   # Validate package contents immediately. Do not spend minutes compiling
