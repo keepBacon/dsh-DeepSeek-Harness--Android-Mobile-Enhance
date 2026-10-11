@@ -14,6 +14,15 @@ mkdir -p "$PREFIX_DIR/bin" "$PREFIX_DIR/libexec/dsh" "$PREFIX_DIR/libexec/dsh/wr
 awk '/^  cat > "\$stage\/usr\/libexec\/dsh\/termux-wrapper" <<'\''EOF_TERMUX_WRAPPER'\''$/{capture=1;next} /^EOF_TERMUX_WRAPPER$/{capture=0} capture{print}' "$SOURCE" > "$PREFIX_DIR/libexec/dsh/termux-wrapper"
 chmod 0755 "$PREFIX_DIR/libexec/dsh/termux-wrapper"
 
+# Check both generated wrappers, including the full PRoot path-relocation
+# launcher, rather than testing only the routing stub.
+awk '/^  cat > "\$stage\/usr\/libexec\/dsh\/termux-run" <<'\''EOF_TERMUX_RUN'\''$/{capture=1;next} /^EOF_TERMUX_RUN$/{capture=0} capture{print}' "$SOURCE" > "$TMP/generated-termux-run"
+test -s "$TMP/generated-termux-run"
+bash -n "$TMP/generated-termux-run"
+grep -Fq 'DSH_TERMUX_GUEST_SETUP_FAILED' "$TMP/generated-termux-run"
+grep -Fq 'GUEST="$REAL_ROOT/.dsh-proot-guest"' "$TMP/generated-termux-run"
+grep -Fq -- '-r "$GUEST"' "$TMP/generated-termux-run"
+
 cat > "$PREFIX_DIR/libexec/dsh/termux-run" <<'EOF'
 #!/usr/bin/env sh
 printf '%s\n' "$1"
