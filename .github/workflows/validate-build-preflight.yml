@@ -99,6 +99,10 @@ jobs:
           check ffmpeg -version
           check exiftool -ver
 
+      - name: Embedded Android guest root regression
+        shell: bash
+        run: bash scripts/check-embedded-termux-guest.sh
+
       - name: Termux generated-entrypoint staging contract
         shell: bash
         run: |
