@@ -21,6 +21,7 @@ const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
 const tools=[
+ {name:'android_shell_health',description:'Read-only diagnosis of embedded DSH shell, Node, Bash, PRoot wrapper and relocated Termux filesystem. No commands or file mutations.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
@@ -279,6 +280,34 @@ async function closeDebug(session){if(session.closed)return;try{if(session.attac
 
 async function call(name,a={}){
  switch(name){
+  case 'android_shell_health': {
+    const root=PREFIX.replace(/\/usr$/,'');
+    const paths={
+      runtimeRoot:root,
+      prefix:PREFIX,
+      home:process.env.HOME||null,
+      bash:resolve(PREFIX,'bin/bash'),
+      node:resolve(PREFIX,'bin/node'),
+      proot:resolve(PREFIX,'bin/proot'),
+      termuxRunner:resolve(PREFIX,'libexec/dsh/termux-run'),
+      virtualGuest:resolve(root,'.dsh-proot-guest'),
+      hostLegacyTermux:'/data/data/com.termux/files'
+    };
+    const exists=async p=>{try{const v=await stat(p);return{exists:true,isDirectory:v.isDirectory(),isFile:v.isFile(),executable:Boolean(v.mode&0o111)}}catch(e){return{exists:false,error:e.code||String(e)}}};
+    const files={};
+    for(const [k,v] of Object.entries(paths)){if(typeof v==='string')files[k]=await exists(v)}
+    const probes={};
+    if(a.probeExecutables!==false){
+      for(const [name,p,args] of [['node',paths.node,['--version']],['bash',paths.bash,['--version']]]){
+        const r=await runProcess(p,args,{timeoutMs:5000,maxOutputBytes:4096});
+        probes[name]={ok:r.exitCode===0,exitCode:r.exitCode,stdout:r.stdout.slice(0,512),stderr:r.stderr.slice(0,512)};
+      }
+    }
+    const legacy=files.hostLegacyTermux?.exists===true;
+    return {mode:'read-only',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,
+      diagnosis:!files.runtimeRoot?.exists?'DSH_RUNTIME_MISSING':!files.bash?.exists?'DSH_BASH_MISSING':!files.proot?.exists?'DSH_PROOT_MISSING':!legacy?'LEGACY_TERMUX_PATH_ABSENT_EXPECTED_IN_APK':'LEGACY_TERMUX_PATH_PRESENT',
+      warning:'A missing com.termux path does not imply that Termux or user data was uninstalled. Private proot guest should supply the legacy path.'};
+  }
   case 'tool_registry_list': return {server:'mobile_tools',tools:tools.map(t=>({name:t.name,description:t.description})),total:tools.length};
   case 'tool_validate': {
     const t=tools.find(tool=>tool.name===String(a.name||''));
