@@ -23,6 +23,10 @@ cat > "$PREFIX/bin/proot" <<'EOF_MOCK'
 #!/usr/bin/env sh
 : "${DSH_MOCK_PROOT_CAPTURE:?}"
 printf '%s\n' "$@" > "$DSH_MOCK_PROOT_CAPTURE"
+# PRoot must use an existing app-owned host directory *before* guest mounts.
+[ -d "$PROOT_TMP_DIR" ] || exit 82
+[ -w "$PROOT_TMP_DIR" ] || exit 83
+printf '%s\n' "$PROOT_TMP_DIR" > "$DSH_MOCK_PROOT_CAPTURE.tmp"
 EOF_MOCK
 chmod 0700 "$PREFIX/bin/proot"
 # The fake command is never executed by mock proot.
@@ -31,7 +35,10 @@ touch "$PREFIX/bin/bash"
 # The test runner does not own /data/data/com.termux/files: exercise the APK
 # fallback with app-private mountpoints, not the real Termux host branch.
 export DSH_MOCK_PROOT_CAPTURE="$TMP/captured-argv"
-(cd "$WORK" && TERMUX__PREFIX="$PREFIX" PREFIX="$PREFIX" HOME="$HOME_DIR"   sh "$TMP/termux-run" bash --noprofile --norc -c 'printf "%s" "hello world"')
+(cd "$WORK" && PROOT_TMP_DIR="/data/data/com.termux/files/usr/tmp" \
+  TERMUX__PREFIX="$PREFIX" PREFIX="$PREFIX" HOME="$HOME_DIR" \
+  sh "$TMP/termux-run" bash --noprofile --norc -c 'printf "%s" "hello world"')
+test "$(cat "$DSH_MOCK_PROOT_CAPTURE.tmp")" = "$HOME_DIR/tmp"
 test -s "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- '-r' "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- "$TMP/com.dshmobile.shell/files/.dsh-proot-guest" "$DSH_MOCK_PROOT_CAPTURE"
