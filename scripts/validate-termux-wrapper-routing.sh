@@ -47,4 +47,11 @@ out="$(TERMUX__PREFIX="$PREFIX_DIR" /bin/sh "$PREFIX_DIR/libexec/dsh/wrappers/op
 out="$(TERMUX__PREFIX="$PREFIX_DIR" /bin/sh "$PREFIX_DIR/libexec/dsh/wrappers/file" --version)"
 [ "$out" = "file" ] || { echo "[FAIL] file did not route through termux-run: $out" >&2; exit 1; }
 
+# The runtime toolbox and terminal must use the same relocated Bash entry.
+grep -Fq 'for tool_cmd in bash apt apt-get' "$SOURCE"
+ENGINE="$ROOT/app/src/main/java/com/dshmobile/shell/EngineManager.kt"
+grep -Fq '"DSH_SIDEBAR_SHELL" to File(usrDir, "libexec/dsh/wrappers/bash")' "$ENGINE"
+grep -Fq '"SHELL" to File(usrDir, "libexec/dsh/wrappers/bash")' "$ENGINE"
+grep -Fq 'unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT' "$SOURCE"
+
 echo '[OK] Termux relocation-wrapper routing'
