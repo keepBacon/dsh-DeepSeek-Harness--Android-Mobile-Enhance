@@ -1365,6 +1365,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       ensurePluginWorkspaceCompat("web")
       applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
       applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
+      applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
       val mcpPatch = mcpConfigManager.ensureRuntimePatch()
       val args = arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
@@ -2314,6 +2315,34 @@ class EngineManager(private val context: Context, private val pickToken: String?
     } catch (t: Throwable) {
       Log.w(TAG, "Codex relay compatibility deferred", t)
       return listOf("relay compatibility check deferred")
+    }
+  }
+
+  /** Apply a narrowly scoped and reversible Codex subagent default-model fix. */
+  private fun applyAndroidCodexSubagentCompat(): List<String> {
+    val assetName = "codex-subagent-compat.mjs"
+    return try {
+      val directory = File(context.filesDir, "codex-compat").apply { mkdirs() }
+      val helper = File(directory, assetName)
+      val embedded = context.assets.open(assetName).bufferedReader(Charsets.UTF_8).use { it.readText() }
+      if (!helper.isFile || helper.readText() != embedded) writeTextAtomic(helper, embedded)
+      val log = File(context.filesDir, "codex-subagent-repair.log")
+      log.writeText("")
+      val process = startWithArgsToFile(
+        arrayOf(nodeBin.absolutePath, helper.absolutePath, "--repair-home", homeDir.absolutePath),
+        engineEnv(preloadBin),
+        log,
+      )
+      val finished = process.waitFor(12, TimeUnit.SECONDS)
+      if (!finished) process.destroyForcibly()
+      val output = try { log.readText().takeLast(4096) } catch (_: Throwable) { "" }
+      if (!finished || process.exitValue() != 0) {
+        Log.w(TAG, "Codex subagent compatibility failed: $output")
+        listOf("subagent compat unavailable")
+      } else output.lineSequence().filter { it.isNotBlank() }.take(6).toList()
+    } catch (t: Throwable) {
+      Log.w(TAG, "Codex subagent compatibility deferred", t)
+      listOf("subagent compat deferred")
     }
   }
 
