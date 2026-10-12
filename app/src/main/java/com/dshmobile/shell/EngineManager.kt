@@ -1364,6 +1364,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // inside the already-running Host and therefore share this profile file.
       ensurePluginWorkspaceCompat("web")
       applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
+      applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
       val mcpPatch = mcpConfigManager.ensureRuntimePatch()
       val args = arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
@@ -2272,6 +2273,48 @@ class EngineManager(private val context: Context, private val pickToken: String?
       }
     }
     return notes
+  }
+
+  /**
+   * Recover a narrowly defined third-party ESM temporal-dead-zone error:
+   * "Cannot access RELAY_DEFAULT_URL before initialization".
+   * The embedded Node helper checks that the declaration is a plain literal,
+   * syntax-checks the replacement and makes a verifiable immutable backup.
+   * Never modify DSH profiles, model selection, credentials or OAuth state.
+   */
+  private fun applyAndroidCodexRelayTdzCompat(): List<String> {
+    val asset = "codex-relay-tdz-compat.mjs"
+    val directory = File(context.filesDir, "codex-compat").apply { mkdirs() }
+    val helper = File(directory, asset)
+    try {
+      val embedded = context.assets.open(asset).bufferedReader(Charsets.UTF_8).use { it.readText() }
+      if (!helper.isFile || helper.readText() != embedded) {
+        val temp = File(directory, "$asset.tmp")
+        temp.writeText(embedded)
+        if (!temp.renameTo(helper)) {
+          helper.writeText(embedded)
+          temp.delete()
+        }
+      }
+      val log = File(context.filesDir, "codex-relay-repair.log")
+      log.writeText("")
+      val process = startWithArgsToFile(
+        arrayOf(nodeBin.absolutePath, helper.absolutePath, "--repair-home", homeDir.absolutePath),
+        engineEnv(preloadBin),
+        log,
+      )
+      val finished = process.waitFor(12, TimeUnit.SECONDS)
+      if (!finished) process.destroyForcibly()
+      val output = try { log.readText().takeLast(4096) } catch (_: Throwable) { "" }
+      if (!finished || process.exitValue() != 0) {
+        Log.w(TAG, "Codex relay compatibility check failed: $output")
+        return listOf("relay compatibility check unavailable")
+      }
+      return output.lineSequence().filter { it.isNotBlank() }.take(6).toList()
+    } catch (t: Throwable) {
+      Log.w(TAG, "Codex relay compatibility deferred", t)
+      return listOf("relay compatibility check deferred")
+    }
   }
 
   private fun profileDir(profile: String = "web"): File = File(homeDir, ".dsh/profiles/$profile")
