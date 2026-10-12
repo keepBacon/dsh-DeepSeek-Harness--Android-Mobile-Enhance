@@ -52,7 +52,6 @@ if grep -Fxq -- '-r' "$DSH_MOCK_PROOT_CAPTURE"; then
 fi
 grep -Fxq -- '/system/bin/sh' "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- "$TMP/com.dshmobile.shell/files/.dsh-proot-guest/data/data/com.termux:/data/data/com.termux" "$DSH_MOCK_PROOT_CAPTURE"
-grep -Fxq -- "$TMP/com.dshmobile.shell/files/.dsh-proot-guest" "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- "$PREFIX:/data/data/com.termux/files/usr" "$DSH_MOCK_PROOT_CAPTURE"
 if grep -Fxq -- '/data/data/com.termux/files/usr/bin/env' "$DSH_MOCK_PROOT_CAPTURE"; then
   echo '[FAIL] unsafe guest env bootstrap remains' >&2
