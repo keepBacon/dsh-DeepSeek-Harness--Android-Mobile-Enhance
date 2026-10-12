@@ -35,6 +35,9 @@ jobs:
           node scripts/validate-desktop-web-parity.mjs --self-test
           node scripts/validate-agent-preset-parity.mjs --self-test
           node --check app/src/main/assets/dsh-tool-call-monitor.js
+          node --check app/src/main/assets/codex-relay-tdz-compat.mjs
+          node app/src/main/assets/codex-relay-tdz-compat.mjs --self-test
+          grep -Fq 'applyAndroidCodexRelayTdzCompat()' app/src/main/java/com/dshmobile/shell/EngineManager.kt
           node --check scripts/dsh-mobile-toolbox-mcp.mjs
           grep -Fq 'data-chat-call-id' app/src/main/assets/dsh-tool-call-monitor.js
           grep -Fq 'dsh-android-tool-observed' app/src/main/assets/dsh-tool-call-monitor.js
