@@ -45,10 +45,20 @@ export DSH_MOCK_PROOT_CAPTURE="$TMP/captured-argv"
   sh "$TMP/termux-run" bash --noprofile --norc -c 'printf "%s" "hello world"')
 test "$(cat "$DSH_MOCK_PROOT_CAPTURE.tmp")" = "$HOME_DIR/tmp"
 test -s "$DSH_MOCK_PROOT_CAPTURE"
-grep -Fxq -- '-r' "$DSH_MOCK_PROOT_CAPTURE"
+# Prefix relocation must NOT hide Android system paths behind an empty root.
+if grep -Fxq -- '-r' "$DSH_MOCK_PROOT_CAPTURE"; then
+  echo '[FAIL] PRoot still starts with an empty guest root' >&2
+  exit 1
+fi
+grep -Fxq -- '/system/bin/sh' "$DSH_MOCK_PROOT_CAPTURE"
+grep -Fxq -- "$TMP/com.dshmobile.shell/files/.dsh-proot-guest/data/data/com.termux:/data/data/com.termux" "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- "$TMP/com.dshmobile.shell/files/.dsh-proot-guest" "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- "$PREFIX:/data/data/com.termux/files/usr" "$DSH_MOCK_PROOT_CAPTURE"
-grep -Fxq -- '/data/data/com.termux/files/usr/bin/env' "$DSH_MOCK_PROOT_CAPTURE"
+if grep -Fxq -- '/data/data/com.termux/files/usr/bin/env' "$DSH_MOCK_PROOT_CAPTURE"; then
+  echo '[FAIL] unsafe guest env bootstrap remains' >&2
+  exit 1
+fi
+grep -Fxq -- 'dsh-termux-guest' "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- "$HOME_DIR:/data/data/com.termux/files/home" "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- '--noprofile' "$DSH_MOCK_PROOT_CAPTURE"
 grep -Fxq -- '--norc' "$DSH_MOCK_PROOT_CAPTURE"
