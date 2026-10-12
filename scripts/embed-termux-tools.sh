@@ -1143,32 +1143,38 @@ case "$PWD" in
   /*) /system/bin/mkdir -p "$GUEST$PWD" || exit 125 ;;
   *) echo "DSH_TERMUX_INVALID_CWD: $PWD" >&2; exit 125 ;;
 esac
-# Binds expose only app-owned REAL_ROOT and explicit Android OS paths.
-# PRoot never needs /data/data/com.termux/files on the actual filesystem.
-if [ -d /apex ]; then
-  exec "$REAL_PREFIX/bin/proot" --link2symlink -r "$GUEST" \
-    -b "$REAL_ROOT:$REAL_ROOT" \
-    -b "$REAL_PREFIX:$LEGACY_PREFIX" -b "$REAL_HOME:$LEGACY_HOME" \
-    -b /system -b /apex -b /proc -b /dev -b "$PWD:$PWD" -w "$PWD" \
-    "$LEGACY_PREFIX/bin/env" \
-      DSH_TERMUX_INNER=1 HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" \
-      TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
-      TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
-      LD_LIBRARY_PATH="$LEGACY_PREFIX/lib" SHELL="$LEGACY_PREFIX/bin/bash" \
-      JAVA_HOME="$LEGACY_PREFIX/lib/jvm/java-21-openjdk" \
-      "$LEGACY_PREFIX/bin/$CMD" "$@"
-fi
-exec "$REAL_PREFIX/bin/proot" --link2symlink -r "$GUEST" \
-  -b "$REAL_ROOT:$REAL_ROOT" \
-  -b "$REAL_PREFIX:$LEGACY_PREFIX" -b "$REAL_HOME:$LEGACY_HOME" \
-  -b /system -b /proc -b /dev -b "$PWD:$PWD" -w "$PWD" \
-  "$LEGACY_PREFIX/bin/env" \
-    DSH_TERMUX_INNER=1 HOME="$LEGACY_HOME" PREFIX="$LEGACY_PREFIX" \
-    TERMUX__PREFIX="$LEGACY_PREFIX" TERMUX_PREFIX="$LEGACY_PREFIX" \
-    TMPDIR="$LEGACY_HOME/tmp" PATH="$LEGACY_PREFIX/bin:/system/bin" \
-    LD_LIBRARY_PATH="$LEGACY_PREFIX/lib" SHELL="$LEGACY_PREFIX/bin/bash" \
-    JAVA_HOME="$LEGACY_PREFIX/lib/jvm/java-21-openjdk" \
-    "$LEGACY_PREFIX/bin/$CMD" "$@"
+# CRITICAL: this app only needs prefix relocation, not an isolated Linux
+# distribution. A private empty -r rootfs hides Android's /system linker,
+# /apex libraries and executable shebang interpreters. Executing env under
+# that incomplete root produced the repeated Android execve(ENOENT) failures.
+# PRoot's documented default rootfs is "/" for *bind-only relocation*.
+#
+# The host never needs to own /data/data/com.termux: expose an app-private
+# placeholder at that path, then overlay its usr and home children with the
+# real DSH paths. No mkdir, chmod or writes against another app's data.
+#
+# Entry is /system/bin/sh, already proven to exist because this launcher
+# itself runs under #!/system/bin/sh. Inside it, set guest paths and then
+# exec the requested command without an extra env binary / linker hop.
+# No shell interpolates user-provided arguments; "$@" remains positional.
+exec "$REAL_PREFIX/bin/proot" --link2symlink \
+  -b "$GUEST/data/data/com.termux:/data/data/com.termux" \
+  -b "$REAL_PREFIX:$LEGACY_PREFIX" \
+  -b "$REAL_HOME:$LEGACY_HOME" \
+  -w "$PWD" \
+  /system/bin/sh -c '
+    export DSH_TERMUX_INNER=1
+    export HOME=/data/data/com.termux/files/home
+    export PREFIX=/data/data/com.termux/files/usr
+    export TERMUX__PREFIX=/data/data/com.termux/files/usr
+    export TERMUX_PREFIX=/data/data/com.termux/files/usr
+    export TMPDIR=/data/data/com.termux/files/home/tmp
+    export PATH=/data/data/com.termux/files/usr/bin:/system/bin
+    export LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib
+    export SHELL=/data/data/com.termux/files/usr/bin/bash
+    export JAVA_HOME=/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk
+    exec "$@"
+  ' dsh-termux-guest "$LEGACY_PREFIX/bin/$CMD" "$@"
 EOF_TERMUX_RUN
   chmod 0755 "$stage/usr/libexec/dsh/termux-run"
 
