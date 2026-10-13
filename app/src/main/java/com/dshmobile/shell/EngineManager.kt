@@ -2472,6 +2472,86 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   /**
+   * Explicit user-requested recovery, independent of the crashed DSH Host.
+   * Preserve installed packages and credentials, isolate third-party bundles
+   * and custom patch includes, and retain dated copies for manual restoration.
+   */
+  fun disableAllUserPluginsForRecovery(profile: String = "web"): PluginCommandResult {
+    if (profile != "web") return PluginCommandResult(false, -1, "只支持 web profile 的安全恢复")
+    val manifest = profileManifest(profile)
+    val patch = profilePatchFile(profile)
+    val stamp = System.currentTimeMillis().toString()
+    val backups = mutableListOf<Pair<File, File>>()
+    val original = mutableListOf<Pair<File, String?>>()
+    return try {
+      val root = if (manifest.isFile) JSONObject(manifest.readText()) else null
+      val dsh = root?.optJSONObject("dsh")
+      val profileObject = dsh?.optJSONObject("profile")
+      val bundles = profileObject?.optJSONArray("bundles")
+      val retained = JSONArray()
+      val disabled = mutableListOf<String>()
+      if (bundles != null) {
+        for (i in 0 until bundles.length()) {
+          val name = bundles.optString(i)
+          if (name.startsWith("@deepseek-ai/")) retained.put(name)
+          else if (name.isNotBlank()) disabled.add(name)
+        }
+      }
+      val patchText = if (patch.isFile) patch.readText() else null
+      val shouldRewriteManifest = bundles != null && disabled.isNotEmpty()
+      val shouldResetPatch = patchText != null && patchText.trim().isNotBlank() &&
+        patchText.trim() != "# DSH web profile overrides"
+      val candidates = listOfNotNull(
+        if (shouldRewriteManifest) manifest else null,
+        if (shouldResetPatch) patch else null,
+      )
+      for (file in candidates) {
+        val old = file.readText()
+        val backup = File(file.parentFile, file.name + ".plugin-recovery-" + stamp + ".bak")
+        file.copyTo(backup, overwrite = false)
+        backups.add(file to backup)
+        original.add(file to old)
+      }
+      if (shouldRewriteManifest) {
+        profileObject!!.put("bundles", retained)
+        writeTextAtomic(manifest, root!!.toString(2) + "\n")
+      }
+      if (shouldResetPatch) {
+        writeTextAtomic(patch, "# DSH web profile overrides\n")
+      }
+      PluginCommandResult(true, 0, buildString {
+        append("安全恢复配置已应用；安装文件、会话和凭据未删除。")
+        if (disabled.isNotEmpty()) append("\n已停用第三方 bundle：").append(disabled.joinToString(", "))
+        if (shouldResetPatch) append("\n已隔离 web 自定义配置覆盖层（含可能重复加载的 include）。")
+        if (backups.isNotEmpty()) {
+          append("\n备份文件：\n")
+          append(backups.joinToString("\n") { it.second.absolutePath })
+        }
+        if (backups.isEmpty()) append("\n没有检测到需要修改的插件启动配置。")
+      })
+    } catch (t: Throwable) {
+      val restoreFailures = mutableListOf<String>()
+      for ((file, previous) in original.asReversed()) {
+        try {
+          if (previous != null) writeTextAtomic(file, previous)
+        } catch (rollback: Throwable) {
+          restoreFailures.add(file.absolutePath + ": " + (rollback.message ?: "restore failed"))
+        }
+      }
+      PluginCommandResult(false, -3, buildString {
+        append("安全恢复未完成：").append(t.message ?: t.javaClass.simpleName)
+        if (restoreFailures.isNotEmpty()) {
+          append("\n回滚失败：").append(restoreFailures.joinToString("; "))
+        }
+        if (backups.isNotEmpty()) {
+          append("\n原始文件备份：\n")
+          append(backups.joinToString("\n") { it.second.absolutePath })
+        }
+      })
+    }
+  }
+
+  /**
    * Diagnose a Host boot failure without mutating the user's plugin stack.
    *
    * Android runtime compatibility now preserves valid custom sandbox/approval
