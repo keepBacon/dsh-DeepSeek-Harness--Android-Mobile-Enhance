@@ -1073,6 +1073,31 @@ case "$CMD" in
 esac
 shift
 /system/bin/mkdir -p "$REAL_HOME" "$REAL_HOME/tmp"
+# On Android APKs, PRoot guest execve repeatedly failed (ENOENT for env/sh).
+# Prefer the app-owned executable and the real app prefix without PRoot.
+# No automatic retry: commands may mutate files or external services.
+case "${DSH_TERMUX_EXEC_MODE:-direct}" in
+  direct)
+    if [ ! -x "$REAL_PREFIX/bin/$CMD" ]; then
+      echo "DSH_TERMUX_DIRECT_BINARY_MISSING: $REAL_PREFIX/bin/$CMD" >&2
+      exit 127
+    fi
+    export HOME="$REAL_HOME" PREFIX="$REAL_PREFIX" TERMUX__PREFIX="$REAL_PREFIX" TERMUX_PREFIX="$REAL_PREFIX"
+    export TMPDIR="$REAL_HOME/tmp"
+    export PATH="$REAL_PREFIX/libexec/dsh/wrappers:$REAL_PREFIX/bin:/system/bin"
+    export LD_LIBRARY_PATH="$REAL_PREFIX/lib"
+    export SHELL="$REAL_PREFIX/libexec/dsh/wrappers/bash"
+    export JAVA_HOME="$REAL_PREFIX/lib/jvm/java-21-openjdk"
+    export DSH_TERMUX_INNER=1
+    unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT || true
+    exec "$REAL_PREFIX/bin/$CMD" "$@"
+    ;;
+  proot) ;;
+  *)
+    echo "DSH_TERMUX_INVALID_EXEC_MODE: use direct or proot" >&2
+    exit 125
+    ;;
+esac
 # PRoot uses its own *host-side* scratch directory before the guest rootfs
 # and -b mounts exist. The Termux build otherwise defaults to the compiled
 # /data/data/com.termux/files/usr/tmp path, which an Android APK cannot own.
@@ -1270,7 +1295,7 @@ validate_termux_tool_runtime() {
   local home="$CACHE_DIR/tool-runtime-smoke-home"
   rm -rf "$home"; mkdir -p "$home/tmp"
   local wrappers="$stage/usr/libexec/dsh/wrappers"
-  local common_env=(env TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" JAVA_HOME="/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
+  local common_env=(env DSH_TERMUX_EXEC_MODE=proot TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" JAVA_HOME="/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
   dsh_validate_staged_interpreter_closure "$stage" || return 7
   "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
