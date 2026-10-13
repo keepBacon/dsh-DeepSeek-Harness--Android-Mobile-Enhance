@@ -5441,7 +5441,7 @@ class MainActivity : ComponentActivity() {
     }
     diagnosticsScroll = android.widget.ScrollView(this).apply {
       isVerticalScrollBarEnabled = true
-      addView(progressText, android.widget.ScrollView.LayoutParams(
+      addView(progressText, FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
       ))
     }
