@@ -66,5 +66,20 @@ test -d "$TMP/com.dshmobile.shell/files/.dsh-proot-guest/data/data/com.termux/fi
 test -d "$TMP/com.dshmobile.shell/files/.dsh-proot-guest/data/data/com.termux/files/home"
 AFTER="$(sha256sum "$HOME_DIR/sentinel" | awk '{print $1}')"
 test "$BEFORE" = "$AFTER"
+# Default APK mode must not use PRoot. The test binary records arguments
+# without relying on its target architecture or the real Android linker.
+cat > "$PREFIX/bin/bash" <<'EOF_DIRECT'
+#!/bin/sh
+printf '%s\\n' "$@" > "$DSH_MOCK_DIRECT_CAPTURE"
+EOF_DIRECT
+chmod 0700 "$PREFIX/bin/bash"
+export DSH_MOCK_DIRECT_CAPTURE="$TMP/direct-argv"
+rm -f "$DSH_MOCK_PROOT_CAPTURE"
+(cd "$WORK" && TERMUX__PREFIX="$PREFIX" PREFIX="$PREFIX" HOME="$HOME_DIR" \
+  sh "$TMP/termux-run" bash --noprofile --norc -c 'printf DSH_OK')
+test -s "$DSH_MOCK_DIRECT_CAPTURE"
+grep -Fxq 'printf DSH_OK' "$DSH_MOCK_DIRECT_CAPTURE"
+test ! -e "$DSH_MOCK_PROOT_CAPTURE"
+echo '[OK] Default APK direct entry does not invoke PRoot'
 echo '[OK] Virtual Android guest mountpoints, argv fidelity and HOME preservation'
 echo '[NOTE] This portable test uses a mock PRoot; real Android execution still requires device validation.'
