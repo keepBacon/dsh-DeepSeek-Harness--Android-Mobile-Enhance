@@ -40,7 +40,7 @@ chmod 0700 "$PREFIX/bin/env"
 # The test runner does not own /data/data/com.termux/files: exercise the APK
 # fallback with app-private mountpoints, not the real Termux host branch.
 export DSH_MOCK_PROOT_CAPTURE="$TMP/captured-argv"
-(cd "$WORK" && PROOT_TMP_DIR="/data/data/com.termux/files/usr/tmp" \
+(cd "$WORK" && DSH_TERMUX_EXEC_MODE=proot PROOT_TMP_DIR="/data/data/com.termux/files/usr/tmp" \
   TERMUX__PREFIX="$PREFIX" PREFIX="$PREFIX" HOME="$HOME_DIR" \
   sh "$TMP/termux-run" bash --noprofile --norc -c 'printf "%s" "hello world"')
 test "$(cat "$DSH_MOCK_PROOT_CAPTURE.tmp")" = "$HOME_DIR/tmp"
