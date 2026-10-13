@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+trap 'echo "[FAIL] embedded guest test failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE="$ROOT/scripts/embed-termux-tools.sh"
 TMP="$(mktemp -d)"
