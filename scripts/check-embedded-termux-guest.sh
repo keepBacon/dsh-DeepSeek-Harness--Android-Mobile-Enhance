@@ -71,7 +71,7 @@ test "$BEFORE" = "$AFTER"
 # without relying on its target architecture or the real Android linker.
 cat > "$PREFIX/bin/bash" <<'EOF_DIRECT'
 #!/bin/sh
-printf '%s\\n' "$@" > "$DSH_MOCK_DIRECT_CAPTURE"
+printf '%s\n' "$@" > "$DSH_MOCK_DIRECT_CAPTURE"
 EOF_DIRECT
 chmod 0700 "$PREFIX/bin/bash"
 export DSH_MOCK_DIRECT_CAPTURE="$TMP/direct-argv"
