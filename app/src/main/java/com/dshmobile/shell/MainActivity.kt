@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
   }
   private lateinit var engineStatus: TextView
   private lateinit var progressText: TextView
+  private lateinit var diagnosticsScroll: android.widget.ScrollView
   private val engineManager by lazy { EngineManager(this, pickToken) }
   private val skillManager by lazy { SkillManager(this, engineManager) }
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -5423,7 +5424,7 @@ class MainActivity : ComponentActivity() {
     val guide = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
       setPadding(padding, padding, padding, padding)
-      gravity = android.view.Gravity.CENTER
+      gravity = android.view.Gravity.TOP
       visibility = View.GONE
     }
     engineStatus = TextView(this).apply {
@@ -5438,6 +5439,12 @@ class MainActivity : ComponentActivity() {
       visibility = View.VISIBLE
       setTextIsSelectable(true)
     }
+    diagnosticsScroll = android.widget.ScrollView(this).apply {
+      isVerticalScrollBarEnabled = true
+      addView(progressText, android.widget.ScrollView.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+      ))
+    }
     val repairRuntime = Button(this).apply {
       text = "修复运行时"
       setOnClickListener { repairRuntimeFlow() }
@@ -5447,20 +5454,24 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { startEngineFlow() }
     }
     val safeMode = Button(this).apply {
-      text = "禁用第三方插件并重启"
+      text = "禁用全部插件并重启"
       setOnClickListener {
         android.app.AlertDialog.Builder(this@MainActivity)
-          .setTitle("安全模式恢复")
-          .setMessage("保留已安装文件，但停用 web profile 中全部第三方 bundle，然后重启 DSH。")
+          .setTitle("插件安全恢复")
+          .setMessage(
+            "停用 web profile 的全部第三方插件，并暂时清空自定义配置覆盖层，" +
+              "以隔离重复加载等启动故障。操作前会备份原配置，保留插件安装文件、会话与 API Key；" +
+              "DSH 内置核心插件必须继续启用。确认后将重启引擎。",
+          )
           .setNegativeButton("取消", null)
-          .setPositiveButton("继续") { _, _ ->
-            runProfileMutation("正在禁用第三方插件…") { engineManager.disableThirdPartyBundles() }
+          .setPositiveButton("禁用并重启") { _, _ ->
+            runProfileMutation("正在隔离用户插件…") { engineManager.disableAllUserPluginsForRecovery() }
           }
           .show()
       }
     }
     val resetConfig = Button(this).apply {
-      text = "备份并重置 web 配置"
+      text = "备份并重置配置"
       setOnClickListener {
         android.app.AlertDialog.Builder(this@MainActivity)
           .setTitle("重置配置覆盖层")
@@ -5484,13 +5495,31 @@ class MainActivity : ComponentActivity() {
     recoveryControls.clear()
     recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, copyDiagnostics)
     recoveryControls.forEach { it.visibility = View.GONE }
+    // Keep recovery actions reachable even when engine.log contains a huge stack trace.
+    // Only diagnostics scroll; recovery actions remain pinned below.
+    val actionPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    val startupActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+    startupActions.addView(retry, LinearLayout.LayoutParams(
+      0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+    ))
+    startupActions.addView(repairRuntime, LinearLayout.LayoutParams(
+      0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+    ))
+    val supportActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+    supportActions.addView(resetConfig, LinearLayout.LayoutParams(
+      0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+    ))
+    supportActions.addView(copyDiagnostics, LinearLayout.LayoutParams(
+      0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+    ))
+    actionPanel.addView(safeMode)
+    actionPanel.addView(startupActions)
+    actionPanel.addView(supportActions)
     guide.addView(engineStatus)
-    guide.addView(progressText)
-    guide.addView(repairRuntime)
-    guide.addView(retry)
-    guide.addView(safeMode)
-    guide.addView(resetConfig)
-    guide.addView(copyDiagnostics)
+    guide.addView(diagnosticsScroll, LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
+    ))
+    guide.addView(actionPanel)
     return guide
   }
 
@@ -5500,6 +5529,8 @@ class MainActivity : ComponentActivity() {
    * No external Termux installation is required.
    */
   private fun startEngineFlow() {
+    // An Activity resume must not race a user-triggered stop/mutate/restart.
+    if (profileMutationRunning.get()) return
     if (!engineFlowRunning.compareAndSet(false, true)) return
     runOnUiThread { showStartingState("正在连接 DeepSeek Harness…") }
     Thread {
@@ -5638,6 +5669,7 @@ class MainActivity : ComponentActivity() {
     engineStatus.text = prefix + "。"
     progressText.visibility = View.VISIBLE
     progressText.text = if (diag.isBlank()) "未生成额外诊断日志。" else diag
+    diagnosticsScroll.post { diagnosticsScroll.scrollTo(0, 0) }
     recoveryControls.forEach { it.visibility = View.VISIBLE }
     showGuide()
   }
