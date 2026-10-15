@@ -1435,6 +1435,37 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   /** Environment used by the DSH web engine and bundled command-line tools. */
+  /**
+   * Prefer a direct app-owned Bash launcher over the legacy PRoot wrapper.
+   * Created at runtime so previously extracted snapshots also work.
+   * Only the shell child drops termux-exec injection; Node retains its env.
+   */
+  private fun directBashShell(): File {
+    val fallback = File(usrDir, "libexec/dsh/wrappers/bash")
+    val real = File(usrDir, "libexec/dsh/bash-real")
+    if (!real.isFile) return fallback
+    val launcher = File(usrDir, "libexec/dsh/bash-direct")
+    val script = """
+      #!/system/bin/sh
+      set -eu
+      REAL="${'$'}{TERMUX__PREFIX:-}/libexec/dsh/bash-real"
+      [ -x "${'$'}REAL" ] || { echo "DSH_BASH_REAL_MISSING: ${'$'}REAL" >&2; exit 127; }
+      unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT
+      exec "${'$'}REAL" --noprofile --norc "${'$'}@"
+    """.trimIndent() + "\n"
+    return try {
+      if (java.nio.file.Files.isSymbolicLink(launcher.toPath())) {
+        throw java.io.IOException("refusing symlink Bash launcher")
+      }
+      if (!launcher.isFile || launcher.readText() != script) writeTextAtomic(launcher, script)
+      if (!launcher.setExecutable(true, true)) throw java.io.IOException("Bash launcher is not executable")
+      launcher
+    } catch (t: Throwable) {
+      Log.w(TAG, "Direct Bash launcher unavailable; retaining existing wrapper", t)
+      fallback
+    }
+  }
+
   private fun engineEnv(preload: File = preloadBin): Map<String, String> {
     File(homeDir, ".ssh").mkdirs()
     val xdgConfig = File(homeDir, ".config").apply { mkdirs() }
@@ -1471,8 +1502,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // Sidebar terminal + model terminal tools must resolve the embedded
       // Android-compatible Bash rather than the app process' empty/default
       // shell. The plugin checks DSH_SIDEBAR_SHELL before $SHELL.
-      "DSH_SIDEBAR_SHELL" to File(usrDir, "libexec/dsh/wrappers/bash").absolutePath,
-      "SHELL" to File(usrDir, "libexec/dsh/wrappers/bash").absolutePath,
+      "DSH_SIDEBAR_SHELL" to directBashShell().absolutePath,
+      "SHELL" to directBashShell().absolutePath,
       "DSH_HOME" to ensureDshDataHome().absolutePath,
       "TMPDIR" to File(homeDir, "tmp").apply { mkdirs() }.absolutePath,
       "XDG_CACHE_HOME" to nodeCacheDir.absolutePath,
