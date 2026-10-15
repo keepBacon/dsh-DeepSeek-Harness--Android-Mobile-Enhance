@@ -41,7 +41,7 @@ public final class ShizukuInspectorService extends Binder {
                         .put("error", error.getClass().getSimpleName() + ": " + error.getMessage())
                         .toString();
             } catch (org.json.JSONException jsonError) {
-                result = "{\\"ok\\":false,\\"error\\":\\"inspector failure\\"}";
+                result = new JSONObject().toString();
             }
         }
         if (reply != null) {
