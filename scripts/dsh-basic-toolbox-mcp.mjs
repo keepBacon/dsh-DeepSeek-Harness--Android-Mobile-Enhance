@@ -197,6 +197,37 @@ async function call(name,a={}){
 }
 
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const[{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
-async function selfTest(){await sdk();process.stdout.write('[DSH] Basic MCP toolbox self-test: OK ('+tools.length+' tools)\n')}
+async function selfTest(){
+ await sdk()
+ const tmp=await mkdtemp(resolve(process.env.TMPDIR||'/tmp','.dsh-network-test-'))
+ const server=createServer((request,response)=>{
+  if(request.url==='/error'){response.writeHead(503);response.end('failure');return}
+  if(request.url==='/redirect'){response.writeHead(302,{location:'/ok'});response.end();return}
+  response.writeHead(200,{'content-type':'text/plain'});response.end('dsh-network-ok')
+ })
+ try{
+  const dir=await checkedDir(tmp)
+  if(dir.path!==await realpath(tmp))throw new Error('temporary directory invalid')
+  const target=resolve(tmp,'output.txt')
+  await writeFile(target,'original')
+  const port=await new Promise((resolvePort,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',()=>resolvePort(server.address().port))})
+  const base='http://127.0.0.1:'+port
+  const probe=await call('tcp_probe',{host:'127.0.0.1',port,timeoutMs:3000})
+  if(!probe.ok)throw new Error('tcp_probe self-test failed')
+  let rejected=false
+  try{await call('http_download',{url:base+'/error',destination:target,overwrite:true,timeoutMs:5000})}catch{rejected=true}
+  if(!rejected||await readFile(target,'utf8')!=='original')throw new Error('failed download damaged existing target')
+  const success=await call('http_download',{url:base+'/redirect',destination:target,overwrite:true,timeoutMs:5000})
+  if(success.size!=='dsh-network-ok'.length||await readFile(target,'utf8')!=='dsh-network-ok')throw new Error('http_download redirect self-test failed')
+  const leftovers=(await readdir(tmp)).filter(name=>name.includes('.dsh-download-'))
+  if(leftovers.length)throw new Error('temporary download files leaked')
+  const suffix=await call('http_download',{url:base+'/ok',destination:resolve(tmp,'new.txt'),timeoutMs:5000})
+  if(suffix.size!=='dsh-network-ok'.length)throw new Error('new download self-test failed')
+ }finally{
+  await new Promise(done=>server.close(()=>done()))
+  await rm(tmp,{recursive:true,force:true})
+ }
+ process.stdout.write('[DSH] Basic MCP network self-test: OK ('+tools.length+' tools)\n')
+}
 async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-basic-toolbox',version:'1.0.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments||{});return{content:[{type:'text',text:JSON.stringify(value,null,2)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-basic-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
