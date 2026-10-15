@@ -35,10 +35,14 @@ public final class ShizukuInspectorService extends Binder {
         try {
             result = inspect(operation, packageName).toString();
         } catch (Exception error) {
-            result = new JSONObject()
-                    .put("ok", false)
-                    .put("error", error.getClass().getSimpleName() + ": " + error.getMessage())
-                    .toString();
+            try {
+                result = new JSONObject()
+                        .put("ok", false)
+                        .put("error", error.getClass().getSimpleName() + ": " + error.getMessage())
+                        .toString();
+            } catch (org.json.JSONException jsonError) {
+                result = "{\\"ok\\":false,\\"error\\":\\"inspector failure\\"}";
+            }
         }
         if (reply != null) {
             reply.writeNoException();
