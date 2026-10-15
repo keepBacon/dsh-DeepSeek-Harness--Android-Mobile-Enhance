@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { connect as netConnect } from 'node:net'
+import { connect as netConnect, isIP } from 'node:net'
 import { createRequire } from 'node:module'
 import { dirname, resolve, relative, isAbsolute, sep } from 'node:path'
+import { createServer } from 'node:http'
+import { existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { chmod, copyFile, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 
 const HERE=dirname(fileURLToPath(import.meta.url))
 const PREFIX=process.env.TERMUX__PREFIX||process.env.PREFIX||resolve(HERE,'../..')
@@ -37,7 +39,7 @@ const tools=[
  {name:'disk_info',description:'Return filesystem capacity and usage.',inputSchema:{type:'object',properties:{path:{type:'string',default:'.'}},additionalProperties:false}},
  {name:'port_list',description:'List local listening sockets.',inputSchema:{type:'object',properties:{tcp:{type:'boolean',default:true},udp:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'tcp_probe',description:'Probe one TCP host and port.',inputSchema:{type:'object',properties:{host:{type:'string'},port:{type:'integer',minimum:1,maximum:65535},timeoutMs:{type:'integer',minimum:100,maximum:15000,default:3000}},required:['host','port'],additionalProperties:false}},
- {name:'dns_lookup',description:'Resolve DNS records.',inputSchema:{type:'object',properties:{name:{type:'string'},type:{type:'string',enum:['A','AAAA','MX','TXT','CNAME'],default:'A'}},required:['name'],additionalProperties:false}},
+ {name:'dns_lookup',description:'Resolve DNS records with bounded timeout and explicit DNS status.',inputSchema:{type:'object',properties:{name:{type:'string'},type:{type:'string',enum:['A','AAAA','MX','TXT','CNAME'],default:'A'},timeoutMs:{type:'integer',minimum:1000,maximum:15000,default:5000}},required:['name'],additionalProperties:false}},
  {name:'base_convert',description:'Convert utf8/hex/base64/base64url.',inputSchema:{type:'object',properties:{data:{type:'string'},from:{type:'string',enum:['utf8','hex','base64','base64url'],default:'utf8'},to:{type:'string',enum:['utf8','hex','base64','base64url'],default:'hex'}},required:['data'],additionalProperties:false}},
  {name:'encoding_detect',description:'Detect MIME and charset.',inputSchema:fileSchema},
  {name:'permissions_info',description:'Read POSIX mode/uid/gid.',inputSchema:fileSchema},
@@ -52,7 +54,7 @@ const tools=[
  {name:'pdf_info',description:'Inspect PDF metadata and page count.',inputSchema:fileSchema},
  {name:'archive_extract',description:'Safely extract an archive into a destination directory.',inputSchema:{type:'object',properties:{path:{type:'string'},destination:{type:'string'},overwrite:{type:'boolean',default:false},maxEntries:{type:'integer',minimum:1,maximum:20000,default:5000},maxTotalBytes:{type:'integer',minimum:1048576,maximum:4294967296,default:1073741824}},required:['path','destination'],additionalProperties:false}},
  {name:'archive_create',description:'Create zip/7z/tar.gz from explicit paths.',inputSchema:{type:'object',properties:{output:{type:'string'},paths:{type:'array',items:{type:'string'},minItems:1,maxItems:256},cwd:{type:'string',default:'.'},format:{type:'string',enum:['zip','7z','tar.gz'],default:'zip'},overwrite:{type:'boolean',default:false}},required:['output','paths'],additionalProperties:false}},
- {name:'http_download',description:'Download an HTTP(S) resource to a file.',inputSchema:{type:'object',properties:{url:{type:'string'},destination:{type:'string'},overwrite:{type:'boolean',default:false},maxBytes:{type:'integer',minimum:1,maximum:1073741824,default:268435456}},required:['url','destination'],additionalProperties:false}},
+ {name:'http_download',description:'Atomically download HTTP(S) to a file; incomplete downloads are deleted.',inputSchema:{type:'object',properties:{url:{type:'string'},destination:{type:'string'},overwrite:{type:'boolean',default:false},maxBytes:{type:'integer',minimum:1,maximum:1073741824,default:268435456},timeoutMs:{type:'integer',minimum:1000,maximum:120000,default:60000}},required:['url','destination'],additionalProperties:false}},
  {name:'tls_inspect',description:'Inspect a TLS endpoint certificate chain.',inputSchema:{type:'object',properties:{host:{type:'string'},port:{type:'integer',minimum:1,maximum:65535,default:443}},required:['host'],additionalProperties:false}},
  {name:'certificate_info',description:'Inspect a local PEM/DER X.509 certificate.',inputSchema:fileSchema},
  {name:'line_endings',description:'Inspect or convert LF/CRLF line endings.',inputSchema:{type:'object',properties:{path:{type:'string'},convertTo:{type:'string',enum:['LF','CRLF']},dryRun:{type:'boolean',default:true}},required:['path'],additionalProperties:false}},
@@ -77,8 +79,28 @@ async function checkedPath(p){const path=await realpath(userPath(p)),s=await sta
 async function checkedDir(p='.'){const path=await realpath(userPath(p)),s=await stat(path);if(!s.isDirectory())throw new Error('not a directory');return{path}}
 async function exists(p){try{await lstat(p);return true}catch(e){if(e?.code==='ENOENT')return false;throw e}}
 function trim(s,n=1200){const a=String(s).split(/\r?\n/);return{output:a.slice(0,n).join('\n').slice(0,MAX_OUTPUT),truncated:a.length>n,totalLines:a.length}}
-async function run(cmd,args=[],opts={}){return await new Promise(done=>{let out='',err='',finished=false;const child=spawn(cmd,args,{cwd:opts.cwd||process.cwd(),env:process.env,shell:false});const cap=MAX_OUTPUT;child.stdout?.on('data',b=>{if(out.length<cap)out=(out+b.toString()).slice(0,cap)});child.stderr?.on('data',b=>{if(err.length<cap)err=(err+b.toString()).slice(0,cap)});const timer=setTimeout(()=>{try{child.kill('SIGKILL')}catch{}},opts.timeout||30000);child.on('close',code=>{clearTimeout(timer);if(!finished){finished=true;done({exitCode:code,stdout:out,stderr:err})}});child.on('error',e=>{clearTimeout(timer);if(!finished){finished=true;done({exitCode:null,stdout:out,stderr:String(e)})}})})}
-async function strict(cmd,args=[],opts={}){const r=await run(cmd,args,opts);if(r.exitCode!==0)throw new Error(cmd+' failed: '+(r.stderr||r.stdout));return r.stdout}
+function runtimeToolEnv() {
+ const env={...process.env}
+ if(!env.MAGIC){for(const f of ['share/misc/magic.mgc','share/file/magic.mgc','etc/magic.mgc','lib/file/magic.mgc']){const p=resolve(PREFIX,f);if(existsSync(p)){env.MAGIC=p;break}}}
+ if(!env.MAGICK_CONFIGURE_PATH){for(const d of ['etc/ImageMagick-7','etc/ImageMagick-6','share/ImageMagick-7','share/ImageMagick-6']){const p=resolve(PREFIX,d);if(existsSync(resolve(p,'delegates.xml'))){env.MAGICK_CONFIGURE_PATH=p;break}}}
+ return env
+}
+async function run(cmd,args=[],opts={}) {
+ return await new Promise(done=>{
+  const started=Date.now(), cap=MAX_OUTPUT
+  let out=Buffer.alloc(0),err=Buffer.alloc(0),truncated=false,timedOut=false,spawnError=null
+  const capture=(current,chunk)=>{const data=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);const room=cap-current.length;if(data.length>room)truncated=true;return room>0?Buffer.concat([current,data.subarray(0,room)]):current}
+  let child
+  try{child=spawn(cmd,args,{cwd:opts.cwd||process.cwd(),env:opts.env||runtimeToolEnv(),shell:false,stdio:['ignore','pipe','pipe']})}
+  catch(e){done({exitCode:null,stdout:'',stderr:String(e),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
+  child.stdout?.on('data',b=>{out=capture(out,b)})
+  child.stderr?.on('data',b=>{err=capture(err,b)})
+  child.on('error',e=>{spawnError=e})
+  const timer=setTimeout(()=>{timedOut=true;try{child.kill('SIGKILL')}catch{}},opts.timeout??30000)
+  child.on('close',(code,signal)=>{clearTimeout(timer);done({exitCode:typeof code==='number'?code:null,signal:signal||null,stdout:out.toString('utf8'),stderr:(spawnError?String(spawnError)+'\n':'')+err.toString('utf8'),timedOut,truncated,durationMs:Date.now()-started})})
+ })
+}
+async function strict(cmd,args=[],opts={}){const r=await run(cmd,args,opts);if(r.timedOut)throw new Error(cmd+' timed out after '+(opts.timeout??30000)+'ms: '+(r.stderr||r.stdout).slice(0,4096));if(r.exitCode!==0)throw new Error(cmd+' failed (exit='+r.exitCode+'): '+(r.stderr||r.stdout||'no process output').slice(0,4096));return r.stdout}
 async function sha(path,alg='sha256'){const o=await strict('openssl',['dgst','-'+alg,path]);const m=o.match(/=\s*([0-9a-fA-F]+)\s*$/);if(!m)throw new Error('digest parse failed');return m[1].toLowerCase()}
 function decode(data,enc='utf8'){if(enc==='utf8')return Buffer.from(data);if(enc==='base64url')return Buffer.from(data,'base64url');return Buffer.from(data,enc)}
 async function tree(root,maxDepth,maxEntries,showHidden,sizeOnly=false){const rows=[];let bytes=0,files=0,dirs=0;async function walk(d,depth){if(depth>maxDepth)return;for(const e of await readdir(d,{withFileTypes:true})){if(!showHidden&&e.name.startsWith('.'))continue;if((sizeOnly?files+dirs:rows.length)>=maxEntries)return;const p=resolve(d,e.name),s=await lstat(p),type=s.isSymbolicLink()?'symlink':s.isDirectory()?'directory':s.isFile()?'file':'other';if(type==='file'){bytes+=s.size;files++}else if(type==='directory')dirs++;if(!sizeOnly)rows.push({path:relative(root,p),type,size:type==='file'?s.size:0});if(type==='directory')await walk(p,depth+1)}}await walk(root,0);return{rows,bytes,files,dirs}}
@@ -105,9 +127,18 @@ async function call(name,a={}){
   case 'regex_test':{const p=text(a.pattern),flags=a.flags||'g',input=text(a.text),max=int(a.maxMatches,50,1,200),s="const[p,f,b,m]=process.argv.slice(1);let z=f.includes('g')?f:f+'g',r=new RegExp(p,z),t=Buffer.from(b,'base64').toString(),o=[],x;while((x=r.exec(t))&&o.length<+m){o.push({match:x[0],index:x.index,groups:x.slice(1)});if(!x[0])r.lastIndex++}console.log(JSON.stringify(o))";return{matches:JSON.parse(await strict('node',['-e',s,p,flags,Buffer.from(input).toString('base64'),String(max)],{timeout:2000}))}}
   case 'env_info':return{cwd:process.cwd(),platform:process.platform,arch:process.arch,node:process.version,pid:process.pid,env:{HOME:process.env.HOME||null,TMPDIR:process.env.TMPDIR||null,PREFIX:process.env.PREFIX||null,PATH:bool(a.includePath,true)?process.env.PATH:null}}
   case 'disk_info':{const p=await realpath(userPath(a.path||'.')),o=await strict('df',['-Pk',p]),c=o.trim().split(/\r?\n/).at(-1).trim().split(/\s+/);return{path:p,totalKiB:+c[1],usedKiB:+c[2],availableKiB:+c[3],usePercent:c[4],mount:c.slice(5).join(' ')}}
-  case 'port_list':return trim(await strict('ss',['-H','-l','-n','-t','-u']),1000)
+  case 'port_list':{const tcp=bool(a.tcp,true),udp=bool(a.udp,true);if(!tcp&&!udp)throw new Error('select tcp and/or udp');return trim(await strict('ss',['-H','-l','-n',...(tcp?['-t']:[]),...(udp?['-u']:[])]),1000)}
   case 'tcp_probe':{const host=text(a.host),port=int(a.port,0,1,65535),start=Date.now();return await new Promise(done=>{let finished=false;const s=netConnect({host,port});const finish=(ok,error=null)=>{if(finished)return;finished=true;s.destroy();done({host,port,ok,latencyMs:Date.now()-start,error})};s.setTimeout(int(a.timeoutMs,3000,100,15000),()=>finish(false,'timeout'));s.once('connect',()=>finish(true));s.once('error',e=>finish(false,e.code||e.message))})}
-  case 'dns_lookup':return{name:a.name,type:a.type||'A',answers:(await strict('dig',['+short',text(a.name),a.type||'A'])).split(/\r?\n/).filter(Boolean)}
+  case 'dns_lookup':{
+ const name=text(a.name,'name'),type=a.type||'A',timeout=int(a.timeoutMs,5000,1000,15000)
+ if(!/^[A-Za-z0-9_.-]{1,253}\.?$/.test(name)||name.startsWith('-'))throw new Error('invalid DNS name')
+ const seconds=Math.max(1,Math.min(5,Math.ceil(timeout/1000)))
+ const raw=await strict('dig',['+time='+seconds,'+tries=1','+noall','+comments','+answer',name,type],{timeout:timeout+1000})
+ const status=raw.match(/status:\s*([A-Z]+)/)?.[1]||'UNKNOWN'
+ const answers=raw.split(/\r?\n/).filter(line=>line.trim()&&!line.trim().startsWith(';')).map(line=>line.trim())
+ if(!['NOERROR','NXDOMAIN'].includes(status))throw new Error('DNS query '+name+' failed: '+status)
+ return{name,type,status,answers}
+ }
   case 'base_convert':{const b=decode(text(a.data),a.from||'utf8'),to=a.to||'hex';return{value:to==='utf8'?b.toString():b.toString(to)}}
   case 'encoding_detect':{const f=await checkedPath(a.path);return{path:f.path,mime:(await strict('file',['-b','--mime',f.path])).trim()}}
   case 'permissions_info':{const p=userPath(a.path),s=await lstat(p);return{path:p,mode:'0'+(s.mode&0o7777).toString(8),uid:s.uid,gid:s.gid}}
@@ -122,8 +153,32 @@ async function call(name,a={}){
   case 'pdf_info':{const f=await checkedPath(a.path);return{path:f.path,...trim(await strict('pdfinfo',[f.path]),200)}}
   case 'archive_extract':{const f=await checkedPath(a.path),d=userPath(a.destination),tmp=d+'.dsh-tmp-'+Date.now();if(await exists(d)&&!bool(a.overwrite,false))throw new Error('destination exists');await mkdir(tmp,{recursive:true});try{await strict('7z',['x','-y','-o'+tmp,f.path],{timeout:120000});let count=0,total=0;async function scan(dir){for(const e of await readdir(dir,{withFileTypes:true})){count++;if(count>int(a.maxEntries,5000,1,20000))throw new Error('archive entry limit exceeded');const p=resolve(dir,e.name),s=await lstat(p);if(s.isSymbolicLink())throw new Error('archive symlink rejected');if(s.isDirectory())await scan(p);else if(s.isFile()){total+=s.size;if(total>int(a.maxTotalBytes,1073741824,1048576,4294967296))throw new Error('archive size limit exceeded')}}}await scan(tmp);if(await exists(d))await rm(d,{recursive:true,force:true});await rename(tmp,d);return{archive:f.path,destination:d,entries:count,totalBytes:total}}catch(e){await rm(tmp,{recursive:true,force:true}).catch(()=>{});throw e}}
   case 'archive_create':{const root=(await checkedDir(a.cwd||'.')).path,out=userPath(a.output),fmt=a.format||'zip',ps=[];for(const raw of a.paths||[]){const p=await realpath(resolve(root,text(raw,'path'))),rel=relative(root,p);if(rel===''||rel==='..'||rel.startsWith('..'+sep)||isAbsolute(rel))throw new Error('path escapes archive root');ps.push(rel)}if(!ps.length)throw new Error('paths empty');if(await exists(out)){if(!bool(a.overwrite,false))throw new Error('output exists');await rm(out,{force:true})}await mkdir(dirname(out),{recursive:true});if(fmt==='tar.gz')await strict('tar',['-czf',out,'--',...ps],{cwd:root,timeout:120000});else await strict('7z',['a',fmt==='7z'?'-t7z':'-tzip','-y',out,...ps],{cwd:root,timeout:120000});return{path:out,format:fmt}}
-  case 'http_download':{const url=text(a.url,'url'),u=new URL(url);if(!['http:','https:'].includes(u.protocol))throw new Error('only http/https supported');const d=userPath(a.destination);if(await exists(d)&&!bool(a.overwrite,false))throw new Error('destination exists');await mkdir(dirname(d),{recursive:true});await strict('curl',['-fL','--max-filesize',String(int(a.maxBytes,268435456,1,1073741824)),'-o',d,url],{timeout:120000});return{path:d,size:(await stat(d)).size}}
-  case 'tls_inspect':{const h=text(a.host,'host'),p=int(a.port,443,1,65535),x=await run('openssl',['s_client','-connect',h+':'+p,'-servername',h,'-showcerts','-brief'],{timeout:15000});return{host:h,port:p,ok:x.exitCode===0,...trim(x.stdout+'\n'+x.stderr,500)}}
+  case 'http_download':{
+ const url=text(a.url,'url'),u=new URL(url)
+ if(!['http:','https:'].includes(u.protocol))throw new Error('only http/https supported')
+ const dest=userPath(a.destination),maxBytes=int(a.maxBytes,268435456,1,1073741824)
+ const timeout=int(a.timeoutMs,60000,1000,120000),overwrite=bool(a.overwrite,false)
+ await mkdir(dirname(dest),{recursive:true})
+ let targetExists=false
+ try{const existing=await lstat(dest);if(existing.isSymbolicLink()||!existing.isFile())throw new Error('destination must be a regular file, not a symlink');if(!overwrite)throw new Error('destination exists');targetExists=true}catch(e){if(e?.code!=='ENOENT')throw e}
+ const temp=resolve(dirname(dest),'.'+dest.split('/').at(-1)+'.dsh-download-'+randomBytes(8).toString('hex')+'.tmp')
+ try{
+  await strict('curl',['--fail','--location','--silent','--show-error','--proto','=http,https','--proto-redir','=http,https','--max-redirs','10','--connect-timeout','10','--max-time',String(Math.ceil(timeout/1000)),'--max-filesize',String(maxBytes),'--output',temp,'--',url],{timeout:timeout+2000})
+  const info=await lstat(temp)
+  if(!info.isFile()||info.size>maxBytes)throw new Error('download exceeds configured size or is not a regular file')
+  await rename(temp,dest)
+  return{path:dest,size:info.size,overwritten:targetExists,url:u.toString()}
+ }catch(e){await rm(temp,{force:true}).catch(()=>{});throw e}
+ }
+  case 'tls_inspect':{
+ const host=text(a.host,'host'),port=int(a.port,443,1,65535),ip=isIP(host)
+ if(!ip&&(!/^[A-Za-z0-9.-]{1,253}$/.test(host)||host.startsWith('-')))throw new Error('invalid TLS host')
+ const connect=(ip===6?'['+host+']':host)+':'+port
+ const args=['s_client','-connect',connect,...(!ip?['-servername',host]:[]),'-showcerts','-brief']
+ const r=await run('openssl',args,{timeout:15000})
+ if(r.timedOut)throw new Error('TLS probe timed out after 15000ms: '+host)
+ return{host,port,ok:r.exitCode===0,exitCode:r.exitCode,...trim(r.stdout+'\n'+r.stderr,500)}
+ }
   case 'certificate_info':{const f=await checkedPath(a.path);let x=await run('openssl',['x509','-in',f.path,'-noout','-subject','-issuer','-serial','-dates','-fingerprint','-sha256']);if(x.exitCode!==0)x=await run('openssl',['x509','-inform','DER','-in',f.path,'-noout','-subject','-issuer','-serial','-dates','-fingerprint','-sha256']);if(x.exitCode!==0)throw new Error(x.stderr||x.stdout);return{path:f.path,...trim(x.stdout,100)}}
   case 'line_endings':{const f=await checkedPath(a.path),s=await readFile(f.path,'utf8'),crlf=(s.match(/\r\n/g)||[]).length,lf=(s.match(/(?<!\r)\n/g)||[]).length;if(a.convertTo&&!bool(a.dryRun,true)){const next=a.convertTo==='CRLF'?s.replace(/\r?\n/g,'\r\n'):s.replace(/\r\n/g,'\n');await writeFile(f.path,next)}return{path:f.path,crlf,lf,mixed:crlf>0&&lf>0,converted:a.convertTo||null,dryRun:bool(a.dryRun,true)}}
   case 'chmod_file':{const p=userPath(a.path),s=await lstat(p),m=text(a.mode,'mode');if(s.isSymbolicLink())throw new Error('refusing symlink');if(!/^[0-7]{3,4}$/.test(m))throw new Error('invalid mode');await chmod(p,parseInt(m,8));return{path:p,mode:m}}
