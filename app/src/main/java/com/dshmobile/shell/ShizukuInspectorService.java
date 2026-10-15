@@ -74,30 +74,43 @@ public final class ShizukuInspectorService extends Binder {
 
         Process process = new ProcessBuilder(argv).redirectErrorStream(true).start();
         ByteArrayOutputStream captured = new ByteArrayOutputStream();
-        boolean overflow = false;
-        try {
-            InputStream stream = process.getInputStream();
-            byte[] block = new byte[2048];
-            int size;
-            while ((size = stream.read(block)) != -1) {
-                if (captured.size() + size > LIMIT) {
-                    overflow = true;
-                    process.destroyForcibly();
-                    break;
+        java.util.concurrent.atomic.AtomicBoolean overflow = new java.util.concurrent.atomic.AtomicBoolean(false);
+        Thread reader = new Thread(() -> {
+            try (InputStream stream = process.getInputStream()) {
+                byte[] block = new byte[2048];
+                int size;
+                while ((size = stream.read(block)) != -1) {
+                    synchronized (captured) {
+                        if (captured.size() + size > LIMIT) {
+                            overflow.set(true);
+                            process.destroyForcibly();
+                            break;
+                        }
+                        captured.write(block, 0, size);
+                    }
                 }
-                captured.write(block, 0, size);
+            } catch (Exception ignored) {
+                // The stream can close normally when a timed-out process is killed.
             }
+        }, "dsh-shizuku-read");
+        reader.setDaemon(true);
+        reader.start();
+        try {
             boolean complete = process.waitFor(6, TimeUnit.SECONDS);
             if (!complete) process.destroyForcibly();
+            if (complete) reader.join(500);
+            else reader.join(250);
             int code = complete ? process.exitValue() : -1;
+            byte[] output;
+            synchronized (captured) { output = captured.toByteArray(); }
             return new JSONObject()
-                    .put("ok", complete && !overflow && code == 0)
+                    .put("ok", complete && !overflow.get() && code == 0)
                     .put("operation", operation)
                     .put("uid", android.os.Process.myUid())
                     .put("exitCode", code)
                     .put("timedOut", !complete)
-                    .put("truncated", overflow)
-                    .put("output", new String(captured.toByteArray(), StandardCharsets.UTF_8));
+                    .put("truncated", overflow.get())
+                    .put("output", new String(output, StandardCharsets.UTF_8));
         } finally {
             if (process.isAlive()) process.destroyForcibly();
         }
