@@ -734,6 +734,26 @@ class MainActivity : ComponentActivity() {
     })
 
     wrap.addView(TextView(this).apply {
+      text = "Shizuku 只读诊断"
+      textSize = 16f
+      setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
+    })
+    wrap.addView(Button(this).apply {
+      text = "检查 Shizuku 授权与 Shell 身份"
+      setOnClickListener {
+        Thread {
+          val result = ShizukuSupport.inspect("identity")
+          runOnUiThread {
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("Shizuku 诊断")
+              .setMessage(result.toString(2))
+              .setPositiveButton(android.R.string.ok, null)
+              .show()
+          }
+        }.start()
+      }
+    })
+    wrap.addView(TextView(this).apply {
       text = "关于"
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
