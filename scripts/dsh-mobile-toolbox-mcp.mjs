@@ -2,6 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createCoordinator } from './dsh-subagent-coordination.mjs'
+import { codebaseMap, codeSymbols, codeImpact, codeEditTransaction } from './dsh-coding-engine.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -23,9 +24,15 @@ const MAX_HTTP_CAPTURE=4*1024*1024
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
 const coordinator=createCoordinator()
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
+const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED!=='0'
+const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction'])
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
-const visibleTools=()=>COORDINATION_ENABLED?tools:tools.filter(t=>!COORDINATION_NAMES.has(t.name))
+const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name)))
 const tools=[
+ {name:'codebase_map',description:'Bounded project map by source-language and directory.',inputSchema:{type:'object',properties:{root:{type:'string'}},additionalProperties:false}},
+ {name:'code_symbols',description:'Find approximated source declaration symbols (heuristic not semantic LSP).',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},query:{type:'string'},limit:{type:'integer',minimum:1,maximum:200}},additionalProperties:false}},
+ {name:'code_impact',description:'Find potential textual references to edited source modules.',inputSchema:{type:'object',properties:{root:{type:'string'},paths:{type:'array',items:{type:'string'}},limit:{type:'integer',minimum:1,maximum:100}},required:['paths'],additionalProperties:false}},
+ {name:'code_edit_transaction',description:'Checked multi-file text edits requiring source SHA-256; dryRun by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},changes:{type:'array',minItems:1,maxItems:16,items:{type:'object',properties:{path:{type:'string'},expectedSha256:{type:'string'},oldText:{type:'string'},newText:{type:'string'}},required:['path','expectedSha256','oldText','newText']}}},required:['changes'],additionalProperties:false}},
  {name:'coordination_create',description:'Create durable shared task plan; native subagents execute tasks separately.',inputSchema:{type:'object',properties:{tasks:{type:'array',minItems:1,maxItems:64,items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},description:{type:'string'},blockedBy:{type:'array',items:{type:'string'}},writeScopes:{type:'array',items:{type:'string'}}},required:['id','title']}},maxParallel:{type:'integer',minimum:1,maximum:8},maxAttempts:{type:'integer',minimum:1,maximum:5}},required:['tasks'],additionalProperties:false}},
  {name:'coordination_status',description:'Read task board readiness, conflicts and status.',inputSchema:{type:'object',properties:{boardId:{type:'string'}},required:['boardId'],additionalProperties:false}},
  {name:'coordination_claim',description:'Claim ready task with lease and concurrency checks.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},leaseSeconds:{type:'integer',minimum:30,maximum:1800}},required:['boardId','taskId','agentId'],additionalProperties:false}},
@@ -342,9 +349,14 @@ async function closeDebug(session){if(session.closed)return;try{if(session.attac
 
 async function call(name,a={}){
  if(!COORDINATION_ENABLED&&COORDINATION_NAMES.has(name))throw new Error('coordination extension disabled in Android settings')
+ if(!CODING_ENABLED&&CODING_NAMES.has(name))throw new Error('coding extension disabled in Android settings')
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'codebase_map': return codebaseMap(a)
+  case 'code_symbols': return codeSymbols(a)
+  case 'code_impact': return codeImpact(a)
+  case 'code_edit_transaction': return codeEditTransaction(a)
   case 'coordination_create': return coordinator.create(a)
   case 'coordination_status': return coordinator.status(a.boardId)
   case 'coordination_claim': return coordinator.claim(a)
