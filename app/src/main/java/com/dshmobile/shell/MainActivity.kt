@@ -733,6 +733,10 @@ class MainActivity : ComponentActivity() {
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
 
+    wrap.addView(Button(this).apply {
+      text = "安卓扩展管理 · 开关与诊断"
+      setOnClickListener { showAndroidExtensions() }
+    })
     wrap.addView(TextView(this).apply {
       text = "Shizuku 只读诊断"
       textSize = 16f
@@ -4029,6 +4033,93 @@ class MainActivity : ComponentActivity() {
       // package metadata diagnostics are handled by DSH/pnpm after selection.
     }
     return packageRoot.absolutePath
+  }
+
+  /**
+   * Android additions are opt-in management surfaces, not DSH core plugin replacements.
+   * MCP changes stop/restart the Host through the existing transaction boundary.
+   */
+  private fun showAndroidExtensions() {
+    val density = resources.displayMetrics.density
+    val root = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding((16 * density).toInt(), (12 * density).toInt(), (16 * density).toInt(), (12 * density).toInt())
+    }
+    root.addView(TextView(this).apply {
+      text = "这些开关只控制 Android 扩展，不删除插件或运行时文件。修改 MCP 开关需要重启 DSH；自定义 MCP 服务器仍在“管理 MCP”中设置。"
+      textSize = 13f
+      setPadding(0, 0, 0, (12 * density).toInt())
+    })
+    lateinit var dialog: android.app.AlertDialog
+    fun addToggle(id: String, label: String, description: String) {
+      val checked = engineManager.builtInMcpExtensionEnabled(id)
+      val item = android.widget.Switch(this).apply {
+        text = label
+        textSize = 15f
+        isChecked = checked
+        setPadding(0, (8 * density).toInt(), 0, 0)
+        setOnCheckedChangeListener { _, enabled ->
+          if (enabled == checked) return@setOnCheckedChangeListener
+          isChecked = checked
+          android.app.AlertDialog.Builder(this@MainActivity)
+            .setTitle(if (enabled) "启用 $label" else "停用 $label")
+            .setMessage("需要重启 DSH 引擎后生效。现有插件、模型配置与会话不会被删除。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("应用并重启") { _, _ ->
+              dialog.dismiss()
+              runProfileMutation("正在更新安卓扩展…") {
+                engineManager.setBuiltInMcpExtensionEnabled(id, enabled)
+              }
+            }.show()
+        }
+      }
+      root.addView(item)
+      root.addView(TextView(this).apply {
+        text = description
+        textSize = 12f
+        setPadding(0, 0, 0, (8 * density).toInt())
+      })
+    }
+    addToggle("mobile_tools", "mobile_tools · 移动开发与逆向工具", "本地文件、命令、网络、Git 与兼容性工具；关闭后不注册此 MCP 服务。")
+    addToggle("basic_tools", "basic_tools · 基础工具", "压缩包、数据处理、系统诊断、基础网络和构建工具；与 mobile_tools 独立。")
+    addToggle("coordination", "子代理协同任务板", "仅控制 mobile_tools 内 coordination_* 工具；原生 Subagent / Workflow 不受影响。")
+    root.addView(Button(this).apply {
+      text = "查看配置与运行环境"
+      setOnClickListener {
+        val report = buildString {
+          append(engineManager.mcpRuntimeSummary())
+          append("\nmobile_tools: ").append(engineManager.builtInMcpExtensionEnabled("mobile_tools"))
+          append("\nbasic_tools: ").append(engineManager.builtInMcpExtensionEnabled("basic_tools"))
+          append("\ncoordination: ").append(engineManager.builtInMcpExtensionEnabled("coordination"))
+          append("\nShizuku: ").append(ShizukuSupport.status())
+          engineManager.mcpConfigurationIssue()?.let { append("\n配置异常: ").append(it) }
+        }
+        android.app.AlertDialog.Builder(this@MainActivity).setTitle("扩展诊断")
+          .setMessage(report).setPositiveButton("确定", null).show()
+      }
+    })
+    root.addView(Button(this).apply {
+      text = "检测 Shizuku Shell 身份"
+      setOnClickListener {
+        Thread {
+          val report = ShizukuSupport.inspect("identity").toString(2)
+          runOnUiThread {
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("Shizuku 诊断").setMessage(report)
+              .setPositiveButton("确定", null).show()
+          }
+        }.start()
+      }
+    })
+    root.addView(TextView(this).apply {
+      text = "尚未实现的 Coding Engine 2.0 自动编码功能将在完成测试后逐项加入。DSH 核心 Agent / 工作流不会被此页面禁用。"
+      textSize = 12f
+    })
+    dialog = android.app.AlertDialog.Builder(this)
+      .setTitle("安卓扩展管理")
+      .setView(android.widget.ScrollView(this).apply { addView(root) })
+      .setPositiveButton("完成", null).create()
+    dialog.show()
   }
 
   private fun showMcpManager() {
