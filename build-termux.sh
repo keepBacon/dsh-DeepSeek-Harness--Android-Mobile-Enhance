@@ -1589,6 +1589,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$verifier" ] || { echo '[DSH] Missing Coding Verification module'; exit 8; }
   cp "$verifier" "$(dirname "$dest")/dsh-code-verify.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-code-verify.mjs"
+  local task_link="$ROOT/scripts/dsh-code-task-link.mjs"
+  [ -f "$task_link" ] || { echo '[DSH] Missing Coding Task Link module'; exit 8; }
+  cp "$task_link" "$(dirname "$dest")/dsh-code-task-link.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-task-link.mjs"
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-task-link.mjs" --self-test || { echo '[DSH] Coding Task Link self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-verify.mjs" --self-test || { echo '[DSH] Coding Verification self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-diagnostics.mjs" --self-test || { echo '[DSH] Coding Diagnostics self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-transactions.mjs" --self-test || { echo '[DSH] Coding Transactions self-test failed'; exit 8; }
