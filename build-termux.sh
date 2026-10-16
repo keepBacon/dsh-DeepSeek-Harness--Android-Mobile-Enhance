@@ -1581,6 +1581,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$transactions" ] || { echo '[DSH] Missing Coding Transactions module'; exit 8; }
   cp "$transactions" "$(dirname "$dest")/dsh-code-transactions.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-code-transactions.mjs"
+  local diagnostics="$ROOT/scripts/dsh-code-diagnostics.mjs"
+  [ -f "$diagnostics" ] || { echo '[DSH] Missing Coding Diagnostics module'; exit 8; }
+  cp "$diagnostics" "$(dirname "$dest")/dsh-code-diagnostics.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-diagnostics.mjs"
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-diagnostics.mjs" --self-test || { echo '[DSH] Coding Diagnostics self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-transactions.mjs" --self-test || { echo '[DSH] Coding Transactions self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-index.mjs" --self-test || { echo '[DSH] Coding Index self-test failed.'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-coding-engine.mjs" --self-test || { echo '[DSH] Coding Engine self-test failed.'; exit 8; }
