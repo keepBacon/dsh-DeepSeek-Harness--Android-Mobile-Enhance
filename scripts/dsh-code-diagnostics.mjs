@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url'
 /**
  * Coding Engine 2.0 P2: deterministic compiler diagnostics + test selection.
  *
@@ -191,4 +192,4 @@ async function selfTest(){
   process.stdout.write('[DSH] Coding diagnostics/test selection self-test: OK\n')
  }finally {await rm(root,{recursive:true,force:true})}
 }
-if(process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
