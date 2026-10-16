@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url'
 /**
  * Coding Engine 2.0 P2 - bounded verification runner.
  *
@@ -150,4 +151,4 @@ async function selfTest(){
     process.stdout.write('[DSH] Coding verification self-test: OK\n')
  }finally{await rm(root,{recursive:true,force:true})}
 }
-if(process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
