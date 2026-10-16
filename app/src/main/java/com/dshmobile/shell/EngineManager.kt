@@ -181,6 +181,27 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
+  /** Read-only Android Coding Engine status; no Host or MCP process is started. */
+  fun codingEngineDiagnostics(): String = buildString {
+    val root = File(usrDir, "libexec/dsh-mobile")
+    val components = linkedMapOf(
+      "Coding Engine P0/P1" to "dsh-coding-engine.mjs",
+      "Incremental index" to "dsh-code-index.mjs",
+      "Recoverable transactions" to "dsh-code-transactions.mjs",
+      "Compiler diagnostics" to "dsh-code-diagnostics.mjs",
+      "Verification runner" to "dsh-code-verify.mjs",
+    )
+    append("编码增强状态：").append(if (mcpConfigManager.codingEnabled()) "已配置启用" else "已配置关闭")
+    append("\n依赖 mobile_tools：").append(if (mcpConfigManager.toolboxEnabled()) "已配置启用" else "已配置关闭")
+    append("\n检查来源：当前 APK 已解压的 runtime 文件（不是 MCP 执行成功证明）")
+    for ((name, file) in components) {
+      val module = File(root, file)
+      append("\n").append(name).append("：")
+        .append(if (module.isFile && module.length() > 0L) "已安装" else "缺失")
+    }
+    append("\n索引、事务和验证需要在 DSH 模型会话中实际调用 MCP 才能证明可用。")
+  }
+
   fun mcpRuntimeSummary(): String = mcpConfigManager.runtimeSummary()
   fun listMcpServers(): List<McpServerConfig> = mcpConfigManager.listServers()
   fun mcpToolboxEnabled(): Boolean = mcpConfigManager.toolboxEnabled()
