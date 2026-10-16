@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url'
 /**
  * DSH Coding Engine 2.0: recoverable, opt-in, multi-file text transactions.
  *
@@ -330,6 +331,6 @@ async function selfTest(){
   await rm(home,{recursive:true,force:true})
  }
 }
-if(process.argv[2]==='--crash-helper'){
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&process.argv[2]==='--crash-helper'){
  runCodeTransaction({root:process.argv[3],changes:JSON.parse(process.argv[4]),dryRun:false}).catch(e=>{console.error(e);process.exitCode=1})
-}else if(process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
+}else if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
