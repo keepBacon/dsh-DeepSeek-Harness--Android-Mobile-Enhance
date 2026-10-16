@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url'
 import {createHash,randomBytes} from 'node:crypto'
 import {open,readFile,readdir,lstat,realpath,mkdir,rename,rm,mkdtemp,writeFile} from 'node:fs/promises'
 import {resolve,join,extname,relative} from 'node:path'
@@ -134,4 +135,4 @@ async function test(){
   process.stdout.write('[DSH] Coding index incremental self-test: OK\n')
  }finally{if(oldEnv===undefined)delete process.env.DSH_CODE_INDEX_HOME;else process.env.DSH_CODE_INDEX_HOME=oldEnv;await rm(root,{recursive:true,force:true})}
 }
-if(process.argv.includes('--self-test'))test().catch(e=>{console.error(e);process.exitCode=1})
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&process.argv.includes('--self-test'))test().catch(e=>{console.error(e);process.exitCode=1})
