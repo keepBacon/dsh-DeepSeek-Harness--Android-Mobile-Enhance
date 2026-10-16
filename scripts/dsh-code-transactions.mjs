@@ -300,6 +300,23 @@ async function selfTest(){
   const recovered=await codeTransactionRecover({root})
   if(recovered.recovered.length!==1||recovered.unresolved.length)throw Error('crash recovery failed')
   if(!(await readFile(a,'utf8')).includes('value=3')||!(await readFile(b,'utf8')).includes('other=4'))throw Error('recovered data mismatch')
+  // Third-party changes after a crash must not be destroyed by recovery.
+  const external=[{path:'a.js',expectedSha256:sha(await readFile(a)),oldText:'value=3',newText:'value=8'},
+    {path:'b.js',expectedSha256:sha(await readFile(b)),oldText:'other=4',newText:'other=9'}]
+  const third=spawnSync(process.execPath,[script,'--crash-helper',root,JSON.stringify(external)],
+    {env:{...process.env,DSH_CODE_TX_TEST_MODE:'1',DSH_CODE_TX_CRASH_AFTER:'1'},encoding:'utf8'})
+  if(third.status!==86)throw Error('external conflict crash injection failed')
+  await (await import('node:fs/promises')).writeFile(a,'let value=777 // external writer\n')
+  const conflicted=await codeTransactionRecover({root})
+  if(!conflicted.unresolved.length||!(await readFile(a,'utf8')).includes('external writer'))throw Error('external content was overwritten')
+  const lockedOut=await runCodeTransaction({root,changes:[{path:'b.js',expectedSha256:sha(await readFile(b)),oldText:'other=4',newText:'other=5'}],dryRun:false}).then(()=>false,e=>/CODING_TX_RECOVERY_REQUIRED/.test(e.message))
+  if(!lockedOut)throw Error('unresolved journal did not block subsequent changes')
+  // Resolve the external conflict explicitly without overwriting external content.
+  const pending=await codeTransactionStatus({root})
+  if(!pending.unresolved.some(x=>x.state==='needs_review'))throw Error('needs-review status omitted')
+  await (await import('node:fs/promises')).writeFile(a,'let value=3\n')
+  const finished=await codeTransactionRecover({root,allowReviewRetry:true})
+  if(finished.unresolved.length)throw Error('review recovery failed after restoring known file hash')
   const badPath=await (await import('node:fs/promises')).symlink(a,join(root,'linked.js'))
   let rejected=false
   try{await runCodeTransaction({root,changes:[{path:'linked.js',expectedSha256:sha(await readFile(a)),oldText:'value=3',newText:'value=7'}]})}catch{rejected=true}
