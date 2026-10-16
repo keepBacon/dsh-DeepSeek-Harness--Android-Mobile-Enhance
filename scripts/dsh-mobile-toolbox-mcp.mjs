@@ -648,6 +648,11 @@ async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/
 async function selfTest(){
  await sdk()
  const empty=await call('tool_registry_list',null);if(empty.total!==tools.length)throw new Error('null tool arguments contract failed')
+ if(empty.tools.length>40||empty.nextOffset!==40)throw new Error('tool registry pagination default failed')
+ const lastPage=await call('tool_registry_list',{offset:tools.length-1,limit:10})
+ if(lastPage.tools.length!==1||lastPage.nextOffset!==null)throw new Error('tool registry final page failed')
+ const large=await call('command_run',{command:'node',args:['-e','process.stdout.write("x".repeat(200000));process.stderr.write("DSH_STDERR_OK")'],maxOutputBytes:4096,timeoutMs:5000})
+ if(large.exitCode!==0||!large.truncated||large.stdout.length!==4096||!large.stderr.includes('DSH_STDERR_OK'))throw new Error('bounded command output regression failed')
  const adb=tools.find(t=>t.name==='adb_devices');if(adb?.inputSchema?.required?.length)throw new Error('adb_devices unexpectedly requires arguments')
  const names=new Set(tools.map(x=>x.name));for(const name of ['fs_read','fs_list','fs_search','fs_write','fs_patch','command_run','git_status','git_diff','git_log','http_request','android_logcat','apk_inspect','process_list','process_info','process_maps','process_threads','module_list','memory_regions','memory_read','memory_search','syscall_trace','frida_processes','frida_attach','frida_spawn','frida_script','frida_trace','debug_session_start','debug_attach','debug_breakpoint_set','debug_continue','debug_registers','debug_backtrace','debug_memory_read','debug_session_close','binary_functions','binary_xrefs','jni_map_java_native','no_root_capabilities','self_runtime_snapshot','runtime_snapshot','runtime_diff','process_fds','process_network','child_strace','adb_devices','adb_pair','adb_connect','adb_package_info','adb_process_info','adb_logcat','adb_jdwp_list','adb_pull_apk','reverse_capabilities','package_process_info','native_backtrace','frida_detach','symbol_resolve','address_rebase','il2cpp_detect','il2cpp_metadata_info','il2cpp_find_class','il2cpp_find_method'])if(!names.has(name))throw new Error('missing tool '+name)
  if((await call('protocol_decode',{data:'414243',encoding:'hex'})).utf8!=='ABC')throw new Error('decode self-test failed')
