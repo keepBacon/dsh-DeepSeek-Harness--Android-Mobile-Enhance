@@ -297,7 +297,7 @@ async function selfTest(){
   if(child.status!==86)throw Error('hard crash fault injection missing: '+child.stderr)
   const state=await codeTransactionStatus({root})
   if(state.unresolved.length!==1||!state.unresolved[0].state||state.unresolved[0].state!=='applying')throw Error('crashed journal missing')
-  const recovered=await codeTransactionRecover({root})
+  const recovered=await codeTransactionRecover({root,id:state.unresolved[0].id})
   if(recovered.recovered.length!==1||recovered.unresolved.length)throw Error('crash recovery failed: '+JSON.stringify(recovered))
   if(!(await readFile(a,'utf8')).includes('value=3')||!(await readFile(b,'utf8')).includes('other=4'))throw Error('recovered data mismatch')
   // Third-party changes after a crash must not be destroyed by recovery.
