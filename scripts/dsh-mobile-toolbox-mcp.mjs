@@ -35,7 +35,7 @@ const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
 const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED!=='0'
 const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes','code_task_verify'])
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
-const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name)))
+const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
 const tools=[
  {name:'tool_latency_report',description:'Return bounded in-memory MCP tool latency measurements; opt-in via settings.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'code_task_verify',description:'Link a claimed subagent task to bounded verification, evidence and optional finalization; dryRun by default.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},revision:{type:'integer',minimum:0},root:{type:'string'},trackedPaths:{type:'array',minItems:1,maxItems:16,items:{type:'string'}},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset']}},dryRun:{type:'boolean'},finalize:{type:'boolean'},summary:{type:'string'},concurrency:{type:'integer',minimum:1,maximum:2},stopOnFailure:{type:'boolean'}},required:['boardId','taskId','agentId','revision','trackedPaths','verifications'],additionalProperties:false}},
@@ -370,6 +370,7 @@ async function closeDebug(session){if(session.closed)return;try{if(session.attac
 async function call(name,a={}){
  if(!COORDINATION_ENABLED&&COORDINATION_NAMES.has(name))throw new Error('coordination extension disabled in Android settings')
  if(!CODING_ENABLED&&CODING_NAMES.has(name))throw new Error('coding extension disabled in Android settings')
+ if(name==='code_task_verify'&&!COORDINATION_ENABLED)throw new Error('coding task verification requires coordination extension enabled')
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
