@@ -4091,7 +4091,7 @@ class MainActivity : ComponentActivity() {
           append("\nmobile_tools: ").append(engineManager.builtInMcpExtensionEnabled("mobile_tools"))
           append("\nbasic_tools: ").append(engineManager.builtInMcpExtensionEnabled("basic_tools"))
           append("\ncoordination: ").append(engineManager.builtInMcpExtensionEnabled("coordination"))
-          append("\nShizuku: ").append(ShizukuSupport.status())
+          append("\nShizuku: ").append(ShizukuSupport.status(this@MainActivity))
           engineManager.mcpConfigurationIssue()?.let { append("\n配置异常: ").append(it) }
         }
         android.app.AlertDialog.Builder(this@MainActivity).setTitle("扩展诊断")
