@@ -1569,6 +1569,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$coordination" ] || { echo '[DSH] Missing subagent coordination module'; exit 8; }
   cp "$coordination" "$(dirname "$dest")/dsh-subagent-coordination.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-subagent-coordination.mjs"
+  local coding="$ROOT/scripts/dsh-coding-engine.mjs"
+  [ -f "$coding" ] || { echo '[DSH] Missing Coding Engine module'; exit 8; }
+  cp "$coding" "$(dirname "$dest")/dsh-coding-engine.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-coding-engine.mjs"
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-coding-engine.mjs" --self-test || { echo '[DSH] Coding Engine self-test failed.'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-subagent-coordination.mjs" --self-test || { echo '[DSH] Subagent coordinator self-test failed.'; exit 8; }
   chmod 0755 "$dest"
   "$stage/usr/bin/node" --check "$dest" >/dev/null
