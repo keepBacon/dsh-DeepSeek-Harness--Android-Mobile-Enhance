@@ -634,6 +634,10 @@ node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
 node "$ROOT/scripts/dsh-code-task-link.mjs" --self-test
 node "$ROOT/scripts/dsh-tool-metrics.mjs" --self-test
 node "$ROOT/scripts/dsh-code-repair-cycle.mjs" --self-test
+# Imports must never run self-tests: nested modules used to race on process.env,
+# causing nondeterministic crashes in transaction recovery checks.
+import_output="$(cd "$ROOT" && node --input-type=module -e 'await import("./scripts/dsh-code-repair-cycle.mjs")' -- --self-test 2>&1)"
+[ -z "$import_output" ] || { echo "[FAIL] Coding module import had side effects: $import_output"; exit 1; }
 must "$MCM" 'DSH_MOBILE_TOOL_METRICS_ENABLED'
 must "$MTB" "case 'code_task_verify': return codingTaskLink.verify(a)"
 echo '[OK] remaining medium/low regression checks passed'
