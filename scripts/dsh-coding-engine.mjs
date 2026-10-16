@@ -51,7 +51,7 @@ export async function codeImpact(input={}){
  const root=await rootPath(input.root),names=input.paths
  if(!Array.isArray(names)||!names.length||names.length>64)throw Error('paths required (1..64)')
  const files=await inventory(root),terms=new Set()
- for(const name of names){const normalized=safeName(name),leaf=normalized.split('/').at(-1).replace(/\.[^.]+$/,'');if(leaf.length>2)terms.add(leaf)}
+ for(const name of names){const normalized=safeName(name),leaf=normalized.split('/').at(-1).replace(/\.[^.]+$/,'');if(leaf.length>0)terms.add(leaf)}
  const affected=[],limit=Math.min(100,Math.max(1,input.limit||40))
  for(const path of files){if(names.includes(path))continue;const info=await lstat(await contained(root,path));if(info.size>256*1024)continue;const source=await readFile(resolve(root,path),'utf8')
   const matches=[...terms].filter(t=>source.includes(t));if(matches.length)affected.push({path,matched:matches});if(affected.length>=limit)break}
