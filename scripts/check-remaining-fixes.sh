@@ -624,7 +624,7 @@ DSH_MOBILE_COORDINATION_ENABLED=0 node --check "$MTB"
 must "$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt" 'fun codingEnabled(): Boolean'
 must "$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt" 'DSH_MOBILE_CODING_ENABLED'
 must "$MA" 'Coding Engine 2.0 · 编码增强（实验）'
-must "$MTB" "case 'code_edit_transaction': return codeEditTransaction(a)"
+must "$MTB" "case 'code_edit_transaction': return runCodeTransaction(a)"
 must "$BT" 'dsh-coding-engine.mjs'
 node "$ROOT/scripts/dsh-coding-engine.mjs" --self-test
 node "$ROOT/scripts/dsh-code-index.mjs" --self-test
