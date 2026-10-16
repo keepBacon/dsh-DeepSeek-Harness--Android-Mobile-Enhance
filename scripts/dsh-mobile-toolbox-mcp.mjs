@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { createCoordinator } from './dsh-subagent-coordination.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -20,7 +21,12 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
+const coordinator=createCoordinator()
 const tools=[
+ {name:'coordination_create',description:'Create durable shared task plan; native subagents execute tasks separately.',inputSchema:{type:'object',properties:{tasks:{type:'array',minItems:1,maxItems:64,items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},description:{type:'string'},blockedBy:{type:'array',items:{type:'string'}},writeScopes:{type:'array',items:{type:'string'}}},required:['id','title']}},maxParallel:{type:'integer',minimum:1,maximum:8},maxAttempts:{type:'integer',minimum:1,maximum:5}},required:['tasks'],additionalProperties:false}},
+ {name:'coordination_status',description:'Read task board readiness, conflicts and status.',inputSchema:{type:'object',properties:{boardId:{type:'string'}},required:['boardId'],additionalProperties:false}},
+ {name:'coordination_claim',description:'Claim ready task with lease and concurrency checks.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},leaseSeconds:{type:'integer',minimum:30,maximum:1800}},required:['boardId','taskId','agentId'],additionalProperties:false}},
+ {name:'coordination_update',description:'Heartbeat, complete, fail or release owned task using revision.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},revision:{type:'integer',minimum:0},action:{type:'string',enum:['heartbeat','complete','fail','release']},summary:{type:'string'},evidence:{type:'array',items:{type:'string'}},leaseSeconds:{type:'integer',minimum:30,maximum:1800}},required:['boardId','taskId','agentId','revision','action'],additionalProperties:false}},
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -335,6 +341,10 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'coordination_create': return coordinator.create(a)
+  case 'coordination_status': return coordinator.status(a.boardId)
+  case 'coordination_claim': return coordinator.claim(a)
+  case 'coordination_update': return coordinator.update(a)
   case 'android_shell_health': {
     const root=PREFIX.replace(/\/usr$/,'');
     const paths={
