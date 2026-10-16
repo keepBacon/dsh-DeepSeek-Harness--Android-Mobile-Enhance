@@ -137,7 +137,7 @@ export async function selectCodeTests(input={}){
    const scripts=json.scripts||{}
    if(typeof scripts.test==='string'&&scripts.test.trim()&&!/^echo\b.*(?:no test|error)/i.test(scripts.test)){
     detected.push('node')
-    commands.push({command:'npm',args:['test','--','--runInBand'],cwd:'.',automatic:false,reason:'npm test exists; flags may be framework-specific'})
+    commands.push({command:'npm',args:['test'],cwd:'.',automatic:false,reason:'npm test exists; flags may be framework-specific'})
    }
   }catch{}
  }
