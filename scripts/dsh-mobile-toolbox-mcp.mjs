@@ -6,7 +6,7 @@ import { codebaseMap, codeSymbols, codeImpact, codeEditTransaction } from './dsh
 import { codeIndexRefresh, codeIndexQuery } from './dsh-code-index.mjs'
 import {runCodeTransaction,codeTransactionStatus,codeTransactionRecover} from './dsh-code-transactions.mjs'
 import {parseCodeDiagnostics,selectCodeTests} from './dsh-code-diagnostics.mjs'
-import {codeVerify,verificationRecipes} from './dsh-code-verify.mjs'
+import {codeVerify,codeVerifyBatch,verificationRecipes} from './dsh-code-verify.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -29,10 +29,11 @@ const fileSchema={type:'object',properties:{path:{type:'string',description:'Abs
 const coordinator=createCoordinator()
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
 const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED!=='0'
-const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_recipes'])
+const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes'])
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name)))
 const tools=[
+ {name:'code_verify_batch',description:'Run 1–4 allowlisted validations with mobile-safe concurrency (1–2), dryRun by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},concurrency:{type:'integer',minimum:1,maximum:2},stopOnFailure:{type:'boolean'},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset'],additionalProperties:false}}},required:['verifications'],additionalProperties:false}},
  {name:'code_verify_recipes',description:'List explicitly supported Coding Engine validation recipes.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'code_verify',description:'Run a bounded allowlisted verification recipe; dry-run by default and parse diagnostics.',inputSchema:{type:'object',properties:{root:{type:'string'},preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000},dryRun:{type:'boolean'}},required:['preset'],additionalProperties:false}},
  {name:'code_diagnostics',description:'Parse Kotlin/Java/TypeScript/Rust/native compiler logs into bounded structured errors.',inputSchema:{type:'object',properties:{log:{type:'string'},root:{type:'string'},limit:{type:'integer',minimum:1,maximum:200}},required:['log'],additionalProperties:false}},
@@ -367,6 +368,7 @@ async function call(name,a={}){
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
   case 'code_verify_recipes': return {recipes:verificationRecipes()}
+  case 'code_verify_batch': return codeVerifyBatch(a)
   case 'code_verify': return codeVerify(a)
   case 'code_diagnostics': return parseCodeDiagnostics(a)
   case 'code_test_select': return selectCodeTests(a)
