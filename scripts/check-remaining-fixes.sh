@@ -633,6 +633,7 @@ node "$ROOT/scripts/dsh-code-diagnostics.mjs" --self-test
 node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
 node "$ROOT/scripts/dsh-code-task-link.mjs" --self-test
 node "$ROOT/scripts/dsh-tool-metrics.mjs" --self-test
+node "$ROOT/scripts/dsh-code-repair-cycle.mjs" --self-test
 must "$MCM" 'DSH_MOBILE_TOOL_METRICS_ENABLED'
 must "$MTB" "case 'code_task_verify': return codingTaskLink.verify(a)"
 echo '[OK] remaining medium/low regression checks passed'
