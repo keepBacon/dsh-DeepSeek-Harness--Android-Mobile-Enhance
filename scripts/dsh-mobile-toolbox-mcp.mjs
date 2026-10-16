@@ -33,7 +33,7 @@ const coordinator=createCoordinator()
 const codingTaskLink=createCodingTaskLink(coordinator)
 const telemetry=createToolTelemetry({enabled:process.env.DSH_MOBILE_TOOL_METRICS_ENABLED==='1'})
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
-const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED!=='0'
+const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED==='1'
 const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes','code_task_verify','code_repair_cycle'])
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
@@ -746,9 +746,9 @@ async function call(name,a={}){
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const [{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
 async function selfTest(){
  await sdk()
- const empty=await call('tool_registry_list',null);if(empty.total!==tools.length)throw new Error('null tool arguments contract failed')
- if(empty.tools.length>40||empty.nextOffset!==40)throw new Error('tool registry pagination default failed')
- const lastPage=await call('tool_registry_list',{offset:tools.length-1,limit:10})
+ const empty=await call('tool_registry_list',null);if(empty.total!==visibleTools().length)throw new Error('null tool arguments contract failed')
+ if(empty.tools.length>40||empty.nextOffset!==(visibleTools().length>40?40:null))throw new Error('tool registry pagination default failed')
+ const lastPage=await call('tool_registry_list',{offset:visibleTools().length-1,limit:10})
  if(lastPage.tools.length!==1||lastPage.nextOffset!==null)throw new Error('tool registry final page failed')
  const large=await call('command_run',{command:'node',args:['-e','process.stdout.write("x".repeat(200000));process.stderr.write("DSH_STDERR_OK")'],maxOutputBytes:4096,timeoutMs:5000})
  if(large.exitCode!==0||!large.truncated||!large.stdout.includes('bytes omitted')||!large.stderr.includes('DSH_STDERR_OK')||large.stdoutBytes!==200000)throw new Error('bounded command output regression failed')
@@ -787,5 +787,5 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const began=Date.now();let success=false;try{const value=await call(req.params.name,req.params.arguments??{});success=true;return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}}finally{telemetry.record(req.params.name,Date.now()-began,success)}});await server.connect(new StdioServerTransport())}
+async function main(){if(process.argv.includes('--feature-test')){const shown=new Set(visibleTools().map(t=>t.name));for(const id of CODING_NAMES){if(shown.has(id)!==CODING_ENABLED)throw new Error('coding tool visibility mismatch: '+id)}for(const id of COORDINATION_NAMES){if(shown.has(id)!==COORDINATION_ENABLED)throw new Error('coordination tool visibility mismatch: '+id)}if(shown.has('code_task_verify')!==(CODING_ENABLED&&COORDINATION_ENABLED))throw new Error('coordination dependency mismatch');if(!CODING_ENABLED){try{await call('code_repair_cycle',{});throw new Error('disabled coding tool callable')}catch(e){if(!String(e.message).includes('coding extension disabled'))throw e}}process.stdout.write('[DSH] MCP extension gating: OK coding='+CODING_ENABLED+' coordination='+COORDINATION_ENABLED+'\n');return}if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const began=Date.now();let success=false;try{const value=await call(req.params.name,req.params.arguments??{});success=true;return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}}finally{telemetry.record(req.params.name,Date.now()-began,success)}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
