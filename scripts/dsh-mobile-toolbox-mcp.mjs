@@ -22,6 +22,8 @@ const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
 const coordinator=createCoordinator()
+const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
+const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
 const tools=[
  {name:'coordination_create',description:'Create durable shared task plan; native subagents execute tasks separately.',inputSchema:{type:'object',properties:{tasks:{type:'array',minItems:1,maxItems:64,items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},description:{type:'string'},blockedBy:{type:'array',items:{type:'string'}},writeScopes:{type:'array',items:{type:'string'}}},required:['id','title']}},maxParallel:{type:'integer',minimum:1,maximum:8},maxAttempts:{type:'integer',minimum:1,maximum:5}},required:['tasks'],additionalProperties:false}},
  {name:'coordination_status',description:'Read task board readiness, conflicts and status.',inputSchema:{type:'object',properties:{boardId:{type:'string'}},required:['boardId'],additionalProperties:false}},
@@ -338,6 +340,7 @@ function waitDebugStop(session,timeoutMs){for(let i=session.lines.length-1;i>=0&
 async function closeDebug(session){if(session.closed)return;try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}try{await miCommand(session,'-gdb-exit',3000)}catch{}try{session.child.kill('SIGKILL')}catch{}session.closed=true;DEBUG_SESSIONS.delete(session.id)}
 
 async function call(name,a={}){
+ if(!COORDINATION_ENABLED&&COORDINATION_NAMES.has(name))throw new Error('coordination extension disabled in Android settings')
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
@@ -735,5 +738,5 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments??{});return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
+async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:COORDINATION_ENABLED?tools:tools.filter(t=>!COORDINATION_NAMES.has(t.name))}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments??{});return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
