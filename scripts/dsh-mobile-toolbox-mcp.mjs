@@ -368,7 +368,7 @@ async function call(name,a={}){
   case 'codebase_map': return codebaseMap(a)
   case 'code_symbols': return codeSymbols(a)
   case 'code_impact': return codeImpact(a)
-  case 'code_edit_transaction': return codeEditTransaction(a)
+  case 'code_edit_transaction': return runCodeTransaction(a)
   case 'coordination_create': return coordinator.create(a)
   case 'coordination_status': return coordinator.status(a.boardId)
   case 'coordination_claim': return coordinator.claim(a)
