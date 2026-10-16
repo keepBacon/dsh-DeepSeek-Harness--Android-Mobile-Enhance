@@ -15,7 +15,7 @@ import {parseCodeDiagnostics} from './dsh-code-diagnostics.mjs'
 const MAX_CAPTURE=32768,MAX_RUN_MS=120000
 const PRESETS=Object.freeze({
  'node-syntax':{label:'Node JavaScript syntax check',tool:'node',needsFile:true,extensions:['.js','.mjs','.cjs'],timeout:15000},
- 'npm-test':{label:'Node package test script',tool:'npm',args:['test','--','--runInBand'],marker:'package.json',timeout:60000},
+ 'npm-test':{label:'Node package test script',tool:'npm',args:['test'],marker:'package.json',timeout:60000},
  'gradle-test':{label:'Gradle project tests',tool:'./gradlew',args:['test','--no-daemon'],marker:'gradlew',timeout:120000},
  'go-test':{label:'Go module tests',tool:'go',args:['test','./...'],marker:'go.mod',timeout:60000},
  'cargo-test':{label:'Rust Cargo tests',tool:'cargo',args:['test','--locked'],marker:'Cargo.lock',timeout:120000},
