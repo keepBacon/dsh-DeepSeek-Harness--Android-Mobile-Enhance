@@ -4086,6 +4086,16 @@ class MainActivity : ComponentActivity() {
       }
     })
     root.addView(Button(this).apply {
+      text = "Coding Engine · 模块完整性诊断"
+      setOnClickListener {
+        android.app.AlertDialog.Builder(this@MainActivity)
+          .setTitle("Coding Engine 2.0 诊断")
+          .setMessage(engineManager.codingEngineDiagnostics())
+          .setPositiveButton("确定", null)
+          .show()
+      }
+    })
+    root.addView(Button(this).apply {
       text = "检测 Shizuku Shell 身份"
       isEnabled = ShellState.androidExtensionEnabled(this@MainActivity, "shizuku_diagnostics")
       setOnClickListener {
