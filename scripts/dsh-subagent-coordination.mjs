@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url'
 #!/usr/bin/env node
 /**
  * DSH Android cooperative task board.
@@ -214,4 +215,4 @@ async function selfTest(){
   process.stdout.write('[DSH] Subagent coordination board self-test: OK\n')
  }finally{await rm(dir,{recursive:true,force:true})}
 }
-if(process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
