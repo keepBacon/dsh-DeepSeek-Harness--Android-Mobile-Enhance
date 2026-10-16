@@ -94,6 +94,38 @@ export async function codeVerify(input={}){
   })
  })
 }
+/**
+ * Batch verifier reduces model/tool round-trips. Bound execution to 1-4
+ * recipes and at most two concurrent child processes on mobile.
+ * Each recipe still uses codeVerify's allowlist, duration and output caps.
+ */
+export async function codeVerifyBatch(input={}){
+ const items=input.verifications
+ if(!Array.isArray(items)||items.length<1||items.length>4)throw Error('verifications must contain 1..4 items')
+ const concurrency=Number.isInteger(input.concurrency)?Math.min(2,Math.max(1,input.concurrency)):1
+ const stopOnFailure=input.stopOnFailure===true
+ const results=new Array(items.length)
+ let next=0,halted=false
+ async function worker(){
+  while(!halted){
+   const idx=next++
+   if(idx>=items.length)return
+   try{
+    const options=items[idx]
+    if(!options||typeof options!=='object'||Array.isArray(options))throw Error('invalid batch entry')
+    const r=await codeVerify({...options,root:input.root??options.root,dryRun:input.dryRun!==false})
+    results[idx]=r
+    if(stopOnFailure&&!r.ok&&r.dryRun===false)halted=true
+   }catch(e){
+    results[idx]={preset:items[idx]?.preset||null,ok:false,error:String(e?.message||e)}
+    if(stopOnFailure)halted=true
+   }
+  }
+ }
+ await Promise.all(Array.from({length:Math.min(concurrency,items.length)},()=>worker()))
+ return{dryRun:input.dryRun!==false,concurrency,requested:items.length,executed:results.filter(Boolean).length,
+  stoppedEarly:results.some(x=>!x),results:results.map((x,i)=>x||{preset:items[i]?.preset||null,skipped:true})}
+}
 async function selfTest(){
  const root=await mkdtemp(join(tmpdir(),'dsh-verify-'))
  try{
@@ -112,7 +144,10 @@ async function selfTest(){
   rejected=false
   try{await codeVerify({root,preset:'arbitrary-command',dryRun:false})}catch{rejected=true}
   if(!rejected)throw Error('arbitrary command allowed')
-  process.stdout.write('[DSH] Coding verification self-test: OK\n')
+  const batch=await codeVerifyBatch({root,dryRun:false,concurrency:2,verifications:[
+    {preset:'node-syntax',path:'src/ok.js'},{preset:'node-syntax',path:'src/fail.js'}]})
+  if(batch.executed!==2||!batch.results[0].ok||batch.results[1].ok)throw Error('verification batch aggregation failed')
+    process.stdout.write('[DSH] Coding verification self-test: OK\n')
  }finally{await rm(root,{recursive:true,force:true})}
 }
 if(process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
