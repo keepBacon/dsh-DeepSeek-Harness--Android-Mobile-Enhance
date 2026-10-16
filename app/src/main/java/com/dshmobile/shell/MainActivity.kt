@@ -4131,7 +4131,7 @@ class MainActivity : ComponentActivity() {
         textSize = 12f
         setPadding(0, 0, 0, (8 * density).toInt())
       })
-    })
+    }
     root.addView(TextView(this).apply {
       text = "尚未实现的 Coding Engine 2.0 自动编码功能将在完成测试后逐项加入。DSH 核心 Agent / 工作流不会被此页面禁用。"
       textSize = 12f
