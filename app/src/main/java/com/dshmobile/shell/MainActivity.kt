@@ -865,6 +865,7 @@ class MainActivity : ComponentActivity() {
    */
   private fun installMobileUiBridge(view: WebView) {
     val uiMode = ShellState.interfaceMode(this)
+    val toolsUiEnabled = ShellState.androidExtensionEnabled(this, "android_tools_ui")
     val capability = bridgeCapability
     val script = """
       (() => {
@@ -873,6 +874,7 @@ class MainActivity : ComponentActivity() {
 
         const ROOT = document.documentElement;
         const UI_MODE = ${jsString(uiMode)};
+        const ANDROID_TOOLS_UI_ENABLED = $toolsUiEnabled;
         const BRIDGE_CAP = ${jsString(capability)};
         const MANAGER_ID = 'dsh-android-plugin-manager';
         const COMPOSER_IMPORT_CLASS = 'dsh-android-composer-import';
@@ -2798,9 +2800,11 @@ class MainActivity : ComponentActivity() {
             title.textContent = 'DeepSeek Harness';
             const actions = document.createElement('div');
             actions.className = 'dsh-mobile-actions';
-            const tools = makeButton('dsh-mobile-tools', 'Tools', 'tools');
-            tools.setAttribute('aria-haspopup', 'true');
-            tools.setAttribute('aria-expanded', 'false');
+            const tools = ANDROID_TOOLS_UI_ENABLED ? makeButton('dsh-mobile-tools', 'Tools', 'tools') : null;
+            if (tools) {
+              tools.setAttribute('aria-haspopup', 'true');
+              tools.setAttribute('aria-expanded', 'false');
+            }
             const add = makeButton('dsh-mobile-new', '新建会话', 'new');
             const appSettings = makeButton('dsh-mobile-app-settings', '应用设置', null);
             appSettings.innerHTML = upstreamSettingsIcon();
@@ -2808,7 +2812,7 @@ class MainActivity : ComponentActivity() {
               if (UI_MODE === 'mobile') toggleMobileSidebar();
               else { try { findSidebarToggle()?.click(); } catch (_) {} }
             });
-            tools.addEventListener('click', toggleToolsPanel);
+            if (tools) tools.addEventListener('click', toggleToolsPanel);
             add.addEventListener('click', () => {
               const target = findNewSession();
               if (target) target.click();
@@ -2816,11 +2820,12 @@ class MainActivity : ComponentActivity() {
             appSettings.addEventListener('click', () => {
               try { window.androidBridge && window.androidBridge.openAppSettings(BRIDGE_CAP); } catch (_) {}
             });
-            actions.append(tools, add, appSettings);
+            if (tools) actions.append(tools);
+            actions.append(add, appSettings);
             bar.append(menu, title, actions);
             document.body.appendChild(bar);
           }
-          installToolsPanel();
+          if (ANDROID_TOOLS_UI_ENABLED) installToolsPanel();
           let scrim = document.getElementById(SCRIM_ID);
           if (!scrim) {
             scrim = document.createElement('div');
@@ -4100,6 +4105,7 @@ class MainActivity : ComponentActivity() {
     })
     root.addView(Button(this).apply {
       text = "检测 Shizuku Shell 身份"
+      isEnabled = ShellState.androidExtensionEnabled(this@MainActivity, "shizuku_diagnostics")
       setOnClickListener {
         Thread {
           val report = ShizukuSupport.inspect("identity").toString(2)
@@ -4110,6 +4116,41 @@ class MainActivity : ComponentActivity() {
           }
         }.start()
       }
+    })
+    listOf(
+      Triple("android_tools_ui", "Android Tools · 悬浮工具面板", "关闭后下次重新加载页面不再插入 Android Tools 面板，不影响 MCP 工具。"),
+      Triple("shizuku_diagnostics", "Shizuku · 只读诊断", "关闭诊断入口，不撤销系统 Shizuku 授权，也不改变其他应用权限。"),
+    ).forEach { (id, label, detail) ->
+      val current = ShellState.androidExtensionEnabled(this, id)
+      root.addView(android.widget.Switch(this).apply {
+        text = label
+        isChecked = current
+        setOnCheckedChangeListener { view, enabled ->
+          if (enabled == current) return@setOnCheckedChangeListener
+          view.isChecked = current
+          android.app.AlertDialog.Builder(this@MainActivity)
+            .setTitle(if (enabled) "启用 $label" else "停用 $label")
+            .setMessage("设置将立即保存。Android Tools 面板需要重新加载页面生效，不重启 DSH 引擎。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("应用") { _, _ ->
+              if (!ShellState.setAndroidExtensionEnabled(this@MainActivity, id, enabled)) {
+                showSimpleMessage("保存失败", "无法持久化扩展设置")
+              } else {
+                dialog.dismiss()
+                if (id == "android_tools_ui" && ::webView.isInitialized) {
+                  webView.reload()
+                } else {
+                  showAndroidExtensions()
+                }
+              }
+            }.show()
+        }
+      })
+      root.addView(TextView(this).apply {
+        text = detail
+        textSize = 12f
+        setPadding(0, 0, 0, (8 * density).toInt())
+      })
     })
     root.addView(TextView(this).apply {
       text = "尚未实现的 Coding Engine 2.0 自动编码功能将在完成测试后逐项加入。DSH 核心 Agent / 工作流不会被此页面禁用。"
