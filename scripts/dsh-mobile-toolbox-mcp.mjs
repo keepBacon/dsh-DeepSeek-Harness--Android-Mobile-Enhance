@@ -5,6 +5,7 @@ import { createCoordinator } from './dsh-subagent-coordination.mjs'
 import { codebaseMap, codeSymbols, codeImpact, codeEditTransaction } from './dsh-coding-engine.mjs'
 import { codeIndexRefresh, codeIndexQuery } from './dsh-code-index.mjs'
 import {runCodeTransaction,codeTransactionStatus,codeTransactionRecover} from './dsh-code-transactions.mjs'
+import {parseCodeDiagnostics,selectCodeTests} from './dsh-code-diagnostics.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -27,10 +28,12 @@ const fileSchema={type:'object',properties:{path:{type:'string',description:'Abs
 const coordinator=createCoordinator()
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
 const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED!=='0'
-const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover'])
+const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select'])
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name)))
 const tools=[
+ {name:'code_diagnostics',description:'Parse Kotlin/Java/TypeScript/Rust/native compiler logs into bounded structured errors.',inputSchema:{type:'object',properties:{log:{type:'string'},root:{type:'string'},limit:{type:'integer',minimum:1,maximum:200}},required:['log'],additionalProperties:false}},
+ {name:'code_test_select',description:'Suggest related test files and project test commands; never runs them.',inputSchema:{type:'object',properties:{root:{type:'string'},changedPaths:{type:'array',minItems:1,maxItems:64,items:{type:'string'}},maxTests:{type:'integer',minimum:1,maximum:160}},required:['changedPaths'],additionalProperties:false}},
  {name:'code_transaction_apply',description:'Recoverable multi-file edit with SHA-256 guards; dryRun true by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},changes:{type:'array',minItems:1,maxItems:16,items:{type:'object',properties:{path:{type:'string'},expectedSha256:{type:'string'},oldText:{type:'string'},newText:{type:'string'}},required:['path','expectedSha256','oldText','newText']}}},required:['changes'],additionalProperties:false}},
  {name:'code_transaction_status',description:'Inspect durable edit journal and unresolved transactions.',inputSchema:{type:'object',properties:{root:{type:'string'}},additionalProperties:false}},
  {name:'code_transaction_recover',description:'Safely rollback interrupted edits; will never overwrite unknown external changes.',inputSchema:{type:'object',properties:{root:{type:'string'},id:{type:'string'},allowReviewRetry:{type:'boolean'}},additionalProperties:false}},
@@ -360,6 +363,8 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'code_diagnostics': return parseCodeDiagnostics(a)
+  case 'code_test_select': return selectCodeTests(a)
   case 'code_transaction_apply': return runCodeTransaction(a)
   case 'code_transaction_status': return codeTransactionStatus(a)
   case 'code_transaction_recover': return codeTransactionRecover(a)
