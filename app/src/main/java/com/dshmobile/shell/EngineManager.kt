@@ -184,6 +184,15 @@ class EngineManager(private val context: Context, private val pickToken: String?
   fun mcpRuntimeSummary(): String = mcpConfigManager.runtimeSummary()
   fun listMcpServers(): List<McpServerConfig> = mcpConfigManager.listServers()
   fun mcpToolboxEnabled(): Boolean = mcpConfigManager.toolboxEnabled()
+  fun builtInMcpExtensionEnabled(id: String): Boolean = mcpConfigManager.builtInExtensionEnabled(id)
+  fun setBuiltInMcpExtensionEnabled(id: String, enabled: Boolean): PluginCommandResult = try {
+    mcpConfigManager.setBuiltInExtensionEnabled(id, enabled)
+    mcpConfigManager.ensureRuntimePatch()
+    PluginCommandResult(true, 0, "扩展 " + id + if (enabled) " 已启用（重启引擎后生效）" else " 已关闭（重启引擎后生效）")
+  } catch (t: Throwable) {
+    PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
+  }
+
   fun mcpConfigurationIssue(): String? = mcpConfigManager.configurationIssue()
   fun hasMcpBearerToken(id: String): Boolean = try { SecureCredentialStore.hasMcpBearerToken(context, id) } catch (_: Throwable) { false }
 
