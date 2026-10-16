@@ -24,6 +24,7 @@ const fileSchema={type:'object',properties:{path:{type:'string',description:'Abs
 const coordinator=createCoordinator()
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
+const visibleTools=()=>COORDINATION_ENABLED?tools:tools.filter(t=>!COORDINATION_NAMES.has(t.name))
 const tools=[
  {name:'coordination_create',description:'Create durable shared task plan; native subagents execute tasks separately.',inputSchema:{type:'object',properties:{tasks:{type:'array',minItems:1,maxItems:64,items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},description:{type:'string'},blockedBy:{type:'array',items:{type:'string'}},writeScopes:{type:'array',items:{type:'string'}}},required:['id','title']}},maxParallel:{type:'integer',minimum:1,maximum:8},maxAttempts:{type:'integer',minimum:1,maximum:5}},required:['tasks'],additionalProperties:false}},
  {name:'coordination_status',description:'Read task board readiness, conflicts and status.',inputSchema:{type:'object',properties:{boardId:{type:'string'}},required:['boardId'],additionalProperties:false}},
@@ -396,9 +397,9 @@ async function call(name,a={}){
       diagnosis,hostLegacyTermuxPresent:legacy,expectedProotTmpDir:paths.prootHostTemp,
       warning:'PROOT_TMP_DIR must resolve to the real app HOME/tmp before entering the guest. A missing com.termux path alone does not imply user data was uninstalled.'};
   }
-  case 'tool_registry_list': {const offset=int(a.offset,0,0,tools.length),limit=int(a.limit,40,1,200),page=tools.slice(offset,offset+limit);return{server:'mobile_tools',tools:page.map(t=>({name:t.name,description:t.description})),total:tools.length,offset,returned:page.length,nextOffset:offset+page.length<tools.length?offset+page.length:null};}
+  case 'tool_registry_list': {const visible=visibleTools(),offset=int(a.offset,0,0,visible.length),limit=int(a.limit,40,1,200),page=visible.slice(offset,offset+limit);return{server:'mobile_tools',tools:page.map(t=>({name:t.name,description:t.description})),total:visible.length,offset,returned:page.length,nextOffset:offset+page.length<visible.length?offset+page.length:null};}
   case 'tool_validate': {
-    const t=tools.find(tool=>tool.name===String(a.name||''));
+    const t=visibleTools().find(tool=>tool.name===String(a.name||''));
     if(!t)throw new Error('tool not found');
     const schema=t.inputSchema;
     const errors=[];
@@ -421,7 +422,7 @@ async function call(name,a={}){
   }
   case 'tool_inspect': {
     const target=String(a.name||'');
-    const found=tools.find(t=>t.name===target);
+    const found=visibleTools().find(t=>t.name===target);
     if(!found)throw new Error('tool not found: '+target);
     return found;
   }
@@ -738,5 +739,5 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:COORDINATION_ENABLED?tools:tools.filter(t=>!COORDINATION_NAMES.has(t.name))}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments??{});return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
+async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments??{});return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
