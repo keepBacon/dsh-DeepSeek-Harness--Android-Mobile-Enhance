@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url'
 import {createHash} from 'node:crypto'
 import {readFile,readdir,lstat,realpath,writeFile,rename,rm,mkdir,mkdtemp} from 'node:fs/promises'
 import {resolve,relative,dirname,join,extname} from 'node:path'
@@ -106,4 +107,4 @@ async function selfTest(){
   process.stdout.write('[DSH] Coding Engine P0/P1 self-test: OK\n')
  }finally{await rm(d,{recursive:true,force:true})}
 }
-if(process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
