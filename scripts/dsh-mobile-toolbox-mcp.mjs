@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { createCoordinator } from './dsh-subagent-coordination.mjs'
+import { codebaseMap, codeSymbols, codeImpact, codeEditTransaction } from './dsh-coding-engine.mjs'
+import { codeIndexRefresh, codeIndexQuery } from './dsh-code-index.mjs'
+import {runCodeTransaction,codeTransactionStatus,codeTransactionRecover} from './dsh-code-transactions.mjs'
+import {parseCodeDiagnostics,selectCodeTests} from './dsh-code-diagnostics.mjs'
+import {codeVerify,codeVerifyBatch,verificationRecipes} from './dsh-code-verify.mjs'
+import {createCodingTaskLink} from './dsh-code-task-link.mjs'
+import {createToolTelemetry} from './dsh-tool-metrics.mjs'
+import {codeRepairCycle} from './dsh-code-repair-cycle.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -20,25 +29,54 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
+const coordinator=createCoordinator()
+const codingTaskLink=createCodingTaskLink(coordinator)
+const telemetry=createToolTelemetry({enabled:process.env.DSH_MOBILE_TOOL_METRICS_ENABLED==='1'})
+const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
+const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED==='1'
+const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes','code_task_verify','code_repair_cycle'])
+const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
+const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
 const tools=[
+ {name:'code_repair_cycle',description:'Execute 1-3 explicitly supplied, SHA-256-guarded candidate fixes, verify with safe recipes, rollback failed edits. Dry-run by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},budgetMs:{type:'integer',minimum:10000,maximum:300000},candidates:{type:'array',minItems:1,maxItems:3,items:{type:'object',properties:{changes:{type:'array',minItems:1,maxItems:16,items:{type:'object',properties:{path:{type:'string'},expectedSha256:{type:'string'},oldText:{type:'string'},newText:{type:'string'}},required:['path','expectedSha256','oldText','newText']}}},required:['changes']}},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset']}}},required:['candidates','verifications'],additionalProperties:false}},
+ {name:'tool_latency_report',description:'Return bounded in-memory MCP tool latency measurements; opt-in via settings.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'code_task_verify',description:'Link a claimed subagent task to bounded verification, evidence and optional finalization; dryRun by default.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},revision:{type:'integer',minimum:0},root:{type:'string'},trackedPaths:{type:'array',minItems:1,maxItems:16,items:{type:'string'}},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset']}},dryRun:{type:'boolean'},finalize:{type:'boolean'},summary:{type:'string'},concurrency:{type:'integer',minimum:1,maximum:2},stopOnFailure:{type:'boolean'}},required:['boardId','taskId','agentId','revision','trackedPaths','verifications'],additionalProperties:false}},
+ {name:'code_verify_batch',description:'Run 1–4 allowlisted validations with mobile-safe concurrency (1–2), dryRun by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},concurrency:{type:'integer',minimum:1,maximum:2},stopOnFailure:{type:'boolean'},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset'],additionalProperties:false}}},required:['verifications'],additionalProperties:false}},
+ {name:'code_verify_recipes',description:'List explicitly supported Coding Engine validation recipes.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'code_verify',description:'Run a bounded allowlisted verification recipe; dry-run by default and parse diagnostics.',inputSchema:{type:'object',properties:{root:{type:'string'},preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000},dryRun:{type:'boolean'}},required:['preset'],additionalProperties:false}},
+ {name:'code_diagnostics',description:'Parse Kotlin/Java/TypeScript/Rust/native compiler logs into bounded structured errors.',inputSchema:{type:'object',properties:{log:{type:'string'},root:{type:'string'},limit:{type:'integer',minimum:1,maximum:200}},required:['log'],additionalProperties:false}},
+ {name:'code_test_select',description:'Suggest related test files and project test commands; never runs them.',inputSchema:{type:'object',properties:{root:{type:'string'},changedPaths:{type:'array',minItems:1,maxItems:64,items:{type:'string'}},maxTests:{type:'integer',minimum:1,maximum:160}},required:['changedPaths'],additionalProperties:false}},
+ {name:'code_transaction_apply',description:'Recoverable multi-file edit with SHA-256 guards; dryRun true by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},changes:{type:'array',minItems:1,maxItems:16,items:{type:'object',properties:{path:{type:'string'},expectedSha256:{type:'string'},oldText:{type:'string'},newText:{type:'string'}},required:['path','expectedSha256','oldText','newText']}}},required:['changes'],additionalProperties:false}},
+ {name:'code_transaction_status',description:'Inspect durable edit journal and unresolved transactions.',inputSchema:{type:'object',properties:{root:{type:'string'}},additionalProperties:false}},
+ {name:'code_transaction_recover',description:'Safely rollback interrupted edits; will never overwrite unknown external changes.',inputSchema:{type:'object',properties:{root:{type:'string'},id:{type:'string'},allowReviewRetry:{type:'boolean'}},additionalProperties:false}},
+ {name:'code_index_refresh',description:'Persist and incrementally refresh project declaration and import index.',inputSchema:{type:'object',properties:{root:{type:'string'},force:{type:'boolean'}},additionalProperties:false}},
+ {name:'code_index_query',description:'Query cached heuristic symbols or import declarations in project.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},query:{type:'string'},mode:{type:'string',enum:['symbols','imports']},limit:{type:'integer',minimum:1,maximum:200}},additionalProperties:false}},
+ {name:'codebase_map',description:'Bounded project map by source-language and directory.',inputSchema:{type:'object',properties:{root:{type:'string'}},additionalProperties:false}},
+ {name:'code_symbols',description:'Find approximated source declaration symbols (heuristic not semantic LSP).',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},query:{type:'string'},limit:{type:'integer',minimum:1,maximum:200}},additionalProperties:false}},
+ {name:'code_impact',description:'Find potential textual references to edited source modules.',inputSchema:{type:'object',properties:{root:{type:'string'},paths:{type:'array',items:{type:'string'}},limit:{type:'integer',minimum:1,maximum:100}},required:['paths'],additionalProperties:false}},
+ {name:'code_edit_transaction',description:'Checked multi-file text edits requiring source SHA-256; dryRun by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},changes:{type:'array',minItems:1,maxItems:16,items:{type:'object',properties:{path:{type:'string'},expectedSha256:{type:'string'},oldText:{type:'string'},newText:{type:'string'}},required:['path','expectedSha256','oldText','newText']}}},required:['changes'],additionalProperties:false}},
+ {name:'coordination_create',description:'Create durable shared task plan; native subagents execute tasks separately.',inputSchema:{type:'object',properties:{tasks:{type:'array',minItems:1,maxItems:64,items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},description:{type:'string'},blockedBy:{type:'array',items:{type:'string'}},writeScopes:{type:'array',items:{type:'string'}}},required:['id','title']}},maxParallel:{type:'integer',minimum:1,maximum:8},maxAttempts:{type:'integer',minimum:1,maximum:5}},required:['tasks'],additionalProperties:false}},
+ {name:'coordination_status',description:'Read task board readiness, conflicts and status.',inputSchema:{type:'object',properties:{boardId:{type:'string'}},required:['boardId'],additionalProperties:false}},
+ {name:'coordination_claim',description:'Claim ready task with lease and concurrency checks.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},leaseSeconds:{type:'integer',minimum:30,maximum:1800}},required:['boardId','taskId','agentId'],additionalProperties:false}},
+ {name:'coordination_update',description:'Heartbeat, complete, fail or release owned task using revision.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},revision:{type:'integer',minimum:0},action:{type:'string',enum:['heartbeat','complete','fail','release']},summary:{type:'string'},evidence:{type:'array',items:{type:'string'}},leaseSeconds:{type:'integer',minimum:30,maximum:1800}},required:['boardId','taskId','agentId','revision','action'],additionalProperties:false}},
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
- {name:'tool_registry_list',description:'List tools exposed by this mobile MCP server (read-only).',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'tool_registry_list',description:'Page through registered mobile MCP tools. Defaults to 40 to reduce model context.',inputSchema:{type:'object',properties:{offset:{type:'integer',minimum:0,default:0},limit:{type:'integer',minimum:1,maximum:200,default:40}},additionalProperties:false}},
  {name:'tool_inspect',description:'Inspect the name, description and input schema of a mobile MCP tool.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
  {name:'plugin_source_read',description:'Read one UTF-8 source file belonging to an installed Web-profile plugin. Read-only and size bounded.',inputSchema:{type:'object',properties:{name:{type:'string'},path:{type:'string'},maxBytes:{type:'integer',minimum:1,maximum:262144,default:65536}},required:['name','path'],additionalProperties:false}},
  {name:'tool_validate',description:'Validate the declared input-schema shape of a mobile MCP tool without invoking it.',inputSchema:{type:'object',properties:{name:{type:'string'}},required:['name'],additionalProperties:false}},
- {name:'fs_read',description:'Read a UTF-8 text file. Paths may be absolute or relative to the MCP cwd. Use startLine/endLine for focused source reads.',inputSchema:{type:'object',properties:{path:{type:'string'},startLine:{type:'integer',minimum:1},endLine:{type:'integer',minimum:1},maxBytes:{type:'integer',minimum:1,maximum:1048576,default:262144}},required:['path'],additionalProperties:false}},
+ {name:'fs_read',description:'Read a UTF-8 text file. Paths may be absolute or relative to the MCP cwd. Use startLine/endLine for focused source reads.',inputSchema:{type:'object',properties:{path:{type:'string'},startLine:{type:'integer',minimum:1},endLine:{type:'integer',minimum:1},maxBytes:{type:'integer',minimum:1,maximum:1048576,default:65536}},required:['path'],additionalProperties:false}},
  {name:'fs_list',description:'List one directory level with stable structured entries. Defaults to the MCP cwd; hidden entries are off unless requested.',inputSchema:{type:'object',properties:{path:{type:'string',default:'.'},showHidden:{type:'boolean',default:false},maxEntries:{type:'integer',minimum:1,maximum:2000,default:500}},additionalProperties:false}},
- {name:'fs_search',description:'Search source/text with embedded ripgrep and return structured path/line/column matches. Literal, case-sensitive search is the default; regex and context are optional.',inputSchema:{type:'object',properties:{query:{type:'string'},path:{type:'string',default:'.'},glob:{type:'string'},regex:{type:'boolean',default:false},caseSensitive:{type:'boolean',default:true},showHidden:{type:'boolean',default:false},maxResults:{type:'integer',minimum:1,maximum:200,default:80},contextLines:{type:'integer',minimum:0,maximum:5,default:2}},required:['query'],additionalProperties:false}},
+ {name:'fs_search',description:'Search source/text with embedded ripgrep and return structured path/line/column matches. Literal, case-sensitive search is the default; regex and context are optional.',inputSchema:{type:'object',properties:{query:{type:'string'},path:{type:'string',default:'.'},glob:{type:'string'},regex:{type:'boolean',default:false},caseSensitive:{type:'boolean',default:true},showHidden:{type:'boolean',default:false},maxResults:{type:'integer',minimum:1,maximum:200,default:40},contextLines:{type:'integer',minimum:0,maximum:5,default:1}},required:['query'],additionalProperties:false}},
  {name:'fs_write',description:'Create or replace one UTF-8 text file atomically. Existing files require overwrite=true; parent creation is opt-in.',inputSchema:{type:'object',properties:{path:{type:'string'},content:{type:'string'},overwrite:{type:'boolean',default:false},createParents:{type:'boolean',default:false}},required:['path','content'],additionalProperties:false}},
  {name:'fs_patch',description:'Safely patch a text file by exact oldText -> newText replacement. Defaults to exactly one occurrence and supports dryRun.',inputSchema:{type:'object',properties:{path:{type:'string'},oldText:{type:'string'},newText:{type:'string'},expectedOccurrences:{type:'integer',minimum:1,maximum:100,default:1},dryRun:{type:'boolean',default:false}},required:['path','oldText','newText'],additionalProperties:false}},
- {name:'command_run',description:'Run one executable directly with argv (shell=false). Returns exitCode/stdout/stderr/timing. Prefer fs_patch/fs_write for file mutation; use this for builds, tests and CLI tools.',inputSchema:{type:'object',properties:{command:{type:'string'},args:{type:'array',items:{type:'string'},maxItems:128,default:[]},cwd:{type:'string'},env:{type:'object',additionalProperties:{type:'string'}},timeoutMs:{type:'integer',minimum:100,maximum:60000,default:10000},maxOutputBytes:{type:'integer',minimum:1024,maximum:1048576,default:196608}},required:['command'],additionalProperties:false}},
+ {name:'command_run',description:'Run one executable directly with argv (shell=false). Returns exitCode/stdout/stderr/timing. Prefer fs_patch/fs_write for file mutation; use this for builds, tests and CLI tools.',inputSchema:{type:'object',properties:{command:{type:'string'},args:{type:'array',items:{type:'string'},maxItems:128,default:[]},cwd:{type:'string'},env:{type:'object',additionalProperties:{type:'string'}},timeoutMs:{type:'integer',minimum:100,maximum:60000,default:10000},maxOutputBytes:{type:'integer',minimum:1024,maximum:1048576,default:32768},outputMode:{type:'string',enum:['head-tail','head','tail'],default:'head-tail'}},required:['command'],additionalProperties:false}},
  {name:'git_status',description:'Return structured Git working-tree status for a repository directory. Defaults to the MCP cwd.',inputSchema:{type:'object',properties:{repo:{type:'string',default:'.'}},additionalProperties:false}},
  {name:'git_diff',description:'Show a Git diff without color or external diff drivers. Supports staged changes, one comparison ref and an optional path.',inputSchema:{type:'object',properties:{repo:{type:'string',default:'.'},staged:{type:'boolean',default:false},ref:{type:'string'},path:{type:'string'},maxLines:{type:'integer',minimum:1,maximum:5000,default:1600}},additionalProperties:false}},
  {name:'git_log',description:'Read recent Git history as structured commits. Defaults to 20 commits from HEAD; optionally scope to ref/path.',inputSchema:{type:'object',properties:{repo:{type:'string',default:'.'},ref:{type:'string'},path:{type:'string'},limit:{type:'integer',minimum:1,maximum:100,default:20}},additionalProperties:false}},
- {name:'http_request',description:'Send an HTTP/HTTPS request with bounded body capture and timeout. Useful for API/MCP/local-host diagnostics; redirects follow by default.',inputSchema:{type:'object',properties:{method:{type:'string',enum:['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'],default:'GET'},url:{type:'string'},headers:{type:'object',additionalProperties:{type:'string'}},body:{type:'string'},timeoutMs:{type:'integer',minimum:100,maximum:60000,default:15000},maxResponseBytes:{type:'integer',minimum:1,maximum:4194304,default:1048576},followRedirects:{type:'boolean',default:true}},required:['url'],additionalProperties:false}},
+ {name:'http_request',description:'Send an HTTP/HTTPS request with bounded body capture and timeout. Useful for API/MCP/local-host diagnostics; redirects follow by default.',inputSchema:{type:'object',properties:{method:{type:'string',enum:['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'],default:'GET'},url:{type:'string'},headers:{type:'object',additionalProperties:{type:'string'}},body:{type:'string'},timeoutMs:{type:'integer',minimum:100,maximum:60000,default:15000},maxResponseBytes:{type:'integer',minimum:1,maximum:4194304,default:32768},followRedirects:{type:'boolean',default:true}},required:['url'],additionalProperties:false}},
  {name:'android_logcat',description:'Read bounded Android logcat output, optionally filtered by package PID, tag, minimum level and recent seconds.',inputSchema:{type:'object',properties:{package:{type:'string'},tag:{type:'string'},level:{type:'string',enum:['V','D','I','W','E','F'],default:'V'},sinceSeconds:{type:'integer',minimum:1,maximum:86400},maxLines:{type:'integer',minimum:1,maximum:2000,default:400}},additionalProperties:false}},
  {name:'apk_inspect',description:'Inspect an APK with embedded aapt2/unzip: package/version/SDK/permissions/launchable activity/ABIs plus bounded manifest tree and archive metadata.',inputSchema:fileSchema},
 
@@ -118,25 +156,78 @@ function trimLines(s,max=800){const a=String(s).split(/\r?\n/);return{output:a.s
 function addr(v){if(v==null||v==='')return null;if(typeof v!=='string'||!/^(?:0x)?[0-9a-fA-F]+$/.test(v))throw new Error('invalid address');return '0x'+v.replace(/^0x/i,'')}
 function sanitizeEnv(extra){if(extra==null)return process.env;if(typeof extra!=='object'||Array.isArray(extra))throw new Error('env must be an object');const env={...process.env};for(const [k,v] of Object.entries(extra)){if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k))throw new Error('invalid env key: '+k);env[k]=text(v,'env.'+k,65536)}return env}
 
+/**
+ * Bounded process capture. Hold at most two output budgets: complete initial
+ * output plus a rolling tail. This preserves end-of-build diagnostics without
+ * an unbounded allocation or repeated Buffer.concat for every data event.
+ */
+function captureOutput(maxBytes, mode='head'){
+ if(!['head','tail','head-tail'].includes(mode))throw new Error('unsupported outputMode')
+ const initial=[],recent=[]
+ let initialSize=0,recentSize=0,totalBytes=0
+ return{
+  push(chunk){
+   const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk)
+   totalBytes+=bytes.length
+   if(initialSize<maxBytes){
+    const part=bytes.subarray(0,maxBytes-initialSize)
+    initial.push(part);initialSize+=part.length
+   }
+   if(mode!=='head'){
+    recent.push(bytes);recentSize+=bytes.length
+    while(recentSize>maxBytes){
+     const oldest=recent[0],excess=recentSize-maxBytes
+     if(oldest.length<=excess){recent.shift();recentSize-=oldest.length}
+     else{recent[0]=oldest.subarray(excess);recentSize-=excess}
+    }
+   }
+  },
+  finish(){
+   const truncated=totalBytes>maxBytes
+   const head=Buffer.concat(initial,initialSize)
+   if(!truncated || mode==='head')return{text:head.toString('utf8'),bytes:totalBytes,truncated}
+   const tail=Buffer.concat(recent,recentSize)
+   if(mode==='tail')return{text:tail.toString('utf8'),bytes:totalBytes,truncated}
+   const headSize=Math.max(1,Math.floor(maxBytes*0.4)),tailSize=maxBytes-headSize
+   const omitted=Math.max(0,totalBytes-maxBytes)
+   return{
+    text:head.subarray(0,headSize).toString('utf8')+
+      '\n[... '+omitted+' bytes omitted ...]\n'+
+      tail.subarray(tail.length-tailSize).toString('utf8'),
+    bytes:totalBytes,truncated
+   }
+  }
+ }
+}
 async function runProcess(command,args=[],opts={}){
  const bin=text(command,'command',4096)
  if(bin.includes('\0'))throw new Error('command contains NUL')
  const argv=(args||[]).map((v,i)=>text(v,'args['+i+']',65536))
  const cwd=opts.cwd? (await checkedDir(opts.cwd)).path : process.cwd()
  const timeoutMs=int(opts.timeoutMs,10000,100,60000)
- const maxOutput=int(opts.maxOutputBytes,MAX_OUTPUT,1024,MAX_COMMAND_OUTPUT)
+ const maxOutput=int(opts.maxOutputBytes,32768,1024,MAX_COMMAND_OUTPUT)
+ const mode=opts.outputMode??'head'
+ const out=captureOutput(maxOutput,mode),err=captureOutput(Math.min(maxOutput,16384),'head-tail')
  const env=opts.env||process.env
- return await new Promise((resolvePromise)=>{
+ return await new Promise(resolvePromise=>{
   const started=Date.now()
   let child
-  try{child=spawn(bin,argv,{cwd,env,shell:false,stdio:['ignore','pipe','pipe']})}catch(error){resolvePromise({exitCode:null,signal:null,stdout:'',stderr:String(error),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
-  let stdout=Buffer.alloc(0),stderr=Buffer.alloc(0),truncated=false,timedOut=false,spawnError=null
-  const capture=(current,chunk)=>{const b=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);if(current.length>=maxOutput){truncated=true;return current}const room=maxOutput-current.length;if(b.length>room)truncated=true;return Buffer.concat([current,b.subarray(0,room)])}
-  child.stdout?.on('data',chunk=>{stdout=capture(stdout,chunk)})
-  child.stderr?.on('data',chunk=>{stderr=capture(stderr,chunk)})
+  try{child=spawn(bin,argv,{cwd,env,shell:false,stdio:['ignore','pipe','pipe']})}
+  catch(error){resolvePromise({exitCode:null,signal:null,stdout:'',stderr:String(error),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
+  let timedOut=false,spawnError=null
+  child.stdout?.on('data',chunk=>out.push(chunk))
+  child.stderr?.on('data',chunk=>err.push(chunk))
   child.on('error',error=>{spawnError=error})
   const timer=setTimeout(()=>{timedOut=true;try{child.kill('SIGKILL')}catch{}},timeoutMs)
-  child.on('close',(code,signal)=>{clearTimeout(timer);resolvePromise({exitCode:typeof code==='number'?code:null,signal:signal||null,stdout:stdout.toString('utf8'),stderr:(spawnError?String(spawnError)+'\n':'')+stderr.toString('utf8'),timedOut,truncated,durationMs:Date.now()-started})})
+  child.on('close',(code,signal)=>{
+   clearTimeout(timer)
+   const stdout=out.finish(),stderr=err.finish()
+   resolvePromise({exitCode:typeof code==='number'?code:null,signal:signal||null,
+    stdout:stdout.text,stderr:(spawnError?String(spawnError)+'\n':'')+stderr.text,
+    stdoutBytes:stdout.bytes,stderrBytes:stderr.bytes,
+    stdoutTruncated:stdout.truncated,stderrTruncated:stderr.truncated,
+    timedOut,truncated:stdout.truncated||stderr.truncated,durationMs:Date.now()-started})
+  })
  })
 }
 async function runStrict(bin,args,opts={}){const r=await runProcess(bin,args,opts);if(r.timedOut)throw new Error(bin+' timed out');if(r.exitCode!==0)throw new Error(bin+' failed ('+r.exitCode+'): '+(r.stderr||r.stdout||'unknown error').slice(0,MAX_OUTPUT));return(r.stdout+(r.stderr?'\n[stderr]\n'+r.stderr:'')).trim()}
@@ -279,7 +370,33 @@ function waitDebugStop(session,timeoutMs){for(let i=session.lines.length-1;i>=0&
 async function closeDebug(session){if(session.closed)return;try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}try{await miCommand(session,'-gdb-exit',3000)}catch{}try{session.child.kill('SIGKILL')}catch{}session.closed=true;DEBUG_SESSIONS.delete(session.id)}
 
 async function call(name,a={}){
+ if(!COORDINATION_ENABLED&&COORDINATION_NAMES.has(name))throw new Error('coordination extension disabled in Android settings')
+ if(!CODING_ENABLED&&CODING_NAMES.has(name))throw new Error('coding extension disabled in Android settings')
+ if(name==='code_task_verify'&&!COORDINATION_ENABLED)throw new Error('coding task verification requires coordination extension enabled')
+ if(a==null)a={}
+ if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'tool_latency_report': return telemetry.report()
+  case 'code_repair_cycle': return codeRepairCycle(a)
+  case 'code_task_verify': return codingTaskLink.verify(a)
+  case 'code_verify_recipes': return {recipes:verificationRecipes()}
+  case 'code_verify_batch': return codeVerifyBatch(a)
+  case 'code_verify': return codeVerify(a)
+  case 'code_diagnostics': return parseCodeDiagnostics(a)
+  case 'code_test_select': return selectCodeTests(a)
+  case 'code_transaction_apply': return runCodeTransaction(a)
+  case 'code_transaction_status': return codeTransactionStatus(a)
+  case 'code_transaction_recover': return codeTransactionRecover(a)
+  case 'code_index_refresh': return codeIndexRefresh(a)
+  case 'code_index_query': return codeIndexQuery(a)
+  case 'codebase_map': return codebaseMap(a)
+  case 'code_symbols': return codeSymbols(a)
+  case 'code_impact': return codeImpact(a)
+  case 'code_edit_transaction': return runCodeTransaction(a)
+  case 'coordination_create': return coordinator.create(a)
+  case 'coordination_status': return coordinator.status(a.boardId)
+  case 'coordination_claim': return coordinator.claim(a)
+  case 'coordination_update': return coordinator.update(a)
   case 'android_shell_health': {
     const root=PREFIX.replace(/\/usr$/,'');
     const paths={
@@ -328,9 +445,9 @@ async function call(name,a={}){
       diagnosis,hostLegacyTermuxPresent:legacy,expectedProotTmpDir:paths.prootHostTemp,
       warning:'PROOT_TMP_DIR must resolve to the real app HOME/tmp before entering the guest. A missing com.termux path alone does not imply user data was uninstalled.'};
   }
-  case 'tool_registry_list': return {server:'mobile_tools',tools:tools.map(t=>({name:t.name,description:t.description})),total:tools.length};
+  case 'tool_registry_list': {const visible=visibleTools(),offset=int(a.offset,0,0,visible.length),limit=int(a.limit,40,1,200),page=visible.slice(offset,offset+limit);return{server:'mobile_tools',tools:page.map(t=>({name:t.name,description:t.description})),total:visible.length,offset,returned:page.length,nextOffset:offset+page.length<visible.length?offset+page.length:null};}
   case 'tool_validate': {
-    const t=tools.find(tool=>tool.name===String(a.name||''));
+    const t=visibleTools().find(tool=>tool.name===String(a.name||''));
     if(!t)throw new Error('tool not found');
     const schema=t.inputSchema;
     const errors=[];
@@ -353,7 +470,7 @@ async function call(name,a={}){
   }
   case 'tool_inspect': {
     const target=String(a.name||'');
-    const found=tools.find(t=>t.name===target);
+    const found=visibleTools().find(t=>t.name===target);
     if(!found)throw new Error('tool not found: '+target);
     return found;
   }
@@ -400,14 +517,14 @@ async function call(name,a={}){
    const d=await checkedDir(a.path||'.'),show=bool(a.showHidden,false),limit=int(a.maxEntries,500,1,2000),raw=await readdir(d.path,{withFileTypes:true});const filtered=raw.filter(e=>show||!e.name.startsWith('.')).sort((x,y)=>Number(y.isDirectory())-Number(x.isDirectory())||x.name.localeCompare(y.name));const slice=filtered.slice(0,limit);return{path:d.path,entries:slice.map(e=>({name:e.name,path:resolve(d.path,e.name),type:e.isDirectory()?'directory':e.isFile()?'file':e.isSymbolicLink()?'symlink':'other'})),truncated:filtered.length>slice.length,totalEntries:filtered.length}
   }
   case 'fs_search': {
-   const query=text(a.query,'query'),d=await checkedDir(a.path||'.'),limit=int(a.maxResults,80,1,200),context=int(a.contextLines,2,0,5),args=['--json','--line-number','--column','--color','never','--max-columns','1000','--max-filesize','16M'];if(!bool(a.regex,false))args.push('--fixed-strings');if(!bool(a.caseSensitive,true))args.push('--ignore-case');if(bool(a.showHidden,false))args.push('--hidden');if(a.glob!=null)args.push('--glob',text(a.glob,'glob',4096));args.push('--',query,d.path);const r=await runProcess('rg',args,{timeoutMs:15000,maxOutputBytes:MAX_SEARCH_OUTPUT});if(r.exitCode!==0&&r.exitCode!==1&&!r.truncated)throw new Error('rg failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));const matches=[],cache=new Map();for(const line of r.stdout.split(/\r?\n/)){if(!line)continue;let event;try{event=JSON.parse(line)}catch{continue}if(event.type!=='match')continue;const data=event.data,path=data.path?.text;if(!path)continue;const sub=data.submatches?.[0];const item={path,line:data.line_number,column:(sub?.start??0)+1,text:(data.lines?.text||'').replace(/\r?\n$/,'')};const c=await contextFor(path,item.line,context,cache);if(c)item.context=c;matches.push(item);if(matches.length>=limit)break}return{query,path:d.path,matches,truncated:r.truncated||matches.length>=limit,stderr:r.stderr.trim()||undefined}
+   const query=text(a.query,'query'),d=await checkedDir(a.path||'.'),limit=int(a.maxResults,40,1,200),context=int(a.contextLines,1,0,5),args=['--json','--line-number','--column','--color','never','--max-columns','1000','--max-filesize','16M'];if(!bool(a.regex,false))args.push('--fixed-strings');if(!bool(a.caseSensitive,true))args.push('--ignore-case');if(bool(a.showHidden,false))args.push('--hidden');if(a.glob!=null)args.push('--glob',text(a.glob,'glob',4096));args.push('--',query,d.path);const r=await runProcess('rg',args,{timeoutMs:15000,maxOutputBytes:MAX_SEARCH_OUTPUT});if(r.exitCode!==0&&r.exitCode!==1&&!r.truncated)throw new Error('rg failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));const matches=[],cache=new Map();for(const line of r.stdout.split(/\r?\n/)){if(!line)continue;let event;try{event=JSON.parse(line)}catch{continue}if(event.type!=='match')continue;const data=event.data,path=data.path?.text;if(!path)continue;const sub=data.submatches?.[0];const item={path,line:data.line_number,column:(sub?.start??0)+1,text:(data.lines?.text||'').replace(/\r?\n$/,'')};const c=await contextFor(path,item.line,context,cache);if(c)item.context=c;matches.push(item);if(matches.length>=limit)break}return{query,path:d.path,matches,truncated:r.truncated||matches.length>=limit,stderr:r.stderr.trim()||undefined}
   }
   case 'fs_write': {const content=text(a.content,'content');return await atomicWrite(a.path,content,{overwrite:bool(a.overwrite,false),createParents:bool(a.createParents,false)})}
   case 'fs_patch': {
    const f=await readTextFile(a.path),oldText=text(a.oldText,'oldText'),newText=text(a.newText,'newText'),expected=int(a.expectedOccurrences,1,1,100),found=countOccurrences(f.text,oldText);if(found!==expected)throw new Error('expected '+expected+' occurrence(s), found '+found);const next=f.text.split(oldText).join(newText);if(Buffer.byteLength(next)>MAX_READ_FILE)throw new Error('patched file exceeds 16 MiB');const result={path:f.path,occurrences:found,beforeSha256:sha256(f.text),afterSha256:sha256(next),beforeBytes:Buffer.byteLength(f.text),afterBytes:Buffer.byteLength(next)};if(bool(a.dryRun,false))return{...result,dryRun:true};await atomicWrite(f.path,next,{overwrite:true});return{...result,dryRun:false}
   }
   case 'command_run': {
-   const cwd=a.cwd? (await checkedDir(a.cwd)).path : process.cwd();const args=Array.isArray(a.args)?a.args:[];return await runProcess(a.command,args,{cwd,env:sanitizeEnv(a.env),timeoutMs:int(a.timeoutMs,10000,100,60000),maxOutputBytes:int(a.maxOutputBytes,MAX_OUTPUT,1024,MAX_COMMAND_OUTPUT)})
+   const cwd=a.cwd? (await checkedDir(a.cwd)).path : process.cwd();const args=Array.isArray(a.args)?a.args:[];return await runProcess(a.command,args,{cwd,env:sanitizeEnv(a.env),timeoutMs:int(a.timeoutMs,10000,100,60000),maxOutputBytes:int(a.maxOutputBytes,32768,1024,MAX_COMMAND_OUTPUT),outputMode:a.outputMode??'head-tail'})
   }
   case 'git_status': {
    const repo=(await checkedDir(a.repo||'.')).path,r=await runProcess('git',['-C',repo,'status','--porcelain=v1','-b','--untracked-files=normal'],{timeoutMs:10000,maxOutputBytes:MAX_OUTPUT});if(r.exitCode!==0)throw new Error('git status failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));const lines=r.stdout.split(/\r?\n/).filter(Boolean),branch=lines[0]?.startsWith('## ')?lines.shift().slice(3):null;return{repo,branch,entries:lines.map(line=>({status:line.slice(0,2),path:line.slice(3)})),clean:lines.length===0}
@@ -419,7 +536,7 @@ async function call(name,a={}){
    const repo=(await checkedDir(a.repo||'.')).path,limit=int(a.limit,20,1,100),args=['-C',repo,'log','-n',String(limit),'--date=iso-strict','--pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s'];if(a.ref!=null)args.push(text(a.ref,'ref',4096));if(a.path!=null)args.push('--',text(a.path,'path',16384));const r=await runProcess('git',args,{timeoutMs:10000,maxOutputBytes:MAX_OUTPUT});if(r.exitCode!==0)throw new Error('git log failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));return{repo,commits:r.stdout.split(/\r?\n/).filter(Boolean).map(line=>{const [sha,shortSha,author,date,subject]=line.split('\x1f');return{sha,shortSha,author,date,subject}})}
   }
   case 'http_request': {
-   const method=(a.method||'GET').toUpperCase(),u=new URL(text(a.url,'url',16384));if(u.protocol!=='http:'&&u.protocol!=='https:')throw new Error('only http/https URLs are supported');const headers={};if(a.headers!=null){if(typeof a.headers!=='object'||Array.isArray(a.headers))throw new Error('headers must be an object');for(const [k,v] of Object.entries(a.headers))headers[text(k,'header name',1024)]=text(v,'header '+k,65536)}if(!Object.keys(headers).some(k=>k.toLowerCase()==='user-agent'))headers['User-Agent']='DSH-Mobile-Tools/3.0';const timeoutMs=int(a.timeoutMs,15000,100,60000),maxBytes=int(a.maxResponseBytes,1048576,1,MAX_HTTP_CAPTURE),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);let response;const chunks=[];let captured=0,truncated=false;try{response=await fetch(u,{method,headers,body:a.body!=null&&method!=='GET'&&method!=='HEAD'?text(a.body,'body',MAX_TEXT):undefined,redirect:bool(a.followRedirects,true)?'follow':'manual',signal:controller.signal});if(response.body&&method!=='HEAD'){const reader=response.body.getReader();while(true){const {done,value}=await reader.read();if(done)break;const b=Buffer.from(value),room=maxBytes-captured;if(room>0){chunks.push(b.subarray(0,room));captured+=Math.min(room,b.length)}if(b.length>room){truncated=true;await reader.cancel().catch(()=>{});break}}}}finally{clearTimeout(timer)}const body=Buffer.concat(chunks),contentType=response.headers.get('content-type')||'',isText=/^(text\/|application\/(?:json|xml|javascript|x-www-form-urlencoded)|[^;]+\+(?:json|xml))/i.test(contentType);return{url:response.url,status:response.status,statusText:response.statusText,redirected:response.redirected,headers:Object.fromEntries(response.headers.entries()),capturedBytes:body.length,truncated,contentType,bodyText:isText?body.toString('utf8'):undefined,bodyBase64:isText?undefined:body.toString('base64')}
+   const method=(a.method||'GET').toUpperCase(),u=new URL(text(a.url,'url',16384));if(u.protocol!=='http:'&&u.protocol!=='https:')throw new Error('only http/https URLs are supported');const headers={};if(a.headers!=null){if(typeof a.headers!=='object'||Array.isArray(a.headers))throw new Error('headers must be an object');for(const [k,v] of Object.entries(a.headers))headers[text(k,'header name',1024)]=text(v,'header '+k,65536)}if(!Object.keys(headers).some(k=>k.toLowerCase()==='user-agent'))headers['User-Agent']='DSH-Mobile-Tools/3.0';const timeoutMs=int(a.timeoutMs,15000,100,60000),maxBytes=int(a.maxResponseBytes,32768,1,MAX_HTTP_CAPTURE),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);let response;const chunks=[];let captured=0,truncated=false;try{response=await fetch(u,{method,headers,body:a.body!=null&&method!=='GET'&&method!=='HEAD'?text(a.body,'body',MAX_TEXT):undefined,redirect:bool(a.followRedirects,true)?'follow':'manual',signal:controller.signal});if(response.body&&method!=='HEAD'){const reader=response.body.getReader();while(true){const {done,value}=await reader.read();if(done)break;const b=Buffer.from(value),room=maxBytes-captured;if(room>0){chunks.push(b.subarray(0,room));captured+=Math.min(room,b.length)}if(b.length>room){truncated=true;await reader.cancel().catch(()=>{});break}}}}finally{clearTimeout(timer)}const body=Buffer.concat(chunks),contentType=response.headers.get('content-type')||'',isText=/^(text\/|application\/(?:json|xml|javascript|x-www-form-urlencoded)|[^;]+\+(?:json|xml))/i.test(contentType);return{url:response.url,status:response.status,statusText:response.statusText,redirected:response.redirected,headers:Object.fromEntries(response.headers.entries()),capturedBytes:body.length,truncated,contentType,bodyText:isText?body.toString('utf8'):undefined,bodyBase64:isText?undefined:body.toString('base64')}
   }
   case 'android_logcat': {
    const level=a.level||'V',limit=int(a.maxLines,400,1,2000),scan=Math.min(8000,Math.max(limit*4,limit)),args=['-d','-v','epoch','-t',String(scan)];let pid=null;if(a.package!=null){const pkg=text(a.package,'package',512),p=await runProcess('/system/bin/pidof',[pkg],{timeoutMs:3000,maxOutputBytes:8192});pid=p.stdout.trim().split(/\s+/).filter(Boolean)[0]||null;if(!pid)return{package:pkg,pid:null,lines:[],message:'package is not running'};args.push('--pid='+pid)}if(a.tag!=null)args.push(text(a.tag,'tag',512)+':'+level,'*:S');else args.push('*:'+level);const r=await runProcess('/system/bin/logcat',args,{timeoutMs:8000,maxOutputBytes:MAX_COMMAND_OUTPUT});if(r.exitCode!==0)throw new Error('logcat failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));let lines=r.stdout.split(/\r?\n/).filter(Boolean);if(a.sinceSeconds!=null){const cutoff=Date.now()/1000-int(a.sinceSeconds,1,1,86400);lines=lines.filter(line=>{const epoch=logcatEpoch(line);return epoch===null||epoch>=cutoff})}if(lines.length>limit)lines=lines.slice(lines.length-limit);return{package:a.package||null,pid,tag:a.tag||null,level,lines,truncated:r.truncated||lines.length>=limit}
@@ -629,6 +746,19 @@ async function call(name,a={}){
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const [{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
 async function selfTest(){
  await sdk()
+ const empty=await call('tool_registry_list',null);if(empty.total!==visibleTools().length)throw new Error('null tool arguments contract failed')
+ if(empty.tools.length>40||empty.nextOffset!==(visibleTools().length>40?40:null))throw new Error('tool registry pagination default failed')
+ const lastPage=await call('tool_registry_list',{offset:visibleTools().length-1,limit:10})
+ if(lastPage.tools.length!==1||lastPage.nextOffset!==null)throw new Error('tool registry final page failed')
+ const large=await call('command_run',{command:'node',args:['-e','process.stdout.write("x".repeat(200000));process.stderr.write("DSH_STDERR_OK")'],maxOutputBytes:4096,timeoutMs:5000})
+ if(large.exitCode!==0||!large.truncated||!large.stdout.includes('bytes omitted')||!large.stderr.includes('DSH_STDERR_OK')||large.stdoutBytes!==200000)throw new Error('bounded command output regression failed')
+ const edges=await call('command_run',{command:'node',args:['-e','process.stdout.write("HEAD_MARK"+("a".repeat(16000))+"TAIL_MARK")'],maxOutputBytes:4096,timeoutMs:5000})
+ if(!edges.truncated||!edges.stdout.startsWith('HEAD_MARK')||!edges.stdout.endsWith('TAIL_MARK'))throw new Error('head-tail output regression failed')
+ const tail=await call('command_run',{command:'node',args:['-e','process.stdout.write("a".repeat(16000)+"TAIL_MARK")'],maxOutputBytes:4096,outputMode:'tail',timeoutMs:5000})
+ if(!tail.stdout.endsWith('TAIL_MARK')||tail.stdout.includes('bytes omitted'))throw new Error('tail output regression failed')
+ const head=await call('command_run',{command:'node',args:['-e','process.stdout.write("HEAD_MARK"+("a".repeat(16000)))'],maxOutputBytes:4096,outputMode:'head',timeoutMs:5000})
+ if(!head.stdout.startsWith('HEAD_MARK')||head.stdoutBytes!==16009)throw new Error('head output regression failed')
+ const adb=tools.find(t=>t.name==='adb_devices');if(adb?.inputSchema?.required?.length)throw new Error('adb_devices unexpectedly requires arguments')
  const names=new Set(tools.map(x=>x.name));for(const name of ['fs_read','fs_list','fs_search','fs_write','fs_patch','command_run','git_status','git_diff','git_log','http_request','android_logcat','apk_inspect','process_list','process_info','process_maps','process_threads','module_list','memory_regions','memory_read','memory_search','syscall_trace','frida_processes','frida_attach','frida_spawn','frida_script','frida_trace','debug_session_start','debug_attach','debug_breakpoint_set','debug_continue','debug_registers','debug_backtrace','debug_memory_read','debug_session_close','binary_functions','binary_xrefs','jni_map_java_native','no_root_capabilities','self_runtime_snapshot','runtime_snapshot','runtime_diff','process_fds','process_network','child_strace','adb_devices','adb_pair','adb_connect','adb_package_info','adb_process_info','adb_logcat','adb_jdwp_list','adb_pull_apk','reverse_capabilities','package_process_info','native_backtrace','frida_detach','symbol_resolve','address_rebase','il2cpp_detect','il2cpp_metadata_info','il2cpp_find_class','il2cpp_find_method'])if(!names.has(name))throw new Error('missing tool '+name)
  if((await call('protocol_decode',{data:'414243',encoding:'hex'})).utf8!=='ABC')throw new Error('decode self-test failed')
  const rebased=await call('address_rebase',{base:'0x1000',rva:'0x20'});if(rebased.runtimeAddress!=='0x1020')throw new Error('address_rebase self-test failed')
@@ -657,5 +787,5 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments||{});return{content:[{type:'text',text:JSON.stringify(value,null,2)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
+async function main(){if(process.argv.includes('--feature-test')){const shown=new Set(visibleTools().map(t=>t.name));for(const id of CODING_NAMES){if(shown.has(id)!==(CODING_ENABLED&&(id!=='code_task_verify'||COORDINATION_ENABLED)))throw new Error('coding tool visibility mismatch: '+id)}for(const id of COORDINATION_NAMES){if(shown.has(id)!==COORDINATION_ENABLED)throw new Error('coordination tool visibility mismatch: '+id)}if(shown.has('code_task_verify')!==(CODING_ENABLED&&COORDINATION_ENABLED))throw new Error('coordination dependency mismatch');if(!CODING_ENABLED){try{await call('code_repair_cycle',{});throw new Error('disabled coding tool callable')}catch(e){if(!String(e.message).includes('coding extension disabled'))throw e}}process.stdout.write('[DSH] MCP extension gating: OK coding='+CODING_ENABLED+' coordination='+COORDINATION_ENABLED+'\n');return}if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const began=Date.now();let success=false;try{const value=await call(req.params.name,req.params.arguments??{});success=true;return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}}finally{telemetry.record(req.params.name,Date.now()-began,success)}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})

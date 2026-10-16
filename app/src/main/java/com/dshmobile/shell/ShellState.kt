@@ -10,6 +10,30 @@ object ShellState {
   private const val LAST_WORKSPACE_PATH = "last-workspace-path"
   private const val INTERFACE_MODE = "interface-mode"
 
+  private const val ANDROID_TOOLS_ENABLED = "android-tools-enabled"
+  private const val SHIZUKU_DIAGNOSTICS_ENABLED = "shizuku-diagnostics-enabled"
+
+  /** These controls only affect optional Android UI extensions, never DSH core plugins. */
+  fun androidExtensionEnabled(context: Context, id: String): Boolean {
+    val key = when (id) {
+      "android_tools_ui" -> ANDROID_TOOLS_ENABLED
+      "shizuku_diagnostics" -> SHIZUKU_DIAGNOSTICS_ENABLED
+      else -> throw IllegalArgumentException("Unknown Android UI extension: $id")
+    }
+    return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(key, true)
+  }
+
+  fun setAndroidExtensionEnabled(context: Context, id: String, enabled: Boolean): Boolean {
+    val key = when (id) {
+      "android_tools_ui" -> ANDROID_TOOLS_ENABLED
+      "shizuku_diagnostics" -> SHIZUKU_DIAGNOSTICS_ENABLED
+      else -> throw IllegalArgumentException("Unknown Android UI extension: $id")
+    }
+    // Synchronous durability before WebView reload / process recreation.
+    return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit().putBoolean(key, enabled).commit()
+  }
+
   const val UI_MODE_MOBILE = "mobile"
   const val UI_MODE_NATIVE = "native"
 

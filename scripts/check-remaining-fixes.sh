@@ -306,8 +306,11 @@ must "$EM" 'libexec/dsh/wrappers:'
 must "$EM" '"TERMUX_PREFIX" to usrDir.absolutePath'
 must "$EM" '"PREFIX" to usrDir.absolutePath'
 must "$BT" 'libexec/dsh/bash-real'
-must "$EM" '"DSH_SIDEBAR_SHELL" to File(usrDir, "libexec/dsh/wrappers/bash").absolutePath'
-must "$EM" '"SHELL" to File(usrDir, "libexec/dsh/wrappers/bash").absolutePath'
+must "$EM" '"DSH_SIDEBAR_SHELL" to directBashShell().absolutePath'
+must "$EM" '"SHELL" to directBashShell().absolutePath'
+must "$EM" 'private fun directBashShell(): File'
+must "$EM" 'unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT'
+must "$EM" '"SHELL" to directBashShell().absolutePath'
 must "$BT" 'Reusable node-pty runtime: OK'
 must "$BT" 'Resolve the complete ELF NEEDED closure'
 must "$BT" '{ "$readelf_bin" -d "$current" 2>/dev/null || true; }'
@@ -605,4 +608,44 @@ must "$ROOT/scripts/android-runtime-patch.mjs" '@deepseek-ai/cordis-plugin-loade
 bash "$ROOT/scripts/check-duplicate-loader-entry-fix.sh"
 
 
+[ -f "$ROOT/scripts/dsh-subagent-coordination.mjs" ] || { echo '[FAIL] Missing subagent coordinator'; exit 1; }
+node "$ROOT/scripts/dsh-subagent-coordination.mjs" --self-test
+# Android extension toggles: persistence, settings entry and MCP capability removal.
+must "$ROOT/app/src/main/java/com/dshmobile/shell/ShellState.kt" 'fun androidExtensionEnabled('
+must "$ROOT/app/src/main/java/com/dshmobile/shell/ShellState.kt" 'fun setAndroidExtensionEnabled('
+must "$MA" 'private fun showAndroidExtensions()'
+must "$MA" 'ANDROID_TOOLS_UI_ENABLED'
+must "$MA" '"shizuku_diagnostics"'
+must "$MCM" 'fun builtInExtensionEnabled('
+must "$MCM" 'DSH_MOBILE_COORDINATION_ENABLED'
+must "$MTB" 'const visibleTools='
+DSH_MOBILE_COORDINATION_ENABLED=0 node --check "$MTB"
+# Coding Engine opt-in, bundled module and standalone regression checks.
+must "$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt" 'fun codingEnabled(): Boolean'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt" 'DSH_MOBILE_CODING_ENABLED'
+must "$MA" 'Coding Engine 2.0 · 编码增强（实验）'
+must "$MTB" "case 'code_edit_transaction': return runCodeTransaction(a)"
+must "$BT" 'dsh-coding-engine.mjs'
+node "$ROOT/scripts/dsh-coding-engine.mjs" --self-test
+node "$ROOT/scripts/dsh-code-index.mjs" --self-test
+node "$ROOT/scripts/dsh-code-transactions.mjs" --self-test
+node "$ROOT/scripts/dsh-code-diagnostics.mjs" --self-test
+node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
+node "$ROOT/scripts/dsh-code-task-link.mjs" --self-test
+node "$ROOT/scripts/dsh-tool-metrics.mjs" --self-test
+node "$ROOT/scripts/dsh-code-repair-cycle.mjs" --self-test
+# Feature switches must affect actual MCP capability discovery and invocation.
+for enabled in 0 1; do
+  for coord in 0 1; do
+    DSH_MOBILE_CODING_ENABLED="$enabled" DSH_MOBILE_COORDINATION_ENABLED="$coord" \
+      node "$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs" --feature-test
+  done
+done
+
+# Imports must never run self-tests: nested modules used to race on process.env,
+# causing nondeterministic crashes in transaction recovery checks.
+import_output="$(cd "$ROOT" && node --input-type=module -e 'await import("./scripts/dsh-code-repair-cycle.mjs")' -- --self-test 2>&1)"
+[ -z "$import_output" ] || { echo "[FAIL] Coding module import had side effects: $import_output"; exit 1; }
+must "$MCM" 'DSH_MOBILE_TOOL_METRICS_ENABLED'
+must "$MTB" "case 'code_task_verify': return codingTaskLink.verify(a)"
 echo '[OK] remaining medium/low regression checks passed'

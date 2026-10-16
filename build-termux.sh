@@ -1565,6 +1565,51 @@ install_mobile_mcp_toolbox() {
   [ -f "$MOBILE_MCP_TOOLBOX" ] || { echo "[DSH] Missing mobile MCP toolbox source"; exit 8; }
   mkdir -p "$(dirname "$dest")"
   cp "$MOBILE_MCP_TOOLBOX" "$dest"
+  local coordination="$ROOT/scripts/dsh-subagent-coordination.mjs"
+  [ -f "$coordination" ] || { echo '[DSH] Missing subagent coordination module'; exit 8; }
+  cp "$coordination" "$(dirname "$dest")/dsh-subagent-coordination.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-subagent-coordination.mjs"
+  local coding="$ROOT/scripts/dsh-coding-engine.mjs"
+  [ -f "$coding" ] || { echo '[DSH] Missing Coding Engine module'; exit 8; }
+  cp "$coding" "$(dirname "$dest")/dsh-coding-engine.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-coding-engine.mjs"
+  local code_index="$ROOT/scripts/dsh-code-index.mjs"
+  [ -f "$code_index" ] || { echo '[DSH] Missing Coding Index module'; exit 8; }
+  cp "$code_index" "$(dirname "$dest")/dsh-code-index.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-index.mjs"
+  local transactions="$ROOT/scripts/dsh-code-transactions.mjs"
+  [ -f "$transactions" ] || { echo '[DSH] Missing Coding Transactions module'; exit 8; }
+  cp "$transactions" "$(dirname "$dest")/dsh-code-transactions.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-transactions.mjs"
+  local diagnostics="$ROOT/scripts/dsh-code-diagnostics.mjs"
+  [ -f "$diagnostics" ] || { echo '[DSH] Missing Coding Diagnostics module'; exit 8; }
+  cp "$diagnostics" "$(dirname "$dest")/dsh-code-diagnostics.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-diagnostics.mjs"
+  local verifier="$ROOT/scripts/dsh-code-verify.mjs"
+  [ -f "$verifier" ] || { echo '[DSH] Missing Coding Verification module'; exit 8; }
+  cp "$verifier" "$(dirname "$dest")/dsh-code-verify.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-verify.mjs"
+  local task_link="$ROOT/scripts/dsh-code-task-link.mjs"
+  [ -f "$task_link" ] || { echo '[DSH] Missing Coding Task Link module'; exit 8; }
+  cp "$task_link" "$(dirname "$dest")/dsh-code-task-link.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-task-link.mjs"
+  local metrics="$ROOT/scripts/dsh-tool-metrics.mjs"
+  [ -f "$metrics" ] || { echo '[DSH] Missing Tool Metrics module'; exit 8; }
+  cp "$metrics" "$(dirname "$dest")/dsh-tool-metrics.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-tool-metrics.mjs"
+  local repair="$ROOT/scripts/dsh-code-repair-cycle.mjs"
+  [ -f "$repair" ] || { echo '[DSH] Missing Coding Repair Cycle'; exit 8; }
+  cp "$repair" "$(dirname "$dest")/dsh-code-repair-cycle.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-repair-cycle.mjs"
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-repair-cycle.mjs" --self-test || { echo '[DSH] Coding Repair self-test failed'; exit 8; }
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-tool-metrics.mjs" --self-test || { echo '[DSH] Tool Metrics self-test failed'; exit 8; }
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-task-link.mjs" --self-test || { echo '[DSH] Coding Task Link self-test failed'; exit 8; }
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-verify.mjs" --self-test || { echo '[DSH] Coding Verification self-test failed'; exit 8; }
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-diagnostics.mjs" --self-test || { echo '[DSH] Coding Diagnostics self-test failed'; exit 8; }
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-transactions.mjs" --self-test || { echo '[DSH] Coding Transactions self-test failed'; exit 8; }
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-index.mjs" --self-test || { echo '[DSH] Coding Index self-test failed.'; exit 8; }
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-coding-engine.mjs" --self-test || { echo '[DSH] Coding Engine self-test failed.'; exit 8; }
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-subagent-coordination.mjs" --self-test || { echo '[DSH] Subagent coordinator self-test failed.'; exit 8; }
   chmod 0755 "$dest"
   "$stage/usr/bin/node" --check "$dest" >/dev/null
   env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Mobile MCP toolbox self-test failed.'; exit 8; }

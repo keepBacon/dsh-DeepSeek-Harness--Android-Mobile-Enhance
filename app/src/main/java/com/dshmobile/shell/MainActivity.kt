@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
   }
   private lateinit var engineStatus: TextView
   private lateinit var progressText: TextView
+  private lateinit var diagnosticsScroll: android.widget.ScrollView
   private val engineManager by lazy { EngineManager(this, pickToken) }
   private val skillManager by lazy { SkillManager(this, engineManager) }
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -732,6 +733,10 @@ class MainActivity : ComponentActivity() {
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
 
+    wrap.addView(Button(this).apply {
+      text = "安卓扩展管理 · 开关与诊断"
+      setOnClickListener { showAndroidExtensions() }
+    })
     wrap.addView(TextView(this).apply {
       text = "关于"
       textSize = 16f
@@ -840,6 +845,7 @@ class MainActivity : ComponentActivity() {
    */
   private fun installMobileUiBridge(view: WebView) {
     val uiMode = ShellState.interfaceMode(this)
+    val toolsUiEnabled = ShellState.androidExtensionEnabled(this, "android_tools_ui")
     val capability = bridgeCapability
     val script = """
       (() => {
@@ -848,6 +854,7 @@ class MainActivity : ComponentActivity() {
 
         const ROOT = document.documentElement;
         const UI_MODE = ${jsString(uiMode)};
+        const ANDROID_TOOLS_UI_ENABLED = $toolsUiEnabled;
         const BRIDGE_CAP = ${jsString(capability)};
         const MANAGER_ID = 'dsh-android-plugin-manager';
         const COMPOSER_IMPORT_CLASS = 'dsh-android-composer-import';
@@ -2773,9 +2780,11 @@ class MainActivity : ComponentActivity() {
             title.textContent = 'DeepSeek Harness';
             const actions = document.createElement('div');
             actions.className = 'dsh-mobile-actions';
-            const tools = makeButton('dsh-mobile-tools', 'Tools', 'tools');
-            tools.setAttribute('aria-haspopup', 'true');
-            tools.setAttribute('aria-expanded', 'false');
+            const tools = ANDROID_TOOLS_UI_ENABLED ? makeButton('dsh-mobile-tools', 'Tools', 'tools') : null;
+            if (tools) {
+              tools.setAttribute('aria-haspopup', 'true');
+              tools.setAttribute('aria-expanded', 'false');
+            }
             const add = makeButton('dsh-mobile-new', '新建会话', 'new');
             const appSettings = makeButton('dsh-mobile-app-settings', '应用设置', null);
             appSettings.innerHTML = upstreamSettingsIcon();
@@ -2783,7 +2792,7 @@ class MainActivity : ComponentActivity() {
               if (UI_MODE === 'mobile') toggleMobileSidebar();
               else { try { findSidebarToggle()?.click(); } catch (_) {} }
             });
-            tools.addEventListener('click', toggleToolsPanel);
+            if (tools) tools.addEventListener('click', toggleToolsPanel);
             add.addEventListener('click', () => {
               const target = findNewSession();
               if (target) target.click();
@@ -2791,11 +2800,12 @@ class MainActivity : ComponentActivity() {
             appSettings.addEventListener('click', () => {
               try { window.androidBridge && window.androidBridge.openAppSettings(BRIDGE_CAP); } catch (_) {}
             });
-            actions.append(tools, add, appSettings);
+            if (tools) actions.append(tools);
+            actions.append(add, appSettings);
             bar.append(menu, title, actions);
             document.body.appendChild(bar);
           }
-          installToolsPanel();
+          if (ANDROID_TOOLS_UI_ENABLED) installToolsPanel();
           let scrim = document.getElementById(SCRIM_ID);
           if (!scrim) {
             scrim = document.createElement('div');
@@ -4008,6 +4018,143 @@ class MainActivity : ComponentActivity() {
       // package metadata diagnostics are handled by DSH/pnpm after selection.
     }
     return packageRoot.absolutePath
+  }
+
+  /**
+   * Android additions are opt-in management surfaces, not DSH core plugin replacements.
+   * MCP changes stop/restart the Host through the existing transaction boundary.
+   */
+  private fun showAndroidExtensions() {
+    val density = resources.displayMetrics.density
+    val root = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding((16 * density).toInt(), (12 * density).toInt(), (16 * density).toInt(), (12 * density).toInt())
+    }
+    root.addView(TextView(this).apply {
+      text = "这些开关只控制 Android 扩展，不删除插件或运行时文件。修改 MCP 开关需要重启 DSH；自定义 MCP 服务器仍在“管理 MCP”中设置。"
+      textSize = 13f
+      setPadding(0, 0, 0, (12 * density).toInt())
+    })
+    lateinit var dialog: android.app.AlertDialog
+    fun addToggle(id: String, label: String, description: String) {
+      val checked = engineManager.builtInMcpExtensionEnabled(id)
+      val item = android.widget.Switch(this).apply {
+        text = label
+        textSize = 15f
+        isChecked = checked
+        setPadding(0, (8 * density).toInt(), 0, 0)
+        setOnCheckedChangeListener { _, enabled ->
+          if (enabled == checked) return@setOnCheckedChangeListener
+          isChecked = checked
+          android.app.AlertDialog.Builder(this@MainActivity)
+            .setTitle(if (enabled) "启用 $label" else "停用 $label")
+            .setMessage("需要重启 DSH 引擎后生效。现有插件、模型配置与会话不会被删除。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("应用并重启") { _, _ ->
+              dialog.dismiss()
+              runProfileMutation("正在更新安卓扩展…") {
+                engineManager.setBuiltInMcpExtensionEnabled(id, enabled)
+              }
+            }.show()
+        }
+      }
+      root.addView(item)
+      root.addView(TextView(this).apply {
+        text = description
+        textSize = 12f
+        setPadding(0, 0, 0, (8 * density).toInt())
+      })
+    }
+    addToggle("mobile_tools", "mobile_tools · 移动开发与逆向工具", "本地文件、命令、网络、Git 与兼容性工具；关闭后不注册此 MCP 服务。")
+    addToggle("basic_tools", "basic_tools · 基础工具", "压缩包、数据处理、系统诊断、基础网络和构建工具；与 mobile_tools 独立。")
+    addToggle("coordination", "子代理协同任务板", "仅控制 mobile_tools 内 coordination_* 工具；原生 Subagent / Workflow 不受影响。")
+    addToggle("coding", "Coding Engine 2.0 · 编码增强（实验）", "项目地图、符号查找、文本影响分析及 SHA-256 校验的多文件修改；默认关闭，需主动启用。")
+    addToggle("tool_metrics", "工具耗时诊断（实验）", "默认关闭。仅在当前工具进程内统计名称、耗时和调用结果；重启后清空，不记录内容。")
+    root.addView(Button(this).apply {
+      text = "查看配置与运行环境"
+      setOnClickListener {
+        val report = buildString {
+          append(engineManager.mcpRuntimeSummary())
+          append("\nmobile_tools: ").append(engineManager.builtInMcpExtensionEnabled("mobile_tools"))
+          append("\nbasic_tools: ").append(engineManager.builtInMcpExtensionEnabled("basic_tools"))
+          append("\ncoordination: ").append(engineManager.builtInMcpExtensionEnabled("coordination"))
+          append("\ncoding: ").append(engineManager.builtInMcpExtensionEnabled("coding"))
+          append("\ntool_metrics: ").append(engineManager.builtInMcpExtensionEnabled("tool_metrics"))
+          append("\nShizuku: ").append(ShizukuSupport.status(this@MainActivity))
+          engineManager.mcpConfigurationIssue()?.let { append("\n配置异常: ").append(it) }
+        }
+        android.app.AlertDialog.Builder(this@MainActivity).setTitle("扩展诊断")
+          .setMessage(report).setPositiveButton("确定", null).show()
+      }
+    })
+    root.addView(Button(this).apply {
+      text = "Coding Engine · 模块完整性诊断"
+      setOnClickListener {
+        android.app.AlertDialog.Builder(this@MainActivity)
+          .setTitle("Coding Engine 2.0 诊断")
+          .setMessage(engineManager.codingEngineDiagnostics())
+          .setPositiveButton("确定", null)
+          .show()
+      }
+    })
+    root.addView(Button(this).apply {
+      text = "检测 Shizuku Shell 身份"
+      isEnabled = ShellState.androidExtensionEnabled(this@MainActivity, "shizuku_diagnostics")
+      setOnClickListener {
+        Thread {
+          val report = ShizukuSupport.inspect("identity").toString(2)
+          runOnUiThread {
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("Shizuku 诊断").setMessage(report)
+              .setPositiveButton("确定", null).show()
+          }
+        }.start()
+      }
+    })
+    listOf(
+      Triple("android_tools_ui", "Android Tools · 悬浮工具面板", "关闭后下次重新加载页面不再插入 Android Tools 面板，不影响 MCP 工具。"),
+      Triple("shizuku_diagnostics", "Shizuku · 只读诊断", "关闭诊断入口，不撤销系统 Shizuku 授权，也不改变其他应用权限。"),
+    ).forEach { (id, label, detail) ->
+      val current = ShellState.androidExtensionEnabled(this, id)
+      root.addView(android.widget.Switch(this).apply {
+        text = label
+        isChecked = current
+        setOnCheckedChangeListener { view, enabled ->
+          if (enabled == current) return@setOnCheckedChangeListener
+          view.isChecked = current
+          android.app.AlertDialog.Builder(this@MainActivity)
+            .setTitle(if (enabled) "启用 $label" else "停用 $label")
+            .setMessage("设置将立即保存。Android Tools 面板需要重新加载页面生效，不重启 DSH 引擎。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("应用") { _, _ ->
+              if (!ShellState.setAndroidExtensionEnabled(this@MainActivity, id, enabled)) {
+                showSimpleMessage("保存失败", "无法持久化扩展设置")
+              } else {
+                dialog.dismiss()
+                if (id == "android_tools_ui" && ::webView.isInitialized) {
+                  webView.reload()
+                } else {
+                  showAndroidExtensions()
+                }
+              }
+            }.show()
+        }
+      })
+      root.addView(TextView(this).apply {
+        text = detail
+        textSize = 12f
+        setPadding(0, 0, 0, (8 * density).toInt())
+      })
+    }
+    root.addView(TextView(this).apply {
+      text = "尚未实现的 Coding Engine 2.0 自动编码功能将在完成测试后逐项加入。DSH 核心 Agent / 工作流不会被此页面禁用。"
+      textSize = 12f
+    })
+    dialog = android.app.AlertDialog.Builder(this)
+      .setTitle("安卓扩展管理")
+      .setView(android.widget.ScrollView(this).apply { addView(root) })
+      .setPositiveButton("完成", null).create()
+    dialog.show()
   }
 
   private fun showMcpManager() {
@@ -5423,7 +5570,7 @@ class MainActivity : ComponentActivity() {
     val guide = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
       setPadding(padding, padding, padding, padding)
-      gravity = android.view.Gravity.CENTER
+      gravity = android.view.Gravity.TOP
       visibility = View.GONE
     }
     engineStatus = TextView(this).apply {
@@ -5438,6 +5585,12 @@ class MainActivity : ComponentActivity() {
       visibility = View.VISIBLE
       setTextIsSelectable(true)
     }
+    diagnosticsScroll = android.widget.ScrollView(this).apply {
+      isVerticalScrollBarEnabled = true
+      addView(progressText, FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+      ))
+    }
     val repairRuntime = Button(this).apply {
       text = "修复运行时"
       setOnClickListener { repairRuntimeFlow() }
@@ -5447,20 +5600,24 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { startEngineFlow() }
     }
     val safeMode = Button(this).apply {
-      text = "禁用第三方插件并重启"
+      text = "禁用全部插件并重启"
       setOnClickListener {
         android.app.AlertDialog.Builder(this@MainActivity)
-          .setTitle("安全模式恢复")
-          .setMessage("保留已安装文件，但停用 web profile 中全部第三方 bundle，然后重启 DSH。")
+          .setTitle("插件安全恢复")
+          .setMessage(
+            "停用 web profile 的全部第三方插件，并暂时清空自定义配置覆盖层，" +
+              "以隔离重复加载等启动故障。操作前会备份原配置，保留插件安装文件、会话与 API Key；" +
+              "DSH 内置核心插件必须继续启用。确认后将重启引擎。",
+          )
           .setNegativeButton("取消", null)
-          .setPositiveButton("继续") { _, _ ->
-            runProfileMutation("正在禁用第三方插件…") { engineManager.disableThirdPartyBundles() }
+          .setPositiveButton("禁用并重启") { _, _ ->
+            runProfileMutation("正在隔离用户插件…") { engineManager.disableAllUserPluginsForRecovery() }
           }
           .show()
       }
     }
     val resetConfig = Button(this).apply {
-      text = "备份并重置 web 配置"
+      text = "备份并重置配置"
       setOnClickListener {
         android.app.AlertDialog.Builder(this@MainActivity)
           .setTitle("重置配置覆盖层")
@@ -5484,13 +5641,31 @@ class MainActivity : ComponentActivity() {
     recoveryControls.clear()
     recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, copyDiagnostics)
     recoveryControls.forEach { it.visibility = View.GONE }
+    // Keep recovery actions reachable even when engine.log contains a huge stack trace.
+    // Only diagnostics scroll; recovery actions remain pinned below.
+    val actionPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    val startupActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+    startupActions.addView(retry, LinearLayout.LayoutParams(
+      0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+    ))
+    startupActions.addView(repairRuntime, LinearLayout.LayoutParams(
+      0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+    ))
+    val supportActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+    supportActions.addView(resetConfig, LinearLayout.LayoutParams(
+      0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+    ))
+    supportActions.addView(copyDiagnostics, LinearLayout.LayoutParams(
+      0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
+    ))
+    actionPanel.addView(safeMode)
+    actionPanel.addView(startupActions)
+    actionPanel.addView(supportActions)
     guide.addView(engineStatus)
-    guide.addView(progressText)
-    guide.addView(repairRuntime)
-    guide.addView(retry)
-    guide.addView(safeMode)
-    guide.addView(resetConfig)
-    guide.addView(copyDiagnostics)
+    guide.addView(diagnosticsScroll, LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
+    ))
+    guide.addView(actionPanel)
     return guide
   }
 
@@ -5500,6 +5675,8 @@ class MainActivity : ComponentActivity() {
    * No external Termux installation is required.
    */
   private fun startEngineFlow() {
+    // An Activity resume must not race a user-triggered stop/mutate/restart.
+    if (profileMutationRunning.get()) return
     if (!engineFlowRunning.compareAndSet(false, true)) return
     runOnUiThread { showStartingState("正在连接 DeepSeek Harness…") }
     Thread {
@@ -5638,6 +5815,7 @@ class MainActivity : ComponentActivity() {
     engineStatus.text = prefix + "。"
     progressText.visibility = View.VISIBLE
     progressText.text = if (diag.isBlank()) "未生成额外诊断日志。" else diag
+    diagnosticsScroll.post { diagnosticsScroll.scrollTo(0, 0) }
     recoveryControls.forEach { it.visibility = View.VISIBLE }
     showGuide()
   }

@@ -181,9 +181,42 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
+  /** Read-only Android Coding Engine status; no Host or MCP process is started. */
+  fun codingEngineDiagnostics(): String = buildString {
+    val root = File(usrDir, "libexec/dsh-mobile")
+    val components = linkedMapOf(
+      "Coding Engine P0/P1" to "dsh-coding-engine.mjs",
+      "Incremental index" to "dsh-code-index.mjs",
+      "Recoverable transactions" to "dsh-code-transactions.mjs",
+      "Compiler diagnostics" to "dsh-code-diagnostics.mjs",
+      "Verification runner" to "dsh-code-verify.mjs",
+      "Verified subagent task link" to "dsh-code-task-link.mjs",
+      "Tool latency metrics" to "dsh-tool-metrics.mjs",
+      "Bounded repair loop" to "dsh-code-repair-cycle.mjs",
+    )
+    append("编码增强状态：").append(if (mcpConfigManager.codingEnabled()) "已配置启用" else "已配置关闭")
+    append("\n依赖 mobile_tools：").append(if (mcpConfigManager.toolboxEnabled()) "已配置启用" else "已配置关闭")
+    append("\n检查来源：当前 APK 已解压的 runtime 文件（不是 MCP 执行成功证明）")
+    for ((name, file) in components) {
+      val module = File(root, file)
+      append("\n").append(name).append("：")
+        .append(if (module.isFile && module.length() > 0L) "已安装" else "缺失")
+    }
+    append("\n索引、事务和验证需要在 DSH 模型会话中实际调用 MCP 才能证明可用。")
+  }
+
   fun mcpRuntimeSummary(): String = mcpConfigManager.runtimeSummary()
   fun listMcpServers(): List<McpServerConfig> = mcpConfigManager.listServers()
   fun mcpToolboxEnabled(): Boolean = mcpConfigManager.toolboxEnabled()
+  fun builtInMcpExtensionEnabled(id: String): Boolean = mcpConfigManager.builtInExtensionEnabled(id)
+  fun setBuiltInMcpExtensionEnabled(id: String, enabled: Boolean): PluginCommandResult = try {
+    mcpConfigManager.setBuiltInExtensionEnabled(id, enabled)
+    mcpConfigManager.ensureRuntimePatch()
+    PluginCommandResult(true, 0, "扩展 " + id + if (enabled) " 已启用（重启引擎后生效）" else " 已关闭（重启引擎后生效）")
+  } catch (t: Throwable) {
+    PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
+  }
+
   fun mcpConfigurationIssue(): String? = mcpConfigManager.configurationIssue()
   fun hasMcpBearerToken(id: String): Boolean = try { SecureCredentialStore.hasMcpBearerToken(context, id) } catch (_: Throwable) { false }
 
@@ -1435,6 +1468,37 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   /** Environment used by the DSH web engine and bundled command-line tools. */
+  /**
+   * Prefer a direct app-owned Bash launcher over the legacy PRoot wrapper.
+   * Created at runtime so previously extracted snapshots also work.
+   * Only the shell child drops termux-exec injection; Node retains its env.
+   */
+  private fun directBashShell(): File {
+    val fallback = File(usrDir, "libexec/dsh/wrappers/bash")
+    val real = File(usrDir, "libexec/dsh/bash-real")
+    if (!real.isFile) return fallback
+    val launcher = File(usrDir, "libexec/dsh/bash-direct")
+    val script = """
+      #!/system/bin/sh
+      set -eu
+      REAL="${'$'}{TERMUX__PREFIX:-}/libexec/dsh/bash-real"
+      [ -x "${'$'}REAL" ] || { echo "DSH_BASH_REAL_MISSING: ${'$'}REAL" >&2; exit 127; }
+      unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT
+      exec "${'$'}REAL" --noprofile --norc "${'$'}@"
+    """.trimIndent() + "\n"
+    return try {
+      if (java.nio.file.Files.isSymbolicLink(launcher.toPath())) {
+        throw java.io.IOException("refusing symlink Bash launcher")
+      }
+      if (!launcher.isFile || launcher.readText() != script) writeTextAtomic(launcher, script)
+      if (!launcher.setExecutable(true, true)) throw java.io.IOException("Bash launcher is not executable")
+      launcher
+    } catch (t: Throwable) {
+      Log.w(TAG, "Direct Bash launcher unavailable; retaining existing wrapper", t)
+      fallback
+    }
+  }
+
   private fun engineEnv(preload: File = preloadBin): Map<String, String> {
     File(homeDir, ".ssh").mkdirs()
     val xdgConfig = File(homeDir, ".config").apply { mkdirs() }
@@ -1471,8 +1535,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // Sidebar terminal + model terminal tools must resolve the embedded
       // Android-compatible Bash rather than the app process' empty/default
       // shell. The plugin checks DSH_SIDEBAR_SHELL before $SHELL.
-      "DSH_SIDEBAR_SHELL" to File(usrDir, "libexec/dsh/wrappers/bash").absolutePath,
-      "SHELL" to File(usrDir, "libexec/dsh/wrappers/bash").absolutePath,
+      "DSH_SIDEBAR_SHELL" to directBashShell().absolutePath,
+      "SHELL" to directBashShell().absolutePath,
       "DSH_HOME" to ensureDshDataHome().absolutePath,
       "TMPDIR" to File(homeDir, "tmp").apply { mkdirs() }.absolutePath,
       "XDG_CACHE_HOME" to nodeCacheDir.absolutePath,
@@ -2468,6 +2532,86 @@ class EngineManager(private val context: Context, private val pickToken: String?
       PluginCommandResult(true, 0, if (disabled.isEmpty()) "没有启用的第三方 bundle" else "已停用：" + disabled.joinToString(", "))
     } catch (t: Throwable) {
       PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
+    }
+  }
+
+  /**
+   * Explicit user-requested recovery, independent of the crashed DSH Host.
+   * Preserve installed packages and credentials, isolate third-party bundles
+   * and custom patch includes, and retain dated copies for manual restoration.
+   */
+  fun disableAllUserPluginsForRecovery(profile: String = "web"): PluginCommandResult {
+    if (profile != "web") return PluginCommandResult(false, -1, "只支持 web profile 的安全恢复")
+    val manifest = profileManifest(profile)
+    val patch = profilePatchFile(profile)
+    val stamp = System.currentTimeMillis().toString()
+    val backups = mutableListOf<Pair<File, File>>()
+    val original = mutableListOf<Pair<File, String?>>()
+    return try {
+      val root = if (manifest.isFile) JSONObject(manifest.readText()) else null
+      val dsh = root?.optJSONObject("dsh")
+      val profileObject = dsh?.optJSONObject("profile")
+      val bundles = profileObject?.optJSONArray("bundles")
+      val retained = JSONArray()
+      val disabled = mutableListOf<String>()
+      if (bundles != null) {
+        for (i in 0 until bundles.length()) {
+          val name = bundles.optString(i)
+          if (name.startsWith("@deepseek-ai/")) retained.put(name)
+          else if (name.isNotBlank()) disabled.add(name)
+        }
+      }
+      val patchText = if (patch.isFile) patch.readText() else null
+      val shouldRewriteManifest = bundles != null && disabled.isNotEmpty()
+      val shouldResetPatch = patchText != null && patchText.trim().isNotBlank() &&
+        patchText.trim() != "# DSH web profile overrides"
+      val candidates = listOfNotNull(
+        if (shouldRewriteManifest) manifest else null,
+        if (shouldResetPatch) patch else null,
+      )
+      for (file in candidates) {
+        val old = file.readText()
+        val backup = File(file.parentFile, file.name + ".plugin-recovery-" + stamp + ".bak")
+        file.copyTo(backup, overwrite = false)
+        backups.add(file to backup)
+        original.add(file to old)
+      }
+      if (shouldRewriteManifest) {
+        profileObject!!.put("bundles", retained)
+        writeTextAtomic(manifest, root!!.toString(2) + "\n")
+      }
+      if (shouldResetPatch) {
+        writeTextAtomic(patch, "# DSH web profile overrides\n")
+      }
+      PluginCommandResult(true, 0, buildString {
+        append("安全恢复配置已应用；安装文件、会话和凭据未删除。")
+        if (disabled.isNotEmpty()) append("\n已停用第三方 bundle：").append(disabled.joinToString(", "))
+        if (shouldResetPatch) append("\n已隔离 web 自定义配置覆盖层（含可能重复加载的 include）。")
+        if (backups.isNotEmpty()) {
+          append("\n备份文件：\n")
+          append(backups.joinToString("\n") { it.second.absolutePath })
+        }
+        if (backups.isEmpty()) append("\n没有检测到需要修改的插件启动配置。")
+      })
+    } catch (t: Throwable) {
+      val restoreFailures = mutableListOf<String>()
+      for ((file, previous) in original.asReversed()) {
+        try {
+          if (previous != null) writeTextAtomic(file, previous)
+        } catch (rollback: Throwable) {
+          restoreFailures.add(file.absolutePath + ": " + (rollback.message ?: "restore failed"))
+        }
+      }
+      PluginCommandResult(false, -3, buildString {
+        append("安全恢复未完成：").append(t.message ?: t.javaClass.simpleName)
+        if (restoreFailures.isNotEmpty()) {
+          append("\n回滚失败：").append(restoreFailures.joinToString("; "))
+        }
+        if (backups.isNotEmpty()) {
+          append("\n原始文件备份：\n")
+          append(backups.joinToString("\n") { it.second.absolutePath })
+        }
+      })
     }
   }
 
