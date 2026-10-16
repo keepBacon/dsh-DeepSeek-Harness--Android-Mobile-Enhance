@@ -54,7 +54,7 @@ export function parseCodeDiagnostics(input={}){
  for(let i=0;i<max;i++){
   const raw=lines[i],text=raw.trim()
   let m
-  if((m=raw.match(/^(?:e|w):\s+(?:file:\/\/\/)?(.+?\.(?:kt|kts)):(\d+):(\d+):\s*(.+)$/i))){
+  if((m=raw.match(/^(?:e|w):\s+(.+?\.(?:kt|kts)):(\d+):(\d+):\s*(.+)$/i))){
    tool='kotlin';addDiag(result,seen,root,{tool,path:m[1],line:+m[2],column:+m[3],severity:severityOf(text),message:m[4]});continue
   }
   if((m=raw.match(/^(.+?\.java):(\d+):\s*(error|warning):\s*(.+)$/i))){
