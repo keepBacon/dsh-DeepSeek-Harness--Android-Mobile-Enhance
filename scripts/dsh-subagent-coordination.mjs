@@ -1,5 +1,5 @@
-import {fileURLToPath} from 'node:url'
 #!/usr/bin/env node
+import {fileURLToPath} from 'node:url'
 /**
  * DSH Android cooperative task board.
  *
