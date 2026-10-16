@@ -33,8 +33,8 @@ function normalizePath(path,root){
  return value.replace(/^\.\//,'')
 }
 const severityOf=raw=>/^w(?:arning)?:/i.test(raw)?'warning':/^i(?:nfo)?:/i.test(raw)?'info':'error'
-function addDiag(output,cache,raw,{tool,code='',path=null,line=null,column=null,severity='error',message=''}){
- const name=normalizePath(path,raw.root),clean=String(message||'').replace(/\s+/g,' ').trim().slice(0,500)
+function addDiag(output,cache,root,{tool,code='',path=null,line=null,column=null,severity='error',message=''}){
+ const name=normalizePath(path,root),clean=String(message||'').replace(/\s+/g,' ').trim().slice(0,500)
  if(!clean)return
  const diag={tool,severity,code:String(code||'').slice(0,32),path:name,line:Number.isInteger(line)?line:null,column:Number.isInteger(column)?column:null,message:clean}
  const key=[diag.tool,diag.path,diag.line,diag.column,diag.code,diag.message].join('|')
@@ -47,7 +47,7 @@ export function parseCodeDiagnostics(input={}){
  const data=truncated?src.slice(-MAX_LOG_BYTES):src
  const lines=data.split(/\r?\n/)
  const limit=cap(input.limit,80,1,200),result=[],seen=new Set()
- result.root=typeof input.root==='string'&&input.root?resolve(input.root):null
+ const root=typeof input.root==='string'&&input.root?resolve(input.root):null
  const tools=new Set(),max=Math.min(lines.length,MAX_LINES)
  let tool='unknown',gradleTask=null
  const summary=[]
@@ -55,7 +55,7 @@ export function parseCodeDiagnostics(input={}){
   const raw=lines[i],text=raw.trim()
   let m
   if((m=raw.match(/^(?:e|w):\s+(?:file:\/\/\/)?(.+?\.(?:kt|kts)):(\d+):(\d+):\s*(.+)$/i))){
-   tool='kotlin';addDiag(result,seen,result,{tool,path:m[1],line:+m[2],column:+m[3],severity:severityOf(text),message:m[4]});continue
+   tool='kotlin';addDiag(result,seen,root,{tool,path:m[1],line:+m[2],column:+m[3],severity:severityOf(text),message:m[4]});continue
   }
   if((m=raw.match(/^(.+?\.java):(\d+):\s*(error|warning):\s*(.+)$/i))){
    tool='javac';addDiag(result,seen,result,{tool,path:m[1],line:+m[2],severity:m[3].toLowerCase(),message:m[4]});continue
