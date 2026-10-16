@@ -620,4 +620,11 @@ must "$MCM" 'fun builtInExtensionEnabled('
 must "$MCM" 'DSH_MOBILE_COORDINATION_ENABLED'
 must "$MTB" 'const visibleTools='
 DSH_MOBILE_COORDINATION_ENABLED=0 node --check "$MTB"
+# Coding Engine opt-in, bundled module and standalone regression checks.
+must "$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt" 'fun codingEnabled(): Boolean'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt" 'DSH_MOBILE_CODING_ENABLED'
+must "$MA" 'Coding Engine 2.0 · 编码增强（实验）'
+must "$MTB" "case 'code_edit_transaction': return codeEditTransaction(a)"
+must "$BT" 'dsh-coding-engine.mjs'
+node "$ROOT/scripts/dsh-coding-engine.mjs" --self-test
 echo '[OK] remaining medium/low regression checks passed'
