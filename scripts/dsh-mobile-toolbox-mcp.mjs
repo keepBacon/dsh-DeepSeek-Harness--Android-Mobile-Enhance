@@ -34,7 +34,7 @@ const tools=[
  {name:'fs_search',description:'Search source/text with embedded ripgrep and return structured path/line/column matches. Literal, case-sensitive search is the default; regex and context are optional.',inputSchema:{type:'object',properties:{query:{type:'string'},path:{type:'string',default:'.'},glob:{type:'string'},regex:{type:'boolean',default:false},caseSensitive:{type:'boolean',default:true},showHidden:{type:'boolean',default:false},maxResults:{type:'integer',minimum:1,maximum:200,default:40},contextLines:{type:'integer',minimum:0,maximum:5,default:1}},required:['query'],additionalProperties:false}},
  {name:'fs_write',description:'Create or replace one UTF-8 text file atomically. Existing files require overwrite=true; parent creation is opt-in.',inputSchema:{type:'object',properties:{path:{type:'string'},content:{type:'string'},overwrite:{type:'boolean',default:false},createParents:{type:'boolean',default:false}},required:['path','content'],additionalProperties:false}},
  {name:'fs_patch',description:'Safely patch a text file by exact oldText -> newText replacement. Defaults to exactly one occurrence and supports dryRun.',inputSchema:{type:'object',properties:{path:{type:'string'},oldText:{type:'string'},newText:{type:'string'},expectedOccurrences:{type:'integer',minimum:1,maximum:100,default:1},dryRun:{type:'boolean',default:false}},required:['path','oldText','newText'],additionalProperties:false}},
- {name:'command_run',description:'Run one executable directly with argv (shell=false). Returns exitCode/stdout/stderr/timing. Prefer fs_patch/fs_write for file mutation; use this for builds, tests and CLI tools.',inputSchema:{type:'object',properties:{command:{type:'string'},args:{type:'array',items:{type:'string'},maxItems:128,default:[]},cwd:{type:'string'},env:{type:'object',additionalProperties:{type:'string'}},timeoutMs:{type:'integer',minimum:100,maximum:60000,default:10000},maxOutputBytes:{type:'integer',minimum:1024,maximum:1048576,default:32768}},required:['command'],additionalProperties:false}},
+ {name:'command_run',description:'Run one executable directly with argv (shell=false). Returns exitCode/stdout/stderr/timing. Prefer fs_patch/fs_write for file mutation; use this for builds, tests and CLI tools.',inputSchema:{type:'object',properties:{command:{type:'string'},args:{type:'array',items:{type:'string'},maxItems:128,default:[]},cwd:{type:'string'},env:{type:'object',additionalProperties:{type:'string'}},timeoutMs:{type:'integer',minimum:100,maximum:60000,default:10000},maxOutputBytes:{type:'integer',minimum:1024,maximum:1048576,default:32768},outputMode:{type:'string',enum:['head-tail','head','tail'],default:'head-tail'}},required:['command'],additionalProperties:false}},
  {name:'git_status',description:'Return structured Git working-tree status for a repository directory. Defaults to the MCP cwd.',inputSchema:{type:'object',properties:{repo:{type:'string',default:'.'}},additionalProperties:false}},
  {name:'git_diff',description:'Show a Git diff without color or external diff drivers. Supports staged changes, one comparison ref and an optional path.',inputSchema:{type:'object',properties:{repo:{type:'string',default:'.'},staged:{type:'boolean',default:false},ref:{type:'string'},path:{type:'string'},maxLines:{type:'integer',minimum:1,maximum:5000,default:1600}},additionalProperties:false}},
  {name:'git_log',description:'Read recent Git history as structured commits. Defaults to 20 commits from HEAD; optionally scope to ref/path.',inputSchema:{type:'object',properties:{repo:{type:'string',default:'.'},ref:{type:'string'},path:{type:'string'},limit:{type:'integer',minimum:1,maximum:100,default:20}},additionalProperties:false}},
@@ -118,6 +118,49 @@ function trimLines(s,max=800){const a=String(s).split(/\r?\n/);return{output:a.s
 function addr(v){if(v==null||v==='')return null;if(typeof v!=='string'||!/^(?:0x)?[0-9a-fA-F]+$/.test(v))throw new Error('invalid address');return '0x'+v.replace(/^0x/i,'')}
 function sanitizeEnv(extra){if(extra==null)return process.env;if(typeof extra!=='object'||Array.isArray(extra))throw new Error('env must be an object');const env={...process.env};for(const [k,v] of Object.entries(extra)){if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k))throw new Error('invalid env key: '+k);env[k]=text(v,'env.'+k,65536)}return env}
 
+/**
+ * Bounded process capture. Hold at most two output budgets: complete initial
+ * output plus a rolling tail. This preserves end-of-build diagnostics without
+ * an unbounded allocation or repeated Buffer.concat for every data event.
+ */
+function captureOutput(maxBytes, mode='head'){
+ if(!['head','tail','head-tail'].includes(mode))throw new Error('unsupported outputMode')
+ const initial=[],recent=[]
+ let initialSize=0,recentSize=0,totalBytes=0
+ return{
+  push(chunk){
+   const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk)
+   totalBytes+=bytes.length
+   if(initialSize<maxBytes){
+    const part=bytes.subarray(0,maxBytes-initialSize)
+    initial.push(part);initialSize+=part.length
+   }
+   if(mode!=='head'){
+    recent.push(bytes);recentSize+=bytes.length
+    while(recentSize>maxBytes){
+     const oldest=recent[0],excess=recentSize-maxBytes
+     if(oldest.length<=excess){recent.shift();recentSize-=oldest.length}
+     else{recent[0]=oldest.subarray(excess);recentSize-=excess}
+    }
+   }
+  },
+  finish(){
+   const truncated=totalBytes>maxBytes
+   const head=Buffer.concat(initial,initialSize)
+   if(!truncated || mode==='head')return{text:head.toString('utf8'),bytes:totalBytes,truncated}
+   const tail=Buffer.concat(recent,recentSize)
+   if(mode==='tail')return{text:tail.toString('utf8'),bytes:totalBytes,truncated}
+   const headSize=Math.max(1,Math.floor(maxBytes*0.4)),tailSize=maxBytes-headSize
+   const omitted=Math.max(0,totalBytes-maxBytes)
+   return{
+    text:head.subarray(0,headSize).toString('utf8')+
+      '\n[... '+omitted+' bytes omitted ...]\n'+
+      tail.subarray(tail.length-tailSize).toString('utf8'),
+    bytes:totalBytes,truncated
+   }
+  }
+ }
+}
 async function runProcess(command,args=[],opts={}){
  const bin=text(command,'command',4096)
  if(bin.includes('\0'))throw new Error('command contains NUL')
@@ -125,33 +168,27 @@ async function runProcess(command,args=[],opts={}){
  const cwd=opts.cwd? (await checkedDir(opts.cwd)).path : process.cwd()
  const timeoutMs=int(opts.timeoutMs,10000,100,60000)
  const maxOutput=int(opts.maxOutputBytes,32768,1024,MAX_COMMAND_OUTPUT)
- const maxError=Math.min(maxOutput,16384)
+ const mode=opts.outputMode??'head'
+ const out=captureOutput(maxOutput,mode),err=captureOutput(Math.min(maxOutput,16384),'head-tail')
  const env=opts.env||process.env
  return await new Promise(resolvePromise=>{
   const started=Date.now()
   let child
   try{child=spawn(bin,argv,{cwd,env,shell:false,stdio:['ignore','pipe','pipe']})}
   catch(error){resolvePromise({exitCode:null,signal:null,stdout:'',stderr:String(error),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
-  const out=[],err=[]
-  let outBytes=0,errBytes=0,truncated=false,timedOut=false,spawnError=null
-  // Keep chunks rather than repeatedly copying an ever-growing Buffer.
-  // Reserve stderr separately so a verbose command cannot hide an error.
-  const capture=(chunks,used,limit,chunk)=>{
-   const data=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk),room=Math.max(0,limit-used)
-   if(data.length>room)truncated=true
-   if(room>0){const kept=data.subarray(0,room);chunks.push(kept);return used+kept.length}
-   return used
-  }
-  child.stdout?.on('data',chunk=>{outBytes=capture(out,outBytes,maxOutput,chunk)})
-  child.stderr?.on('data',chunk=>{errBytes=capture(err,errBytes,maxError,chunk)})
+  let timedOut=false,spawnError=null
+  child.stdout?.on('data',chunk=>out.push(chunk))
+  child.stderr?.on('data',chunk=>err.push(chunk))
   child.on('error',error=>{spawnError=error})
   const timer=setTimeout(()=>{timedOut=true;try{child.kill('SIGKILL')}catch{}},timeoutMs)
   child.on('close',(code,signal)=>{
    clearTimeout(timer)
+   const stdout=out.finish(),stderr=err.finish()
    resolvePromise({exitCode:typeof code==='number'?code:null,signal:signal||null,
-    stdout:Buffer.concat(out,outBytes).toString('utf8'),
-    stderr:(spawnError?String(spawnError)+'\n':'')+Buffer.concat(err,errBytes).toString('utf8'),
-    timedOut,truncated,durationMs:Date.now()-started})
+    stdout:stdout.text,stderr:(spawnError?String(spawnError)+'\n':'')+stderr.text,
+    stdoutBytes:stdout.bytes,stderrBytes:stderr.bytes,
+    stdoutTruncated:stdout.truncated,stderrTruncated:stderr.truncated,
+    timedOut,truncated:stdout.truncated||stderr.truncated,durationMs:Date.now()-started})
   })
  })
 }
@@ -425,7 +462,7 @@ async function call(name,a={}){
    const f=await readTextFile(a.path),oldText=text(a.oldText,'oldText'),newText=text(a.newText,'newText'),expected=int(a.expectedOccurrences,1,1,100),found=countOccurrences(f.text,oldText);if(found!==expected)throw new Error('expected '+expected+' occurrence(s), found '+found);const next=f.text.split(oldText).join(newText);if(Buffer.byteLength(next)>MAX_READ_FILE)throw new Error('patched file exceeds 16 MiB');const result={path:f.path,occurrences:found,beforeSha256:sha256(f.text),afterSha256:sha256(next),beforeBytes:Buffer.byteLength(f.text),afterBytes:Buffer.byteLength(next)};if(bool(a.dryRun,false))return{...result,dryRun:true};await atomicWrite(f.path,next,{overwrite:true});return{...result,dryRun:false}
   }
   case 'command_run': {
-   const cwd=a.cwd? (await checkedDir(a.cwd)).path : process.cwd();const args=Array.isArray(a.args)?a.args:[];return await runProcess(a.command,args,{cwd,env:sanitizeEnv(a.env),timeoutMs:int(a.timeoutMs,10000,100,60000),maxOutputBytes:int(a.maxOutputBytes,32768,1024,MAX_COMMAND_OUTPUT)})
+   const cwd=a.cwd? (await checkedDir(a.cwd)).path : process.cwd();const args=Array.isArray(a.args)?a.args:[];return await runProcess(a.command,args,{cwd,env:sanitizeEnv(a.env),timeoutMs:int(a.timeoutMs,10000,100,60000),maxOutputBytes:int(a.maxOutputBytes,32768,1024,MAX_COMMAND_OUTPUT),outputMode:a.outputMode??'head-tail'})
   }
   case 'git_status': {
    const repo=(await checkedDir(a.repo||'.')).path,r=await runProcess('git',['-C',repo,'status','--porcelain=v1','-b','--untracked-files=normal'],{timeoutMs:10000,maxOutputBytes:MAX_OUTPUT});if(r.exitCode!==0)throw new Error('git status failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));const lines=r.stdout.split(/\r?\n/).filter(Boolean),branch=lines[0]?.startsWith('## ')?lines.shift().slice(3):null;return{repo,branch,entries:lines.map(line=>({status:line.slice(0,2),path:line.slice(3)})),clean:lines.length===0}
@@ -652,7 +689,13 @@ async function selfTest(){
  const lastPage=await call('tool_registry_list',{offset:tools.length-1,limit:10})
  if(lastPage.tools.length!==1||lastPage.nextOffset!==null)throw new Error('tool registry final page failed')
  const large=await call('command_run',{command:'node',args:['-e','process.stdout.write("x".repeat(200000));process.stderr.write("DSH_STDERR_OK")'],maxOutputBytes:4096,timeoutMs:5000})
- if(large.exitCode!==0||!large.truncated||large.stdout.length!==4096||!large.stderr.includes('DSH_STDERR_OK'))throw new Error('bounded command output regression failed')
+ if(large.exitCode!==0||!large.truncated||!large.stdout.includes('bytes omitted')||!large.stderr.includes('DSH_STDERR_OK')||large.stdoutBytes!==200000)throw new Error('bounded command output regression failed')
+ const edges=await call('command_run',{command:'node',args:['-e','process.stdout.write("HEAD_MARK"+("a".repeat(16000))+"TAIL_MARK")'],maxOutputBytes:4096,timeoutMs:5000})
+ if(!edges.truncated||!edges.stdout.startsWith('HEAD_MARK')||!edges.stdout.endsWith('TAIL_MARK'))throw new Error('head-tail output regression failed')
+ const tail=await call('command_run',{command:'node',args:['-e','process.stdout.write("a".repeat(16000)+"TAIL_MARK")'],maxOutputBytes:4096,outputMode:'tail',timeoutMs:5000})
+ if(!tail.stdout.endsWith('TAIL_MARK')||tail.stdout.includes('bytes omitted'))throw new Error('tail output regression failed')
+ const head=await call('command_run',{command:'node',args:['-e','process.stdout.write("HEAD_MARK"+("a".repeat(16000)))'],maxOutputBytes:4096,outputMode:'head',timeoutMs:5000})
+ if(!head.stdout.startsWith('HEAD_MARK')||head.stdoutBytes!==16009)throw new Error('head output regression failed')
  const adb=tools.find(t=>t.name==='adb_devices');if(adb?.inputSchema?.required?.length)throw new Error('adb_devices unexpectedly requires arguments')
  const names=new Set(tools.map(x=>x.name));for(const name of ['fs_read','fs_list','fs_search','fs_write','fs_patch','command_run','git_status','git_diff','git_log','http_request','android_logcat','apk_inspect','process_list','process_info','process_maps','process_threads','module_list','memory_regions','memory_read','memory_search','syscall_trace','frida_processes','frida_attach','frida_spawn','frida_script','frida_trace','debug_session_start','debug_attach','debug_breakpoint_set','debug_continue','debug_registers','debug_backtrace','debug_memory_read','debug_session_close','binary_functions','binary_xrefs','jni_map_java_native','no_root_capabilities','self_runtime_snapshot','runtime_snapshot','runtime_diff','process_fds','process_network','child_strace','adb_devices','adb_pair','adb_connect','adb_package_info','adb_process_info','adb_logcat','adb_jdwp_list','adb_pull_apk','reverse_capabilities','package_process_info','native_backtrace','frida_detach','symbol_resolve','address_rebase','il2cpp_detect','il2cpp_metadata_info','il2cpp_find_class','il2cpp_find_method'])if(!names.has(name))throw new Error('missing tool '+name)
  if((await call('protocol_decode',{data:'414243',encoding:'hex'})).utf8!=='ABC')throw new Error('decode self-test failed')
