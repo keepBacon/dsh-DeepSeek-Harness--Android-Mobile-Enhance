@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createCoordinator } from './dsh-subagent-coordination.mjs'
 import { codebaseMap, codeSymbols, codeImpact, codeEditTransaction } from './dsh-coding-engine.mjs'
+import { codeIndexRefresh, codeIndexQuery } from './dsh-code-index.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -25,10 +26,12 @@ const fileSchema={type:'object',properties:{path:{type:'string',description:'Abs
 const coordinator=createCoordinator()
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
 const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED!=='0'
-const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction'])
+const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query'])
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name)))
 const tools=[
+ {name:'code_index_refresh',description:'Persist and incrementally refresh project declaration and import index.',inputSchema:{type:'object',properties:{root:{type:'string'},force:{type:'boolean'}},additionalProperties:false}},
+ {name:'code_index_query',description:'Query cached heuristic symbols or import declarations in project.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},query:{type:'string'},mode:{type:'string',enum:['symbols','imports']},limit:{type:'integer',minimum:1,maximum:200}},additionalProperties:false}},
  {name:'codebase_map',description:'Bounded project map by source-language and directory.',inputSchema:{type:'object',properties:{root:{type:'string'}},additionalProperties:false}},
  {name:'code_symbols',description:'Find approximated source declaration symbols (heuristic not semantic LSP).',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},query:{type:'string'},limit:{type:'integer',minimum:1,maximum:200}},additionalProperties:false}},
  {name:'code_impact',description:'Find potential textual references to edited source modules.',inputSchema:{type:'object',properties:{root:{type:'string'},paths:{type:'array',items:{type:'string'}},limit:{type:'integer',minimum:1,maximum:100}},required:['paths'],additionalProperties:false}},
@@ -353,6 +356,8 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'code_index_refresh': return codeIndexRefresh(a)
+  case 'code_index_query': return codeIndexQuery(a)
   case 'codebase_map': return codebaseMap(a)
   case 'code_symbols': return codeSymbols(a)
   case 'code_impact': return codeImpact(a)
