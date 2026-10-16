@@ -631,4 +631,5 @@ node "$ROOT/scripts/dsh-code-index.mjs" --self-test
 node "$ROOT/scripts/dsh-code-transactions.mjs" --self-test
 node "$ROOT/scripts/dsh-code-diagnostics.mjs" --self-test
 node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
+node "$ROOT/scripts/dsh-code-task-link.mjs" --self-test
 echo '[OK] remaining medium/low regression checks passed'
