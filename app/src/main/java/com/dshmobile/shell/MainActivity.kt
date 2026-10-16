@@ -4069,6 +4069,7 @@ class MainActivity : ComponentActivity() {
     addToggle("basic_tools", "basic_tools · 基础工具", "压缩包、数据处理、系统诊断、基础网络和构建工具；与 mobile_tools 独立。")
     addToggle("coordination", "子代理协同任务板", "仅控制 mobile_tools 内 coordination_* 工具；原生 Subagent / Workflow 不受影响。")
     addToggle("coding", "Coding Engine 2.0 · 编码增强（实验）", "项目地图、符号查找、文本影响分析及 SHA-256 校验的多文件修改；默认关闭，需主动启用。")
+    addToggle("tool_metrics", "工具耗时诊断（实验）", "默认关闭。仅在当前工具进程内统计名称、耗时和调用结果；重启后清空，不记录内容。")
     root.addView(Button(this).apply {
       text = "查看配置与运行环境"
       setOnClickListener {
@@ -4078,6 +4079,7 @@ class MainActivity : ComponentActivity() {
           append("\nbasic_tools: ").append(engineManager.builtInMcpExtensionEnabled("basic_tools"))
           append("\ncoordination: ").append(engineManager.builtInMcpExtensionEnabled("coordination"))
           append("\ncoding: ").append(engineManager.builtInMcpExtensionEnabled("coding"))
+          append("\ntool_metrics: ").append(engineManager.builtInMcpExtensionEnabled("tool_metrics"))
           append("\nShizuku: ").append(ShizukuSupport.status(this@MainActivity))
           engineManager.mcpConfigurationIssue()?.let { append("\n配置异常: ").append(it) }
         }
