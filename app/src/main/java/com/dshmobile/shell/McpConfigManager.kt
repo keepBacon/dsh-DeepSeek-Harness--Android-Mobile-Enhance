@@ -39,12 +39,14 @@ class McpConfigManager(
   }
   fun coordinationEnabled(): Boolean = readRootSafe().optBoolean("coordinationEnabled", true)
   fun codingEnabled(): Boolean = readRootSafe().optBoolean("codingEnabled", false)
+  fun toolMetricsEnabled(): Boolean = readRootSafe().optBoolean("toolMetricsEnabled", false)
 
   fun builtInExtensionEnabled(id: String): Boolean = when (id) {
     "mobile_tools" -> toolboxEnabled()
     "basic_tools" -> basicToolboxEnabled()
     "coordination" -> coordinationEnabled()
     "coding" -> codingEnabled()
+    "tool_metrics" -> toolMetricsEnabled()
     else -> throw IllegalArgumentException("未知 MCP 扩展：$id")
   }
 
@@ -55,6 +57,7 @@ class McpConfigManager(
       "basic_tools" -> root.put("basicToolsEnabled", enabled)
       "coordination" -> root.put("coordinationEnabled", enabled)
       "coding" -> root.put("codingEnabled", enabled)
+      "tool_metrics" -> root.put("toolMetricsEnabled", enabled)
       else -> throw IllegalArgumentException("未知 MCP 扩展：$id")
     }
     writeRoot(root)
@@ -233,6 +236,7 @@ class McpConfigManager(
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      DSH_MOBILE_COORDINATION_ENABLED: ").append(JSONObject.quote(if (coordinationEnabled()) "1" else "0")).append('\n')
     append("      DSH_MOBILE_CODING_ENABLED: ").append(JSONObject.quote(if (codingEnabled()) "1" else "0")).append('\n')
+    append("      DSH_MOBILE_TOOL_METRICS_ENABLED: ").append(JSONObject.quote(if (toolMetricsEnabled()) "1" else "0")).append('\n')
     append("      LD_LIBRARY_PATH: ").append(JSONObject.quote(File(usrDir, "lib").absolutePath)).append('\n')
     append("      PATH: ").append(JSONObject.quote(File(usrDir, "libexec/dsh/wrappers").absolutePath + ":" + File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
     append("      HOME: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
