@@ -1577,6 +1577,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$code_index" ] || { echo '[DSH] Missing Coding Index module'; exit 8; }
   cp "$code_index" "$(dirname "$dest")/dsh-code-index.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-code-index.mjs"
+  local transactions="$ROOT/scripts/dsh-code-transactions.mjs"
+  [ -f "$transactions" ] || { echo '[DSH] Missing Coding Transactions module'; exit 8; }
+  cp "$transactions" "$(dirname "$dest")/dsh-code-transactions.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-transactions.mjs"
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-transactions.mjs" --self-test || { echo '[DSH] Coding Transactions self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-index.mjs" --self-test || { echo '[DSH] Coding Index self-test failed.'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-coding-engine.mjs" --self-test || { echo '[DSH] Coding Engine self-test failed.'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-subagent-coordination.mjs" --self-test || { echo '[DSH] Subagent coordinator self-test failed.'; exit 8; }
