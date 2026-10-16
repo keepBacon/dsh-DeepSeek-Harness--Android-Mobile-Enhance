@@ -1585,6 +1585,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$diagnostics" ] || { echo '[DSH] Missing Coding Diagnostics module'; exit 8; }
   cp "$diagnostics" "$(dirname "$dest")/dsh-code-diagnostics.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-code-diagnostics.mjs"
+  local verifier="$ROOT/scripts/dsh-code-verify.mjs"
+  [ -f "$verifier" ] || { echo '[DSH] Missing Coding Verification module'; exit 8; }
+  cp "$verifier" "$(dirname "$dest")/dsh-code-verify.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-verify.mjs"
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-verify.mjs" --self-test || { echo '[DSH] Coding Verification self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-diagnostics.mjs" --self-test || { echo '[DSH] Coding Diagnostics self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-transactions.mjs" --self-test || { echo '[DSH] Coding Transactions self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-index.mjs" --self-test || { echo '[DSH] Coding Index self-test failed.'; exit 8; }
