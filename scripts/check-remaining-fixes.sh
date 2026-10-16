@@ -608,4 +608,6 @@ must "$ROOT/scripts/android-runtime-patch.mjs" '@deepseek-ai/cordis-plugin-loade
 bash "$ROOT/scripts/check-duplicate-loader-entry-fix.sh"
 
 
+[ -f "$ROOT/scripts/dsh-subagent-coordination.mjs" ] || { echo '[FAIL] Missing subagent coordinator'; exit 1; }
+node "$ROOT/scripts/dsh-subagent-coordination.mjs" --self-test
 echo '[OK] remaining medium/low regression checks passed'
