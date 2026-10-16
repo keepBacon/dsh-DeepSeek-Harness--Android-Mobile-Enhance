@@ -8,6 +8,7 @@ import {runCodeTransaction,codeTransactionStatus,codeTransactionRecover} from '.
 import {parseCodeDiagnostics,selectCodeTests} from './dsh-code-diagnostics.mjs'
 import {codeVerify,codeVerifyBatch,verificationRecipes} from './dsh-code-verify.mjs'
 import {createCodingTaskLink} from './dsh-code-task-link.mjs'
+import {createToolTelemetry} from './dsh-tool-metrics.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -29,12 +30,14 @@ const MAX_HTTP_CAPTURE=4*1024*1024
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
 const coordinator=createCoordinator()
 const codingTaskLink=createCodingTaskLink(coordinator)
+const telemetry=createToolTelemetry({enabled:process.env.DSH_MOBILE_TOOL_METRICS_ENABLED==='1'})
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
 const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED!=='0'
 const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes','code_task_verify'])
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name)))
 const tools=[
+ {name:'tool_latency_report',description:'Return bounded in-memory MCP tool latency measurements; opt-in via settings.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'code_task_verify',description:'Link a claimed subagent task to bounded verification, evidence and optional finalization; dryRun by default.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},revision:{type:'integer',minimum:0},root:{type:'string'},trackedPaths:{type:'array',minItems:1,maxItems:16,items:{type:'string'}},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset']}},dryRun:{type:'boolean'},finalize:{type:'boolean'},summary:{type:'string'},concurrency:{type:'integer',minimum:1,maximum:2},stopOnFailure:{type:'boolean'}},required:['boardId','taskId','agentId','revision','trackedPaths','verifications'],additionalProperties:false}},
  {name:'code_verify_batch',description:'Run 1–4 allowlisted validations with mobile-safe concurrency (1–2), dryRun by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},concurrency:{type:'integer',minimum:1,maximum:2},stopOnFailure:{type:'boolean'},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset'],additionalProperties:false}}},required:['verifications'],additionalProperties:false}},
  {name:'code_verify_recipes',description:'List explicitly supported Coding Engine validation recipes.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -370,6 +373,7 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'tool_latency_report': return telemetry.report()
   case 'code_task_verify': return codingTaskLink.verify(a)
   case 'code_verify_recipes': return {recipes:verificationRecipes()}
   case 'code_verify_batch': return codeVerifyBatch(a)
@@ -779,5 +783,5 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments??{});return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
+async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const began=Date.now();let success=false;try{const value=await call(req.params.name,req.params.arguments??{});success=true;return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}}finally{telemetry.record(req.params.name,Date.now()-began,success)}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
