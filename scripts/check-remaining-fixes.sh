@@ -634,6 +634,14 @@ node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
 node "$ROOT/scripts/dsh-code-task-link.mjs" --self-test
 node "$ROOT/scripts/dsh-tool-metrics.mjs" --self-test
 node "$ROOT/scripts/dsh-code-repair-cycle.mjs" --self-test
+# Feature switches must affect actual MCP capability discovery and invocation.
+for enabled in 0 1; do
+  for coord in 0 1; do
+    DSH_MOBILE_CODING_ENABLED="$enabled" DSH_MOBILE_COORDINATION_ENABLED="$coord" \
+      node "$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs" --feature-test
+  done
+done
+
 # Imports must never run self-tests: nested modules used to race on process.env,
 # causing nondeterministic crashes in transaction recovery checks.
 import_output="$(cd "$ROOT" && node --input-type=module -e 'await import("./scripts/dsh-code-repair-cycle.mjs")' -- --self-test 2>&1)"
