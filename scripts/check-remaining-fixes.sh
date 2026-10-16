@@ -610,4 +610,14 @@ bash "$ROOT/scripts/check-duplicate-loader-entry-fix.sh"
 
 [ -f "$ROOT/scripts/dsh-subagent-coordination.mjs" ] || { echo '[FAIL] Missing subagent coordinator'; exit 1; }
 node "$ROOT/scripts/dsh-subagent-coordination.mjs" --self-test
+# Android extension toggles: persistence, settings entry and MCP capability removal.
+must "$ROOT/app/src/main/java/com/dshmobile/shell/ShellState.kt" 'fun androidExtensionEnabled('
+must "$ROOT/app/src/main/java/com/dshmobile/shell/ShellState.kt" 'fun setAndroidExtensionEnabled('
+must "$MA" 'private fun showAndroidExtensions()'
+must "$MA" 'ANDROID_TOOLS_UI_ENABLED'
+must "$MA" '"shizuku_diagnostics"'
+must "$MCM" 'fun builtInExtensionEnabled('
+must "$MCM" 'DSH_MOBILE_COORDINATION_ENABLED'
+must "$MTB" 'const visibleTools='
+DSH_MOBILE_COORDINATION_ENABLED=0 node --check "$MTB"
 echo '[OK] remaining medium/low regression checks passed'
