@@ -192,6 +192,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "Verification runner" to "dsh-code-verify.mjs",
       "Verified subagent task link" to "dsh-code-task-link.mjs",
       "Tool latency metrics" to "dsh-tool-metrics.mjs",
+      "Bounded repair loop" to "dsh-code-repair-cycle.mjs",
     )
     append("编码增强状态：").append(if (mcpConfigManager.codingEnabled()) "已配置启用" else "已配置关闭")
     append("\n依赖 mobile_tools：").append(if (mcpConfigManager.toolboxEnabled()) "已配置启用" else "已配置关闭")
