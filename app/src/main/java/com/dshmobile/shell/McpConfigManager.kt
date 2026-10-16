@@ -31,7 +31,31 @@ class McpConfigManager(
   private val toolboxFile = File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs")
   private val basicToolboxFile = File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs")
 
+  // Older installs used one flag for both toolboxes; keep that default.
   fun toolboxEnabled(): Boolean = readRootSafe().optBoolean("toolboxEnabled", true)
+  fun basicToolboxEnabled(): Boolean {
+    val root = readRootSafe()
+    return root.optBoolean("basicToolsEnabled", root.optBoolean("toolboxEnabled", true))
+  }
+  fun coordinationEnabled(): Boolean = readRootSafe().optBoolean("coordinationEnabled", true)
+
+  fun builtInExtensionEnabled(id: String): Boolean = when (id) {
+    "mobile_tools" -> toolboxEnabled()
+    "basic_tools" -> basicToolboxEnabled()
+    "coordination" -> coordinationEnabled()
+    else -> throw IllegalArgumentException("未知 MCP 扩展：$id")
+  }
+
+  @Synchronized fun setBuiltInExtensionEnabled(id: String, enabled: Boolean) {
+    val root = readRootStrictForMutation()
+    when (id) {
+      "mobile_tools" -> root.put("toolboxEnabled", enabled)
+      "basic_tools" -> root.put("basicToolsEnabled", enabled)
+      "coordination" -> root.put("coordinationEnabled", enabled)
+      else -> throw IllegalArgumentException("未知 MCP 扩展：$id")
+    }
+    writeRoot(root)
+  }
   fun listServers(): List<McpServerConfig> = readServers(readRootSafe())
 
   fun configurationIssue(): String? {
@@ -41,7 +65,9 @@ class McpConfigManager(
 
   @Synchronized fun setToolboxEnabled(enabled: Boolean) {
     val root = readRootStrictForMutation()
+    // Preserve the old combined toggle semantics for existing callers.
     root.put("toolboxEnabled", enabled)
+    root.put("basicToolsEnabled", enabled)
     writeRoot(root)
   }
 
@@ -84,7 +110,7 @@ class McpConfigManager(
   @Synchronized fun ensureRuntimePatch(): File {
     val rows = mutableListOf<String>()
     if (toolboxEnabled() && toolboxFile.isFile) rows += toolboxRow()
-    if (toolboxEnabled() && basicToolboxFile.isFile) rows += basicToolboxRow()
+    if (basicToolboxEnabled() && basicToolboxFile.isFile) rows += basicToolboxRow()
     listServers().filter { it.enabled }.forEach { rows += serverRow(it) }
     val text = if (rows.isEmpty()) {
       "[]\n"
@@ -104,7 +130,7 @@ class McpConfigManager(
   fun runtimeSummary(): String {
     val servers = listServers()
     val builtIn = if (toolboxEnabled() && toolboxFile.isFile) "已启用" else if (toolboxFile.isFile) "已关闭" else "未内置"
-    val basic = if (toolboxEnabled() && basicToolboxFile.isFile) " · Basic tools" else ""
+    val basic = if (basicToolboxEnabled() && basicToolboxFile.isFile) " · Basic tools 已启用" else if (basicToolboxFile.isFile) " · Basic tools 已关闭" else " · Basic tools 未内置"
     val binary = if (File(usrDir, "libexec/dsh/wrappers/readelf").exists() && File(usrDir, "libexec/dsh/wrappers/objdump").exists()) " · Binutils" else ""
     return "内置 MCP " + builtIn + basic + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary
   }
@@ -202,6 +228,7 @@ class McpConfigManager(
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
+    append("      DSH_MOBILE_COORDINATION_ENABLED: ").append(JSONObject.quote(if (coordinationEnabled()) "1" else "0")).append('\n')
     append("      LD_LIBRARY_PATH: ").append(JSONObject.quote(File(usrDir, "lib").absolutePath)).append('\n')
     append("      PATH: ").append(JSONObject.quote(File(usrDir, "libexec/dsh/wrappers").absolutePath + ":" + File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
     append("      HOME: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
