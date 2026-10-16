@@ -1597,6 +1597,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$metrics" ] || { echo '[DSH] Missing Tool Metrics module'; exit 8; }
   cp "$metrics" "$(dirname "$dest")/dsh-tool-metrics.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-tool-metrics.mjs"
+  local repair="$ROOT/scripts/dsh-code-repair-cycle.mjs"
+  [ -f "$repair" ] || { echo '[DSH] Missing Coding Repair Cycle'; exit 8; }
+  cp "$repair" "$(dirname "$dest")/dsh-code-repair-cycle.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-repair-cycle.mjs"
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-repair-cycle.mjs" --self-test || { echo '[DSH] Coding Repair self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-tool-metrics.mjs" --self-test || { echo '[DSH] Tool Metrics self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-task-link.mjs" --self-test || { echo '[DSH] Coding Task Link self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-verify.mjs" --self-test || { echo '[DSH] Coding Verification self-test failed'; exit 8; }
