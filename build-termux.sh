@@ -1565,6 +1565,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$MOBILE_MCP_TOOLBOX" ] || { echo "[DSH] Missing mobile MCP toolbox source"; exit 8; }
   mkdir -p "$(dirname "$dest")"
   cp "$MOBILE_MCP_TOOLBOX" "$dest"
+  local coordination="$ROOT/scripts/dsh-subagent-coordination.mjs"
+  [ -f "$coordination" ] || { echo '[DSH] Missing subagent coordination module'; exit 8; }
+  cp "$coordination" "$(dirname "$dest")/dsh-subagent-coordination.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-subagent-coordination.mjs"
+  "$stage/usr/bin/node" "$(dirname "$dest")/dsh-subagent-coordination.mjs" --self-test || { echo '[DSH] Subagent coordinator self-test failed.'; exit 8; }
   chmod 0755 "$dest"
   "$stage/usr/bin/node" --check "$dest" >/dev/null
   env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Mobile MCP toolbox self-test failed.'; exit 8; }
