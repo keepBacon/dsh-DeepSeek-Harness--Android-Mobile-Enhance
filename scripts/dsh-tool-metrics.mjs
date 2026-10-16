@@ -1,3 +1,5 @@
+import {resolve} from 'node:path'
+import {fileURLToPath} from 'node:url'
 /**
  * Local and bounded tool latency telemetry, disabled unless explicitly opted-in.
  * Never persists raw arguments, command output, API tokens or model messages.
@@ -47,4 +49,4 @@ async function selfTest(){
  if(JSON.stringify(r).includes('secret'))throw Error('unexpected private detail')
  process.stdout.write('[DSH] Local MCP latency metrics self-test: OK\n')
 }
-if(process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)&&process.argv.includes('--self-test'))selfTest().catch(e=>{console.error(e);process.exitCode=1})
