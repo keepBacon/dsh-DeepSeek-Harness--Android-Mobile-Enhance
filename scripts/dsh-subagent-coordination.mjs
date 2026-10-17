@@ -25,7 +25,7 @@ function checkText(s,field,max) {
  return s.trim()
 }
 function scope(value) {
- if(typeof value!=='string'||value.includes('\\')||value.includes('\0')||value.startsWith('/')||value.startsWith('~'))throw new Error('invalid writeScope')
+ if(typeof value!=='string'||Buffer.byteLength(value)>512||value.includes('\\')||value.includes('\0')||value.startsWith('/')||value.startsWith('~'))throw new Error('invalid writeScope')
  const normalized=posix.normalize(value)
  if(normalized==='.'||normalized==='..'||normalized.startsWith('../')||normalized.startsWith('/'))throw new Error('unsafe writeScope')
  return normalized.replace(/\/$/,'')
@@ -120,6 +120,7 @@ export function createCoordinator(home=process.env.HOME||process.cwd()){
    if(expired||JSON.stringify(board)!==previous){
     board.version++
     board.updatedAt=Date.now()
+    if(Buffer.byteLength(JSON.stringify(board))>MAX_BYTES)throw new Error('task board exceeds 256 KiB')
     await atomicWrite(path,board)
    }
    return result===undefined?status(board):result
@@ -132,6 +133,7 @@ export function createCoordinator(home=process.env.HOME||process.cwd()){
    const id='board-'+randomBytes(8).toString('hex'),path=await boardFile(id)
    const now=Date.now()
    const board={schema:1,id,version:1,createdAt:now,updatedAt:now,maxParallel,maxAttempts,tasks}
+   if(Buffer.byteLength(JSON.stringify(board))>MAX_BYTES)throw new Error('task board exceeds 256 KiB')
    const handle=await open(path,'wx',0o600)
    try{await handle.writeFile(JSON.stringify(board));await handle.sync()}finally{await handle.close()}
    return status(board)
@@ -212,6 +214,20 @@ async function selfTest(){
   let cycle=false
   try{await a.create({tasks:[{id:'a',title:'A',blockedBy:['b']},{id:'b',title:'B',blockedBy:['a']}]})}catch(e){cycle=/cyclic/.test(e.message)}
   if(!cycle)throw new Error('dependency cycle accepted')
+  // An oversized board must fail at creation, never become an unreadable
+  // persisted board that strands pending tasks after a process restart.
+  const huge=Array.from({length:64},(_,i)=>({
+   id:'huge'+i,title:'Oversized board regression',
+   writeScopes:Array.from({length:20},(_,j)=>'dir'+i+'_'+j+'_'+'x'.repeat(480))
+  }))
+  let oversized=false
+  try{await a.create({tasks:huge})}catch(e){oversized=/exceeds 256 KiB/.test(e.message)}
+  if(!oversized)throw new Error('oversized unreadable board was persisted')
+  let excessiveScope=false
+  try{await a.create({tasks:[{id:'long',title:'Long scope',writeScopes:['x'.repeat(513)]}]})}
+  catch(e){excessiveScope=/writeScope/.test(e.message)}
+  if(!excessiveScope)throw new Error('overlong write scope accepted')
+
   process.stdout.write('[DSH] Subagent coordination board self-test: OK\n')
  }finally{await rm(dir,{recursive:true,force:true})}
 }
