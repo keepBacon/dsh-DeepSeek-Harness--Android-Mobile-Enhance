@@ -117,9 +117,7 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     item(root,"分区设置","编辑重要性、说明、读取许可和访问范围"){editPartition(p)}
     item(root,"＋ 添加文本","长期记忆、设计准则"){editText(id,null)}
     item(root,"＋ 导入文件","使用 Android 系统文件选择器，最大 32 MiB") { pickFile(id) }
-    item(root,"特殊","凭据须使用 Keystore，不支持明文保存"){
-      message("Keystore 凭据代理将在第 3 轮开放")
-    }
+    item(root,"＋ 新建特殊数据","GitHub Token / 服务器访问凭据（Keystore 加密）"){ createSpecial(id) }
     val entries=db.listEntries(id,limit=40,offset=page*40)
     for(i in 0 until entries.length()){
       val e=entries.getJSONObject(i)
@@ -138,6 +136,29 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     AlertDialog.Builder(activity).setTitle(p.optString("title"))
       .setView(ScrollView(activity).apply{addView(root)}).setPositiveButton("返回",null).show()
   }
+  private fun createSpecial(pid:String) {
+    val root=column()
+    val title=field("标题，例如 GitHub 访问令牌")
+    val description=field("用途与权限说明",multiline=true)
+    val secret=field("凭据内容").apply {
+      inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+    }
+    root.addView(title);root.addView(description);root.addView(secret)
+    dialog("安全保存特殊数据",root) {
+      val id=java.util.UUID.randomUUID().toString().replace("-","")
+      val value=secret.text.toString()
+      SecureCredentialStore.saveDatabaseSecret(activity,id,value)
+      try {
+        db.insertReference(pid,"special",title.text.toString(),description.text.toString(),
+          "keystore:"+id,auth("entry:write:"+pid))
+      }catch(e:Throwable) {
+        SecureCredentialStore.deleteDatabaseSecret(activity,id)
+        throw e
+      }finally{secret.text.clear()}
+      partitions()
+    }
+  }
+
   private fun editText(pid:String,old:JSONObject?){
     val root=column()
     val title=field("标题",old?.optString("title")?:"")
@@ -155,7 +176,12 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     item(root,"删除","此操作不可撤销"){
       AlertDialog.Builder(activity).setTitle("删除条目？")
         .setNegativeButton("取消",null).setPositiveButton("删除"){_,_->safe{
+          val secretRef=db.specialReference(pid,e.getString("id"))
           db.deleteEntry(pid,e.getString("id"),auth("entry:delete:"+pid))
+          if(secretRef?.startsWith("keystore:")==true &&
+             secretRef !in db.allSpecialReferences()) {
+            SecureCredentialStore.deleteDatabaseSecret(activity,secretRef.removePrefix("keystore:"))
+          }
           files.pruneUnreferenced(db.allAttachmentReferences());partitions()
         }}.show()
     }
@@ -187,7 +213,11 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
           button.setOnClickListener{
             if(SystemClock.elapsedRealtime()-start<5000L)return@setOnClickListener
             safe{
+              val secretRefs=db.allSpecialReferences()
               db.formatAll(auth("database:format"))
+              for(ref in secretRefs) {
+                if(ref.startsWith("keystore:")) SecureCredentialStore.deleteDatabaseSecret(activity,ref.removePrefix("keystore:"))
+              }
               files.pruneUnreferenced(emptySet())
               second.dismiss();message("格式化完成。长期记忆分区已重置。")
             }
