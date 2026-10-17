@@ -16,6 +16,24 @@ import { resolve, join, posix } from 'node:path'
 const MAX_TASKS=64, MAX_BYTES=256*1024, MAX_LEASE=1800, MIN_LEASE=30
 const WAIT_MS=25, LOCK_WAIT_MS=3000, STALE_LOCK_MS=30000
 const pause=ms=>new Promise(done=>setTimeout(done,ms))
+async function mayReclaimLock(lock){
+ // A slow but living owner must NEVER lose its exclusive lock merely because
+ // its mtime is older than the stale threshold.
+ const info=await stat(lock)
+ if(Date.now()-info.mtimeMs<=STALE_LOCK_MS)return false
+ let owner
+ try{owner=JSON.parse(await readFile(lock,'utf8'))}catch{}
+ if(Number.isSafeInteger(owner?.pid)&&owner.pid>0){
+  try{process.kill(owner.pid,0);return false}
+  catch(error){if(error.code!=='ESRCH')return false}
+ }
+ // Recheck the inode before deleting a stale lock, avoiding a replacement race.
+ const current=await stat(lock)
+ if(info.ino!==current.ino||info.dev!==current.dev)return false
+ await rm(lock,{force:true})
+ return true
+}
+
 function checkName(s,field,max=80) {
  if(typeof s!=='string'||!s.length||s.length>max||!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(s)) throw new Error('invalid '+field)
  return s
@@ -105,10 +123,15 @@ export function createCoordinator(home=process.env.HOME||process.cwd()){
   const path=await boardFile(id),lock=path+'.lock',started=Date.now()
   let h
   while(!h){
-   try{h=await open(lock,'wx',0o600);await h.writeFile(JSON.stringify({pid:process.pid,at:Date.now()}))}
+   try{
+    h=await open(lock,'wx',0o600)
+    try{await h.writeFile(JSON.stringify({pid:process.pid,at:Date.now()}));await h.sync()}
+    catch(error){await h.close();h=null;await rm(lock,{force:true});throw error}
+   }
    catch(e){
     if(e.code!=='EEXIST')throw e
-    try{const info=await stat(lock);if(Date.now()-info.mtimeMs>STALE_LOCK_MS){await rm(lock,{force:true});continue}}catch(e2){if(e2.code!=='ENOENT')throw e2}
+    try{if(await mayReclaimLock(lock))continue}
+    catch(e2){if(e2.code!=='ENOENT')throw e2}
     if(Date.now()-started>LOCK_WAIT_MS)throw new Error('task board busy: '+id)
     await pause(WAIT_MS)
    }
