@@ -256,6 +256,53 @@ internal class DshDatabaseStore(context: Context) :
     return result
   }
 
+  /**
+   * Search the entire permitted partition, not just its first UI page.
+   * All user input is bound as SQL parameters. Results contain no external
+   * attachment paths or Keystore references, even for special records.
+   */
+  @Synchronized
+  fun searchEntries(
+    partitionId: String,
+    query: String,
+    context: AccessContext,
+    limit: Int,
+    matchPartitionMetadata: Boolean = false,
+  ): JSONArray {
+    require(limit in 1..30) { "Invalid search limit" }
+    val term = cleanText(query, "search", 480).lowercase()
+    require(term.length <= 120) { "Invalid search length" }
+    val (mode, scope, modelRead) = findPartition(partitionId)
+    require(modelRead && inScope(mode, scope, context)) { "Model read denied" }
+    val result = JSONArray()
+    readableDatabase.rawQuery(
+      """
+      SELECT id, kind, title, text_body, description
+      FROM entries
+      WHERE partition_id=?
+        AND (?=1 OR instr(lower(title), ?) > 0
+          OR instr(lower(description), ?) > 0
+          OR (kind='text' AND instr(lower(text_body), ?) > 0))
+      ORDER BY updated_at DESC, id
+      LIMIT ?
+      """.trimIndent(),
+      arrayOf(partitionId, if (matchPartitionMetadata) "1" else "0",
+        term, term, term, limit.toString()),
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        result.put(JSONObject().apply {
+          put("id", cursor.getString(0))
+          put("kind", cursor.getString(1))
+          put("title", cursor.getString(2))
+          put("text", if (cursor.getString(1) == "text")
+            cursor.getString(3)?.take(4000) else JSONObject.NULL)
+          put("description", cursor.getString(4))
+        })
+      }
+    }
+    return result
+  }
+
   @Synchronized
   fun upsertText(
     partitionId: String,
