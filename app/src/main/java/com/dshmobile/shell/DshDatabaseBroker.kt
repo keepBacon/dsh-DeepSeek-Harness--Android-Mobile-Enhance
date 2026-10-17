@@ -165,6 +165,7 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
     val latch=CountDownLatch(1)
     val accepted=AtomicBoolean(false)
     val deadline=SystemClock.elapsedRealtime()+45000L
+    val initialScope=context()
     ui.post {
       if(!alive.get()||activity.isFinishing||activity.isDestroyed){latch.countDown();return@post}
       val operation=when(action){"create"->"新增";"update"->"修改";else->"删除"}
@@ -175,7 +176,8 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
         .setNegativeButton("拒绝",null).setPositiveButton("允许本次",null).create()
       dialog.setOnShowListener {
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-          if(SystemClock.elapsedRealtime()<=deadline && alive.get() && enabled()) {
+          if(SystemClock.elapsedRealtime()<=deadline && alive.get() && enabled() &&
+              context()==initialScope && partition in readableIds()) {
             try {
               // Do not trust a model-supplied approval boolean.
               if(action=="create")store.upsertText(partition,title,body,
