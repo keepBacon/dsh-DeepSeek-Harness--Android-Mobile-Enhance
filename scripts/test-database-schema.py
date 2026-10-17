@@ -79,4 +79,26 @@ conn.execute("DELETE FROM partitions WHERE id=?", ("workspace_partition",))
 assert conn.execute("SELECT count(*) FROM entries WHERE id='child'").fetchone()[0] == 0
 assert conn.execute("SELECT count(*) FROM entries WHERE partition_id='long_term_memory'").fetchone()[0] == 3
 assert conn.execute("SELECT allow_model_read FROM partitions WHERE id='long_term_memory'").fetchone()[0] == 0
+# Regression: model search must not silently stop after the first 100 rows.
+# Probe the SQL shape found in the Kotlin implementation, not a separate search fixture.
+search_src = src.split("fun searchEntries(", 1)[1].split("fun upsertText(", 1)[0]
+assert "instr(lower(title), ?)" in search_src
+assert "instr(lower(text_body), ?)" in search_src
+assert "Model read denied" in search_src
+assert "LIMIT ?" in search_src and "external_ref" not in search_src
+for n in range(125):
+    conn.execute(
+        "INSERT INTO entries(id,partition_id,kind,title,text_body,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        (f"bulk-{n}", "long_term_memory", "text",
+         "needle-deep" if n == 124 else f"ordinary-{n}", f"data-{n}", now, now+n)
+    )
+rows = conn.execute(
+    """SELECT id FROM entries WHERE partition_id=?
+       AND (?=1 OR instr(lower(title), ?) > 0 OR instr(lower(description), ?) > 0
+            OR (kind='text' AND instr(lower(text_body), ?) > 0))
+       ORDER BY updated_at DESC,id LIMIT ?""",
+    ("long_term_memory", 0, "needle-deep", "needle-deep", "needle-deep", 30)
+).fetchall()
+assert rows == [("bulk-124",)], f"Full partition search skipped deep entry: {rows}"
+
 print("[DSH] database SQLite schema/foreign-key/access constraint tests: OK")
