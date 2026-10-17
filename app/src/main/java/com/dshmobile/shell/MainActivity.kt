@@ -651,7 +651,7 @@ class MainActivity : ComponentActivity() {
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
         onOpenDatabase = { runOnUiThread { DshDatabaseUi(this, ::pickDatabaseFile, ::exportDatabaseFile).open() } },
-        onActiveDatabaseSession = { id -> DshDatabaseBroker.activeSession(id) },
+        onActiveDatabaseScope = { id, path -> verifyAndSetDatabaseScope(id, path) },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
         onOpenSkillImporter = { runOnUiThread { skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream")) } },
         onListSkills = { skillManager.listJson() },
@@ -2240,8 +2240,15 @@ class MainActivity : ComponentActivity() {
         };
         const syncActiveWorkspace = async () => {
           const sessionId = activeSessionId();
-          try { window.androidBridge && window.androidBridge.setActiveDatabaseSession(BRIDGE_CAP,sessionId); } catch (_) {}
-          if (!sessionId || workspaceSyncRunning) return;
+          if (!sessionId) {
+            try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+            lastWorkspaceSyncKey = '';
+            return;
+          }
+          if (workspaceSyncRunning) {
+            try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+            return;
+          }
           workspaceSyncRunning = true;
           try {
             const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
@@ -2264,7 +2271,11 @@ class MainActivity : ComponentActivity() {
               ? envelope.result.value.items : [];
             const session = items.find((item) => item && item.sessionId === sessionId);
             const cwd = session && typeof session.cwd === 'string' ? session.cwd : '';
-            if (!cwd || cwd.charAt(0) !== '/') return;
+            if (!cwd || cwd.charAt(0) !== '/') {
+              try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+              return;
+            }
+            if (activeSessionId() !== sessionId) return;
             const key = sessionId + '\n' + cwd;
             if (key === lastWorkspaceSyncKey) return;
             let accepted = false;
@@ -2272,7 +2283,11 @@ class MainActivity : ComponentActivity() {
               accepted = !!(window.androidBridge
                 && window.androidBridge.setCurrentWorkspacePath(BRIDGE_CAP, cwd));
             } catch (_) {}
-            if (accepted) lastWorkspaceSyncKey = key;
+            if (accepted) {
+              const scopeOk = !!(window.androidBridge &&
+                window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,sessionId,cwd));
+              if (scopeOk) lastWorkspaceSyncKey = key;
+            }
           } catch (_) {
             // Session navigation can race the Host list update. The next
             // structural navigation/click retries without changing the root.
@@ -4954,6 +4969,32 @@ class MainActivity : ComponentActivity() {
     val file: java.io.File?,
     val parent: Boolean = false,
   )
+
+  /** Fail closed: scope identity is published only as a single validated pair. */
+  private fun verifyAndSetDatabaseScope(sessionId: String?, workspace: String?): Boolean {
+    if (sessionId == null || workspace == null) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return true
+    }
+    val validId = sessionId.length in 4..180 &&
+      sessionId.matches(Regex("[a-zA-Z0-9:_./-]+"))
+    if (!validId) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return false
+    }
+    val canonical = try {
+      java.io.File(workspace).canonicalFile
+    } catch (_: Throwable) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return false
+    }
+    val current = ShellState.lastWorkspacePath(this)
+    val valid = canonical.isDirectory && canonical.canRead() && canonical.canWrite() &&
+      current == canonical.absolutePath
+    DshDatabaseBroker.verifiedScope(if (valid) sessionId else null,
+      if (valid) canonical.absolutePath else null)
+    return valid
+  }
 
   /** Accept a DSH Session cwd only when it is an existing writable directory. */
   private fun rememberActiveWorkspacePath(path: String): Boolean {
