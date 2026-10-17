@@ -590,6 +590,7 @@ class MainActivity : ComponentActivity() {
         onOpenPluginManager = { runOnUiThread { showPluginManager() } },
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
+        onOpenDatabase = { runOnUiThread { DshDatabaseUi(this).open() } },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
         onOpenSkillImporter = { runOnUiThread { skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream")) } },
         onListSkills = { skillManager.listJson() },
@@ -2094,6 +2095,7 @@ class MainActivity : ComponentActivity() {
           if (name === 'processes') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h16M4 17h12"/><circle cx="17" cy="7" r="2"/><circle cx="7" cy="17" r="2"/></svg>';
           if (name === 'packages') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l8-4 8 4-8 4z"/><path d="M4 7v10l8 4 8-4V7M12 11v10"/></svg>';
           if (name === 'git') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v8a4 4 0 0 0 4 4h6"/><circle cx="7" cy="4" r="2"/><circle cx="17" cy="17" r="2"/><circle cx="7" cy="13" r="2"/></svg>';
+          if (name === 'database') return '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 4 18 4 18 0V5M3 12c0 4 18 4 18 0"/></svg>';
           if (name === 'network') return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
           return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h5"/></svg>';
         };
@@ -2740,6 +2742,12 @@ class MainActivity : ComponentActivity() {
               appendToolButton(tool, () => runTool(tool));
             });
 
+            appendSectionLabel('数据');
+            appendToolButton({id:'database',label:'数据库',hint:'长期记忆、文件、权限与安全数据分区'}, () => {
+              closeToolsPanel();
+              try { window.androidBridge && window.androidBridge.openDatabase(BRIDGE_CAP); }
+              catch (error) { console.warn('Database UI unavailable',error); }
+            });
             appendSectionLabel('DSH 桌面功能');
             DSH_SURFACE_DEFS.forEach((surface) => {
               appendToolButton(surface, (button) => {
