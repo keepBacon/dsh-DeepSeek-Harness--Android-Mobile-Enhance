@@ -320,6 +320,13 @@ class MainActivity : ComponentActivity() {
     root.addView(guideView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     setContentView(root)
     configureWebView()
+    try {
+      DshDatabaseBroker.attach(this)
+      DshDatabaseBroker.writeEndpoint(this)
+    } catch(error:Throwable) {
+      Log.e("DSH-Database","Database broker startup failed",error)
+      DshDatabaseBroker.deleteEndpoint(this)
+    }
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
         handleBackPressed()
@@ -350,6 +357,8 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    DshDatabaseBroker.deleteEndpoint(this)
+    DshDatabaseBroker.detach()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
     try {
