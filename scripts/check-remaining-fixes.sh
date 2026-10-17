@@ -654,4 +654,9 @@ must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'authoriz
 must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'Model read denied'
 must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'special") JSONObject.NULL'
 must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseAttachments.kt" 'authorization.check("attachment:import")'
+must "$MA" "openDatabase(BRIDGE_CAP)"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/AndroidBridge.kt" "fun openDatabase(capability: String)"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseUi.kt" "private fun confirmFormat()"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseUi.kt" "5000L"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseAttachments.kt" "fun pruneUnreferenced("
 echo '[OK] remaining medium/low regression checks passed'
