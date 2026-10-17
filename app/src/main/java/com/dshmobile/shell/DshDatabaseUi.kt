@@ -10,7 +10,7 @@ import android.widget.*
 import org.json.JSONObject
 
 /** Host-only native database manager. No arbitrary SQL crosses the WebView bridge. */
-internal class DshDatabaseUi(private val activity: Activity, private val pickFile: (String) -> Unit = {}) {
+internal class DshDatabaseUi(private val activity: Activity, private val pickFile: (String) -> Unit = {}, private val exportFile: (String,String) -> Unit = { _,_ -> }) {
   private val db by lazy { DshDatabaseStore(activity) }
   private val files by lazy { DshDatabaseAttachments(activity) }
   private val prefs by lazy { activity.getSharedPreferences("dsh-native-database",Context.MODE_PRIVATE) }
@@ -180,6 +180,11 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     val root=column()
     item(root,"查看","标题："+e.optString("title")+"\n"+if(e.optString("kind")=="text")e.optString("text")else "特殊引用隐藏"){}
     if(e.optString("kind")=="text")item(root,"编辑","修改标题和内容"){editText(pid,e)}
+    if(e.optString("kind")=="file")item(root,"导出文件","选择手机上的保存位置") {
+      val reference=e.optString("externalRef")
+      if(reference.startsWith("attachment:"))exportFile(reference,e.optString("title"))
+      else message("此附件的私有存储引用不可用。")
+    }
     item(root,"删除","此操作不可撤销"){
       AlertDialog.Builder(activity).setTitle("删除条目？")
         .setNegativeButton("取消",null).setPositiveButton("删除"){_,_->safe{
