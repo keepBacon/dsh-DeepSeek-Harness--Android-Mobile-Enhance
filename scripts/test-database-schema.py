@@ -42,6 +42,8 @@ conn.execute(
     ("s1", "long_term_memory", "special", "token", "keystore:example", now, now)
 )
 
+conn.commit()  # Preserve valid fixture rows before intentional constraint failures.
+
 def rejected(sql, values):
     try:
         with conn:
