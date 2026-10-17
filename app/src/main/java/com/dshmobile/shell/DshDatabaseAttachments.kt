@@ -100,6 +100,19 @@ internal class DshDatabaseAttachments(context: Context) {
   }
 
   @Synchronized
+  fun exportTo(
+    reference: String,
+    target: java.io.OutputStream,
+    authorization: DshDatabaseStore.WriteAuthorization,
+  ): Long {
+    authorization.check("attachment:read")
+    val file = checkRef(reference)
+    require(file.isFile && !java.nio.file.Files.isSymbolicLink(file.toPath())) { "Attachment missing" }
+    require(file.length() <= maxFileBytes) { "Attachment too large" }
+    return file.inputStream().use { it.copyTo(target, 16 * 1024) }
+  }
+
+  @Synchronized
   fun delete(
     reference: String,
     authorization: DshDatabaseStore.WriteAuthorization,
