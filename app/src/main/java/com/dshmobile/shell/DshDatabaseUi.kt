@@ -41,7 +41,7 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
   private fun message(text:String){
     AlertDialog.Builder(activity).setMessage(text).setPositiveButton("确定",null).show()
   }
-  fun open()=safe{
+  fun open(): Unit = safe{
     val root=column()
     root.addView(TextView(activity).apply{text="数据库\n模型记忆与安全数据分区";textSize=20f})
     item(root,"数据库","查看分区、数据和访问规则"){
@@ -60,7 +60,7 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     AlertDialog.Builder(activity).setTitle("数据库").setView(ScrollView(activity).apply{addView(root)})
       .setPositiveButton("完成",null).show()
   }
-  private fun partitions()=safe{
+  private fun partitions(): Unit = safe{
     val root=column();val list=db.listPartitions()
     for(i in 0 until list.length()){
       val p=list.getJSONObject(i)
@@ -112,7 +112,7 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     }
   }
 
-  private fun partition(p:JSONObject, page:Int=0)=safe{
+  private fun partition(p:JSONObject, page:Int=0): Unit = safe{
     val id=p.getString("id");val root=column()
     item(root,"分区设置","编辑重要性、说明、读取许可和访问范围"){editPartition(p)}
     item(root,"＋ 添加文本","长期记忆、设计准则"){editText(id,null)}
