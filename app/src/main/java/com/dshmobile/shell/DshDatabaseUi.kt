@@ -129,7 +129,12 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     if(!p.optBoolean("isDefault"))item(root,"删除分区","删除分区及其全部条目"){
       AlertDialog.Builder(activity).setTitle("删除此分区？").setMessage("删除后不能恢复")
         .setNegativeButton("取消",null).setPositiveButton("删除"){_,_->safe{
+          val before=db.allSpecialReferences()
           db.deletePartition(id,auth("partition:delete:"+id))
+          val remaining=db.allSpecialReferences()
+          for(ref in before-remaining) {
+            if(ref.startsWith("keystore:")) SecureCredentialStore.deleteDatabaseSecret(activity,ref.removePrefix("keystore:"))
+          }
           files.pruneUnreferenced(db.allAttachmentReferences());partitions()
         }}.show()
     }
