@@ -127,21 +127,19 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
         val matches=JSONArray()
         val partitions=store.listPartitions(scope,forModel=true)
         for(i in 0 until partitions.length()){
+          if(matches.length()>=30)break
           val partition=partitions.getJSONObject(i)
           val pid=partition.getString("id")
           val metadata=(partition.optString("title")+" "+partition.optString("description")).lowercase()
-          val entries=store.listEntries(pid,scope,forModel=true,limit=100)
+          val entries=store.searchEntries(pid,query,scope,30-matches.length(),query in metadata)
           for(j in 0 until entries.length()){
             val item=entries.getJSONObject(j)
-            val combined=(item.optString("title")+" "+item.optString("description")+" "+item.optString("text")).lowercase()
-            if(query !in combined && query !in metadata)continue
             matches.put(JSONObject().put("partitionId",pid).put("partitionTitle",partition.optString("title"))
               .put("importance",partition.optString("importance"))
               .put("id",item.getString("id")).put("kind",item.getString("kind"))
-              .put("title",item.optString("title")).put("text",item.optString("text").take(4000)))
-            if(matches.length()>=30)break
+              .put("title",item.optString("title")).put("description",item.optString("description"))
+              .put("text",item.opt("text") ?: JSONObject.NULL))
           }
-          if(matches.length()>=30)break
         }
         JSONObject().put("ok",true).put("results",matches).put("limit",30)
       }
