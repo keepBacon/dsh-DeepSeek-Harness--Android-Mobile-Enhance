@@ -398,6 +398,24 @@ internal class DshDatabaseStore(context: Context) :
     }
   }
 
+  /** Host-only aliases for clearing Keystore credentials during deletion/format. */
+  @Synchronized
+  fun allSpecialReferences(): Set<String> {
+    val refs = linkedSetOf<String>()
+    readableDatabase.rawQuery("SELECT external_ref FROM entries WHERE kind='special'",null).use { cursor ->
+      while(cursor.moveToNext())refs.add(cursor.getString(0))
+    }
+    return refs
+  }
+
+  @Synchronized
+  fun specialReference(partitionId:String,entryId:String):String? {
+    readableDatabase.rawQuery(
+      "SELECT external_ref FROM entries WHERE partition_id=? AND id=? AND kind='special'",
+      arrayOf(partitionId,entryId)
+    ).use { return if(it.moveToFirst())it.getString(0) else null }
+  }
+
   /** Host maintenance only: never expose this raw reference inventory to a model. */
   @Synchronized
   fun allAttachmentReferences(): Set<String> {
