@@ -172,6 +172,8 @@ internal class DshDatabaseStore(context: Context) :
   @Synchronized
   fun canModelWrite(partitionId: String, context: AccessContext): Boolean {
     require(context.actor == "model") { "Invalid model access context" }
+    // Global partitions still require an active, verified DSH session.
+    if(context.conversationId.isNullOrBlank() || context.workspaceId.isNullOrBlank()) return false
     val (mode, scope, _) = findPartition(partitionId)
     return inScope(mode, scope, context)
   }
