@@ -10,7 +10,7 @@ import {fileURLToPath} from 'node:url'
  * controls for actual child authentication, execution and interruption.
  */
 import { randomBytes } from 'node:crypto'
-import { open, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { open, mkdir, readFile, writeFile, rename, rm, stat } from 'node:fs/promises'
 import { resolve, join, posix } from 'node:path'
 
 const MAX_TASKS=64, MAX_BYTES=256*1024, MAX_LEASE=1800, MIN_LEASE=30
