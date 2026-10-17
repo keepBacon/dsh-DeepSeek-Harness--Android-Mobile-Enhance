@@ -116,7 +116,19 @@ export function createCoordinator(home=process.env.HOME||process.cwd()){
   try{
    const board=await load(path)
    const expired=refresh(board),previous=JSON.stringify(board)
-   const result=await fn(board)
+   // Lease expiry must be durable even when the requested update is rejected.
+   // Never persist a partially mutated callback state after an exception.
+   const refreshed=expired?JSON.parse(JSON.stringify(board)):null
+   let result
+   try{result=await fn(board)}
+   catch(error){
+    if(refreshed){
+     refreshed.version++
+     refreshed.updatedAt=Date.now()
+     await atomicWrite(path,refreshed)
+    }
+    throw error
+   }
    if(expired||JSON.stringify(board)!==previous){
     board.version++
     board.updatedAt=Date.now()
@@ -227,6 +239,23 @@ async function selfTest(){
   try{await a.create({tasks:[{id:'long',title:'Long scope',writeScopes:['x'.repeat(513)]}]})}
   catch(e){excessiveScope=/writeScope/.test(e.message)}
   if(!excessiveScope)throw new Error('overlong write scope accepted')
+  // A refused stale update must still persist the expired lease transition.
+  const expiry=await a.create({tasks:[{id:'exp',title:'Expire lease'}],maxAttempts:2})
+  const claim=await a.claim({boardId:expiry.boardId,taskId:'exp',agentId:'worker-exp',leaseSeconds:30})
+  const file=join(dir,'.dsh','mobile','coordination',expiry.boardId+'.json')
+  const data=JSON.parse(await readFile(file,'utf8'))
+  data.tasks[0].leaseUntil=Date.now()-1000
+  await atomicWrite(file,data)
+  let refused=false
+  try{await a.update({boardId:expiry.boardId,taskId:'exp',agentId:'worker-exp',
+    revision:claim.task.revision,action:'complete',summary:'invalid'})}
+  catch(e){refused=/not owned/.test(e.message)}
+  if(!refused)throw new Error('expired owner completed task')
+  const durable=JSON.parse(await readFile(file,'utf8'))
+  if(durable.tasks[0].status!=='pending'||durable.tasks[0].owner!==null||
+     durable.tasks[0].revision<=claim.task.revision)
+    throw new Error('lease expiry was not durably persisted after refused update')
+
 
   process.stdout.write('[DSH] Subagent coordination board self-test: OK\n')
  }finally{await rm(dir,{recursive:true,force:true})}
