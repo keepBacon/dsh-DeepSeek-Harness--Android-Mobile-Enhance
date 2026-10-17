@@ -624,6 +624,7 @@ class MainActivity : ComponentActivity() {
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
         onOpenDatabase = { runOnUiThread { DshDatabaseUi(this, ::pickDatabaseFile).open() } },
+        onActiveDatabaseSession = { id -> DshDatabaseBroker.activeSession(id) },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
         onOpenSkillImporter = { runOnUiThread { skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream")) } },
         onListSkills = { skillManager.listJson() },
@@ -2212,6 +2213,7 @@ class MainActivity : ComponentActivity() {
         };
         const syncActiveWorkspace = async () => {
           const sessionId = activeSessionId();
+          try { window.androidBridge && window.androidBridge.setActiveDatabaseSession(BRIDGE_CAP,sessionId); } catch (_) {}
           if (!sessionId || workspaceSyncRunning) return;
           workspaceSyncRunning = true;
           try {
