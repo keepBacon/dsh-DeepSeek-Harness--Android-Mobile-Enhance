@@ -62,6 +62,30 @@ class MainActivity : ComponentActivity() {
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val recoveryControls = mutableListOf<View>()
   private var pendingPickCallback: String? = null
+  private var pendingDatabasePartitionId: String? = null
+  private val databaseFilePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val partition = pendingDatabasePartitionId
+    pendingDatabasePartitionId = null
+    if (uri != null && partition != null) {
+      runOnUiThread {
+        try {
+          val title = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            ?.take(180) ?: "导入文件"
+          contentResolver.openInputStream(uri)?.use { source ->
+            DshDatabaseUi(this, ::pickDatabaseFile).importSelected(partition, source, title)
+          } ?: showSimpleMessage("导入失败", "无法读取所选文件")
+        } catch (error: Throwable) {
+          showSimpleMessage("数据库文件导入失败", error.message ?: "未知错误")
+        }
+      }
+    }
+  }
+  private fun pickDatabaseFile(partitionId: String) {
+    pendingDatabasePartitionId = partitionId
+    databaseFilePicker.launch(arrayOf("*/*"))
+  }
+
   private var filePathCallback: ValueCallback<Array<Uri>>? = null
   private var pendingWorkspaceImportPath: String? = null
   private var legacyDirectoryPermissionPending = false
@@ -590,7 +614,7 @@ class MainActivity : ComponentActivity() {
         onOpenPluginManager = { runOnUiThread { showPluginManager() } },
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
-        onOpenDatabase = { runOnUiThread { DshDatabaseUi(this).open() } },
+        onOpenDatabase = { runOnUiThread { DshDatabaseUi(this, ::pickDatabaseFile).open() } },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
         onOpenSkillImporter = { runOnUiThread { skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream")) } },
         onListSkills = { skillManager.listJson() },
