@@ -62,6 +62,33 @@ class MainActivity : ComponentActivity() {
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val recoveryControls = mutableListOf<View>()
   private var pendingPickCallback: String? = null
+  private var pendingDatabaseExportReference: String? = null
+  private val databaseExportPicker=registerForActivityResult(
+    ActivityResultContracts.CreateDocument("application/octet-stream")
+  ){ uri ->
+    val reference=pendingDatabaseExportReference
+    pendingDatabaseExportReference=null
+    if(uri!=null && reference!=null){
+      Thread({
+        try {
+          val output=contentResolver.openOutputStream(uri)
+            ?: throw java.io.IOException("无法打开目标文件")
+          output.use {
+            DshDatabaseAttachments(this).exportTo(reference,it,
+              DshDatabaseStore.WriteAuthorization.fromConfirmedUserAction("attachment:read"))
+          }
+          runOnUiThread{showSimpleMessage("数据库文件已导出","文件已保存到选定位置")}
+        }catch(error:Throwable){
+          runOnUiThread{showSimpleMessage("数据库文件导出失败",error.message ?: "未知错误")}
+        }
+      },"dsh-database-export").start()
+    }
+  }
+  private fun exportDatabaseFile(reference:String,name:String){
+    pendingDatabaseExportReference=reference
+    databaseExportPicker.launch(name.take(120).ifBlank{"database-file"})
+  }
+
   private var pendingDatabasePartitionId: String? = null
   private val databaseFilePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     val partition = pendingDatabasePartitionId
@@ -623,7 +650,7 @@ class MainActivity : ComponentActivity() {
         onOpenPluginManager = { runOnUiThread { showPluginManager() } },
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
-        onOpenDatabase = { runOnUiThread { DshDatabaseUi(this, ::pickDatabaseFile).open() } },
+        onOpenDatabase = { runOnUiThread { DshDatabaseUi(this, ::pickDatabaseFile, ::exportDatabaseFile).open() } },
         onActiveDatabaseSession = { id -> DshDatabaseBroker.activeSession(id) },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
         onOpenSkillImporter = { runOnUiThread { skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream")) } },
