@@ -10,7 +10,7 @@ import android.widget.*
 import org.json.JSONObject
 
 /** Host-only native database manager. No arbitrary SQL crosses the WebView bridge. */
-internal class DshDatabaseUi(private val activity: Activity) {
+internal class DshDatabaseUi(private val activity: Activity, private val pickFile: (String) -> Unit = {}) {
   private val db by lazy { DshDatabaseStore(activity) }
   private val files by lazy { DshDatabaseAttachments(activity) }
   private val prefs by lazy { activity.getSharedPreferences("dsh-native-database",Context.MODE_PRIVATE) }
@@ -101,13 +101,22 @@ internal class DshDatabaseUi(private val activity: Activity) {
       partitions()
     }
   }
+  fun importSelected(partitionId: String, source: java.io.InputStream, title: String) = safe {
+    val imported=files.importFile(source,auth("attachment:import"))
+    try {
+      db.insertReference(partitionId,"file",title,"已导入的应用私有附件",imported.reference,auth("entry:write:"+partitionId))
+      message("附件已保存："+title)
+    } catch(e:Throwable) {
+      files.pruneUnreferenced(db.allAttachmentReferences())
+      throw e
+    }
+  }
+
   private fun partition(p:JSONObject)=safe{
     val id=p.getString("id");val root=column()
     item(root,"分区设置","编辑重要性、说明、读取许可和访问范围"){editPartition(p)}
     item(root,"＋ 添加文本","长期记忆、设计准则"){editText(id,null)}
-    item(root,"文件","私有附件存储已就绪，文件选择器尚待集成"){
-      message("文件数据将在完成系统文件选择和安全登记后开放")
-    }
+    item(root,"＋ 导入文件","使用 Android 系统文件选择器，最大 32 MiB") { pickFile(id) }
     item(root,"特殊","凭据须使用 Keystore，不支持明文保存"){
       message("Keystore 凭据代理将在第 3 轮开放")
     }
