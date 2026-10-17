@@ -154,7 +154,7 @@ object SecureCredentialStore {
 
   fun saveDatabaseSecret(context: Context, id: String, secret: String) {
     require(secret.isNotBlank() && secret.length <= 16 * 1024 &&
-      !secret.contains('\\u0000')) { "特殊数据无效" }
+      secret.none { it.code == 0 }) { "特殊数据无效" }
     check(prefs(context).edit().putString(databaseSecretKey(id), encrypt(secret)).commit()) {
       "密钥持久化失败"
     }
