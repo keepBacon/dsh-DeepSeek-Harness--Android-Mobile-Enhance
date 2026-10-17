@@ -262,6 +262,18 @@ async function selfTest(){
   try{await a.create({tasks:[{id:'long',title:'Long scope',writeScopes:['x'.repeat(513)]}]})}
   catch(e){excessiveScope=/writeScope/.test(e.message)}
   if(!excessiveScope)throw new Error('overlong write scope accepted')
+  // A lock held by this live process is not reclaimable merely due to age.
+  const ownLock=join(dir,'.dsh','mobile','coordination',board.boardId+'.json.lock')
+  await writeFile(ownLock,JSON.stringify({pid:process.pid,at:Date.now()-60000}))
+  const {utimes}=await import('node:fs/promises')
+  const oldTime=new Date(Date.now()-60000)
+  await utimes(ownLock,oldTime,oldTime)
+  if(await mayReclaimLock(ownLock))throw Error('stole live owner lock')
+  await rm(ownLock,{force:true})
+  // A lock whose owner has exited can be reclaimed.
+  await writeFile(ownLock,JSON.stringify({pid:999999999,at:Date.now()-60000}))
+  await utimes(ownLock,oldTime,oldTime)
+  if(!(await mayReclaimLock(ownLock)))throw Error('dead owner lock not reclaimed')
   // A refused stale update must still persist the expired lease transition.
   const expiry=await a.create({tasks:[{id:'exp',title:'Expire lease'}],maxAttempts:2})
   const claim=await a.claim({boardId:expiry.boardId,taskId:'exp',agentId:'worker-exp',leaseSeconds:30})
