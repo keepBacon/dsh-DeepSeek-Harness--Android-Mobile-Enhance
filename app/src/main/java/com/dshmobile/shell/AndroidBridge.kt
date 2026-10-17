@@ -25,6 +25,7 @@ class AndroidBridge(
   private val onOpenConfigEditor: () -> Unit = {},
   private val onOpenAppSettings: () -> Unit = {},
   private val onOpenDatabase: () -> Unit = {},
+  private val onActiveDatabaseSession: (String?) -> Unit = {},
   private val onImportWorkspaceFiles: () -> Unit = {},
   private val onOpenSkillImporter: () -> Unit = {},
   private val onListSkills: () -> String = { JSONObject().put("ok", true).put("skills", org.json.JSONArray()).toString() },
@@ -91,6 +92,11 @@ class AndroidBridge(
   @JavascriptInterface
   fun openConfigEditor(capability: String) {
     if (authorized(capability)) onOpenConfigEditor()
+  }
+
+  @JavascriptInterface
+  fun setActiveDatabaseSession(capability: String, sessionId: String?) {
+    if (authorized(capability)) onActiveDatabaseSession(sessionId)
   }
 
   @JavascriptInterface
