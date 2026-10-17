@@ -25,6 +25,7 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
   private val store=DshDatabaseStore(activity)
   private val server=ServerSocket(0,8,InetAddress.getByName("127.0.0.1"))
   private val alive=AtomicBoolean(true)
+  private val slots=java.util.concurrent.Semaphore(4)
   private val secret=ByteArray(32).also { SecureRandom().nextBytes(it) }
   val port:Int get()=server.localPort
   val token:String=Base64.encodeToString(secret,Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
@@ -41,7 +42,13 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
       while(alive.get()) {
         try {
           val client=server.accept()
-          Thread({serve(client)},"dsh-database-client").apply{isDaemon=true;start()}
+          if(!slots.tryAcquire()) {
+            client.close()
+            continue
+          }
+          Thread({
+            try{serve(client)}finally{slots.release()}
+          },"dsh-database-client").apply{isDaemon=true;start()}
         }catch(_:Throwable){}
       }
     },"dsh-database-broker").apply{isDaemon=true;start()}
