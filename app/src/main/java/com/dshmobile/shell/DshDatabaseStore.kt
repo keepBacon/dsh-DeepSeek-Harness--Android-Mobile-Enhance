@@ -164,6 +164,18 @@ internal class DshDatabaseStore(context: Context) :
       else -> false
     }
 
+  /**
+   * Model write permission is independent of model READ permission. A model
+   * may request writing to the default private long-term memory partition,
+   * but the broker must obtain a fresh, explicit user confirmation first.
+   */
+  @Synchronized
+  fun canModelWrite(partitionId: String, context: AccessContext): Boolean {
+    require(context.actor == "model") { "Invalid model access context" }
+    val (mode, scope, _) = findPartition(partitionId)
+    return inScope(mode, scope, context)
+  }
+
   private fun cleanText(value: String, label: String, maxBytes: Int): String {
     val clean = value.trim()
     require(clean.isNotEmpty() && clean.toByteArray(Charsets.UTF_8).size <= maxBytes) { "Invalid $label" }
