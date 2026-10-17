@@ -660,6 +660,7 @@ must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseUi.kt" "private fun
 must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseUi.kt" "5000L"
 must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseAttachments.kt" "fun pruneUnreferenced("
 node --check "$ROOT/scripts/dsh-database-client.mjs"
+node "$ROOT/scripts/test-database-broker.mjs"
 must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseBroker.kt" 'if(confirm(action,partition,title,body,entry))'
 must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseBroker.kt" 'store.listPartitions(scope,forModel=true)'
 must "$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt" 'DSH_DATABASE_ENDPOINT_FILE'
