@@ -46,3 +46,13 @@ bash scripts/check-remaining-fixes.sh
 ```
 
 Android GitHub CI 通过后，进一步运行 `DSH_PREFLIGHT_ONLY=1 bash build-termux.sh`，随后 `bash build-termux.sh`。GitHub Gradle Debug APK 成功不代表在 Termux 的完整构建成功。
+
+## 第 2 轮提交范围（待实机验收）
+
+- Android Tools 页新增「数据 → 数据库」入口，经随机 Capability 校验的 WebView Bridge 打开原生 `DshDatabaseUi`。网页无法传入 SQL、附件路径或数据库指令。
+- 原生页面提供「数据库」与「设置」两部分。分区可创建、编辑访问模式/重要性/描述/模型读取权限及删除；条目可创建、编辑、删除文本，按 40 条分页查看；文件通过 Android `OpenDocument` 选择，并用应用私有目录存储。
+- 数据库开关保存在应用私有 SharedPreferences，关闭后界面拒绝进入数据库；目前尚未接入模型访问，因此第三轮还需让 MCP 工具严格读取并遵守同一开关。
+- 格式化采用两次确认。第二次确认的按钮使用 `elapsedRealtime()` 距离首层确认后至少 5 秒才能点击；存储层重置默认长期记忆的访问许可并清空自定义分区与记录；之后清理无引用的附件。
+- 文件引用登记与导入采用“先导入、后登记”；登记失败会尝试清理孤立文件。清理不能被视为跨 SQLite 与文件系统的原子事务。
+- 特殊类型仍只允许引用，真实 Keystore 密钥保存与外部服务操作必须延后至第 3 轮。
+- Android 原生 UI 尚未在实机进行旋转、低内存恢复、权限失效、文件选择中断等测试。文件较大时导入仍应移出 UI 线程，以消除潜在卡顿；请勿误报已验证完成。
