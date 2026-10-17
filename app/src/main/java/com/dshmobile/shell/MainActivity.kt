@@ -67,18 +67,18 @@ class MainActivity : ComponentActivity() {
     val partition = pendingDatabasePartitionId
     pendingDatabasePartitionId = null
     if (uri != null && partition != null) {
-      runOnUiThread {
+      Thread({
         try {
-          val title = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+          val title=contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)
+            ?.use{ cursor->if(cursor.moveToFirst())cursor.getString(0) else null }
             ?.take(180) ?: "导入文件"
           contentResolver.openInputStream(uri)?.use { source ->
-            DshDatabaseUi(this, ::pickDatabaseFile).importSelected(partition, source, title)
-          } ?: showSimpleMessage("导入失败", "无法读取所选文件")
-        } catch (error: Throwable) {
-          showSimpleMessage("数据库文件导入失败", error.message ?: "未知错误")
+            DshDatabaseUi(this,::pickDatabaseFile).importSelected(partition,source,title)
+          } ?: runOnUiThread{showSimpleMessage("导入失败","无法读取所选文件")}
+        } catch(error:Throwable) {
+          runOnUiThread{showSimpleMessage("数据库文件导入失败",error.message ?: "未知错误")}
         }
-      }
+      },"dsh-database-import").start()
     }
   }
   private fun pickDatabaseFile(partitionId: String) {
