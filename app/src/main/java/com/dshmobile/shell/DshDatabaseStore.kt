@@ -304,6 +304,100 @@ internal class DshDatabaseStore(context: Context) :
     }
   }
 
+  /**
+   * File and special entries are references only. The file bytes are never
+   * held in SQLite; their import must go through DshDatabaseAttachments.
+   * A special alias is a Keystore-broker lookup key, NOT a secret itself.
+   */
+  @Synchronized
+  fun insertReference(
+    partitionId: String,
+    kind: String,
+    title: String,
+    description: String,
+    reference: String,
+    authorization: WriteAuthorization,
+  ): String {
+    authorization.check("entry:write:$partitionId")
+    require(kind in dataKinds && kind != "text")
+    require(description.toByteArray(Charsets.UTF_8).size <= MAX_DESCRIPTION)
+    require(reference.length in 8..220 && reference.matches(Regex("[a-zA-Z0-9:_./-]+")))
+    require(
+      (kind == "file" && reference.startsWith("attachment:")) ||
+      (kind == "special" && reference.startsWith("keystore:"))
+    ) { "Reference type does not match entry kind" }
+    findPartition(partitionId)
+    val id = UUID.randomUUID().toString()
+    val now = System.currentTimeMillis()
+    val db = writableDatabase
+    db.beginTransaction()
+    try {
+      db.rawQuery("SELECT count(*) FROM entries", null).use {
+        require(it.moveToFirst() && it.getInt(0) < MAX_ENTRIES) { "Entry limit reached" }
+      }
+      db.insertOrThrow("entries", null, ContentValues().apply {
+        put("id", id)
+        put("partition_id", partitionId)
+        put("kind", kind)
+        put("title", cleanText(title, "title", MAX_TITLE))
+        putNull("text_body")
+        put("external_ref", reference)
+        put("description", description)
+        put("created_at", now)
+        put("updated_at", now)
+      })
+      db.setTransactionSuccessful()
+      return id
+    } finally {
+      db.endTransaction()
+    }
+  }
+
+  @Synchronized
+  fun updatePartitionRules(
+    id: String,
+    title: String,
+    description: String,
+    importance: String,
+    accessMode: String,
+    accessId: String?,
+    allowModelRead: Boolean,
+    authorization: WriteAuthorization,
+  ) {
+    authorization.check("partition:update:$id")
+    require(importance in importanceKinds && accessMode in scopeKinds)
+    require((accessMode == "global" && accessId == null) ||
+      (accessMode != "global" && !accessId.isNullOrBlank() && accessId.length <= 120))
+    require(description.toByteArray(Charsets.UTF_8).size <= MAX_DESCRIPTION)
+    val values = ContentValues().apply {
+      put("title", cleanText(title, "title", MAX_TITLE))
+      put("description", description)
+      put("importance", importance)
+      put("access_mode", accessMode)
+      put("access_id", accessId)
+      put("allow_model_read", if (allowModelRead) 1 else 0)
+      put("updated_at", System.currentTimeMillis())
+    }
+    require(writableDatabase.update("partitions", values, "id=?", arrayOf(id)) == 1) {
+      "Partition not found"
+    }
+  }
+
+  /**
+   * Secret metadata is always redacted, even for a user facing list.
+   * Actual credentials belong in Android Keystore backed storage.
+   */
+  @Synchronized
+  fun getEntryKind(partitionId: String, entryId: String): String {
+    readableDatabase.rawQuery(
+      "SELECT kind FROM entries WHERE partition_id=? AND id=?",
+      arrayOf(partitionId, entryId),
+    ).use {
+      require(it.moveToFirst()) { "Entry not found" }
+      return it.getString(0)
+    }
+  }
+
   @Synchronized
   fun deleteEntry(partitionId: String, entryId: String, authorization: WriteAuthorization) {
     authorization.check("entry:delete:$partitionId")
