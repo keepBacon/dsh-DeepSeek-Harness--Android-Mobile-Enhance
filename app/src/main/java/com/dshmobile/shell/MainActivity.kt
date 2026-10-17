@@ -2250,6 +2250,8 @@ class MainActivity : ComponentActivity() {
             return;
           }
           workspaceSyncRunning = true;
+          // Invalidate prior grants before asynchronous session/list verification.
+          try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
           try {
             const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
             const apiUrl = new URL('api/session/list', document.baseURI).href;
