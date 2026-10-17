@@ -197,6 +197,19 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
       return DshDatabaseBroker(activity).also{running=it;it.start()}
     }
     @Synchronized fun detach(){running?.stop();running=null}
+    fun writeEndpoint(context:Context) {
+      val endpoint=endpoint() ?: return
+      val file=java.io.File(context.filesDir,"database-broker-endpoint.json")
+      val tmp=java.io.File(context.filesDir,".database-broker-endpoint.tmp")
+      tmp.writeText(JSONObject().put("port",endpoint.first).put("token",endpoint.second).toString())
+      tmp.setReadable(false,false)
+      tmp.setReadable(true,true)
+      if(!tmp.renameTo(file))throw java.io.IOException("Cannot publish database broker endpoint")
+    }
+    fun deleteEndpoint(context:Context) {
+      java.io.File(context.filesDir,"database-broker-endpoint.json").delete()
+    }
+
     fun endpoint():Pair<Int,String>?=running?.takeIf{it.alive.get()}?.let{it.port to it.token}
     fun activeSession(value:String?){running?.setCurrentSession(value)}
   }
