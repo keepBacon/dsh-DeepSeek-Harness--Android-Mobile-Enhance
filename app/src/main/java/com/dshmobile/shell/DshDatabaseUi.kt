@@ -112,7 +112,7 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     }
   }
 
-  private fun partition(p:JSONObject)=safe{
+  private fun partition(p:JSONObject, page:Int=0)=safe{
     val id=p.getString("id");val root=column()
     item(root,"分区设置","编辑重要性、说明、读取许可和访问范围"){editPartition(p)}
     item(root,"＋ 添加文本","长期记忆、设计准则"){editText(id,null)}
@@ -120,13 +120,14 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
     item(root,"特殊","凭据须使用 Keystore，不支持明文保存"){
       message("Keystore 凭据代理将在第 3 轮开放")
     }
-    val entries=db.listEntries(id,limit=100)
+    val entries=db.listEntries(id,limit=40,offset=page*40)
     for(i in 0 until entries.length()){
       val e=entries.getJSONObject(i)
       val snippet=if(e.optString("kind")=="text")e.optString("text").take(120)else e.optString("description")
       item(root,e.optString("title")+" · "+e.optString("kind"),snippet){entry(id,e)}
     }
-    if(entries.length()==100)item(root,"还有更多数据","当前展示最近 100 条"){message("分页加载将在后续版本完善")}
+    if(page>0)item(root,"← 上一页","第 "+page+" 页"){partition(p,page-1)}
+    if(entries.length()==40)item(root,"下一页 →","第 "+(page+2)+" 页"){partition(p,page+1)}
     if(!p.optBoolean("isDefault"))item(root,"删除分区","删除分区及其全部条目"){
       AlertDialog.Builder(activity).setTitle("删除此分区？").setMessage("删除后不能恢复")
         .setNegativeButton("取消",null).setPositiveButton("删除"){_,_->safe{
