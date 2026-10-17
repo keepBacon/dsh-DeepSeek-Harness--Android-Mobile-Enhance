@@ -648,4 +648,10 @@ import_output="$(cd "$ROOT" && node --input-type=module -e 'await import("./scri
 [ -z "$import_output" ] || { echo "[FAIL] Coding module import had side effects: $import_output"; exit 1; }
 must "$MCM" 'DSH_MOBILE_TOOL_METRICS_ENABLED'
 must "$MTB" "case 'code_task_verify': return codingTaskLink.verify(a)"
+# Database native foundation: execute the actual SQL schema against SQLite.
+python3 "$ROOT/scripts/test-database-schema.py"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'authorization.check("entry:write:$partitionId")'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'Model read denied'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'special") JSONObject.NULL'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseAttachments.kt" 'authorization.check("attachment:import")'
 echo '[OK] remaining medium/low regression checks passed'
