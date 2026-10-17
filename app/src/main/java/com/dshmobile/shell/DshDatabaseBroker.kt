@@ -26,6 +26,7 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
   private val server=ServerSocket(0,8,InetAddress.getByName("127.0.0.1"))
   private val alive=AtomicBoolean(true)
   private val slots=java.util.concurrent.Semaphore(4)
+  private val writeConfirmation=java.util.concurrent.Semaphore(1)
   private val secret=ByteArray(32).also { SecureRandom().nextBytes(it) }
   val port:Int get()=server.localPort
   val token:String=Base64.encodeToString(secret,Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
@@ -155,7 +156,9 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
         if(action!="delete")require(title.length in 1..180 && body.isNotBlank() &&
           body.toByteArray(Charsets.UTF_8).size<=DshDatabaseStore.MAX_TEXT_BYTES)
         if(action!="create")require(entry.length in 4..128)
-        if(confirm(action,partition,title,body,entry))JSONObject().put("ok",true).put("action",action)
+        require(writeConfirmation.tryAcquire()){"Another database confirmation is active"}
+        val approved=try{confirm(action,partition,title,body,entry)}finally{writeConfirmation.release()}
+        if(approved)JSONObject().put("ok",true).put("action",action)
           else JSONObject().put("ok",false).put("error","User refused or confirmation timed out")
       }
       else -> throw IllegalArgumentException("Unsupported database operation")
