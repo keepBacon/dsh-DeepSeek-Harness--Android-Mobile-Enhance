@@ -74,6 +74,18 @@ internal class DshDatabaseAttachments(context: Context) {
   }
 
   @Synchronized
+  fun pruneUnreferenced(usedReferences: Set<String>): Int {
+    ensureRoot()
+    var removed = 0
+    root.listFiles()?.forEach { file ->
+      if (file.isFile && !java.nio.file.Files.isSymbolicLink(file.toPath()) &&
+          file.name.matches(Regex("[0-9a-f]{32}")) &&
+          "attachment:${file.name}" !in usedReferences && file.delete()) removed++
+    }
+    return removed
+  }
+
+  @Synchronized
   fun load(
     reference: String,
     authorization: DshDatabaseStore.WriteAuthorization,
