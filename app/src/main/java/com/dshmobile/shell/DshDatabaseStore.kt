@@ -398,6 +398,16 @@ internal class DshDatabaseStore(context: Context) :
     }
   }
 
+  /** Host maintenance only: never expose this raw reference inventory to a model. */
+  @Synchronized
+  fun allAttachmentReferences(): Set<String> {
+    val refs = linkedSetOf<String>()
+    readableDatabase.rawQuery("SELECT external_ref FROM entries WHERE kind='file'", null).use { cursor ->
+      while (cursor.moveToNext()) refs.add(cursor.getString(0))
+    }
+    return refs
+  }
+
   @Synchronized
   fun deleteEntry(partitionId: String, entryId: String, authorization: WriteAuthorization) {
     authorization.check("entry:delete:$partitionId")
@@ -424,8 +434,18 @@ internal class DshDatabaseStore(context: Context) :
       db.delete("entries", null, null)
       db.delete("partitions", "is_default=0", null)
       // Keep the built-in partition but reset model read access.
-      db.execSQL("UPDATE partitions SET allow_model_read=0, updated_at=? WHERE id=?",
-        arrayOf(System.currentTimeMillis(), DEFAULT_PARTITION))
+      db.execSQL("""
+        UPDATE partitions SET
+          title='长期记忆',
+          description='长期记忆、项目规则与用户明确保存的设计准则。模型读取需要符合访问范围；模型写入必须先取得用户授权。',
+          importance='high',
+          access_mode='global',
+          access_id=NULL,
+          allow_model_read=0,
+          require_write_confirmation=1,
+          updated_at=?
+        WHERE id=?
+      """.trimIndent(), arrayOf(System.currentTimeMillis(), DEFAULT_PARTITION))
       db.setTransactionSuccessful()
     } finally {
       db.endTransaction()
