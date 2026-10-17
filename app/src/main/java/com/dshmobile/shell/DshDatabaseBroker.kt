@@ -100,6 +100,10 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
       "Cache-Control: no-store\r\nConnection: close\r\nContent-Length: "+body.size+"\r\n\r\n"
     try{client.getOutputStream().write(headers.toByteArray(Charsets.UTF_8));client.getOutputStream().write(body);client.getOutputStream().flush()}catch(_:Throwable){}
   }
+  // UI visible authorization is independent of any JSON flags sent by the model.
+  // Broker deliberately does not return credential values or run network actions.
+  private fun scopeSnapshot():DshDatabaseStore.AccessContext = context()
+
   private fun readableIds():Set<String> {
     val partitions=store.listPartitions(context(),forModel=true)
     return (0 until partitions.length()).map{partitions.getJSONObject(it).getString("id")}.toSet()
