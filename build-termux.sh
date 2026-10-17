@@ -1601,6 +1601,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$repair" ] || { echo '[DSH] Missing Coding Repair Cycle'; exit 8; }
   cp "$repair" "$(dirname "$dest")/dsh-code-repair-cycle.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-code-repair-cycle.mjs"
+  local db_client="$ROOT/scripts/dsh-database-client.mjs"
+  [ -f "$db_client" ] || { echo '[DSH] Missing database MCP client'; exit 8; }
+  cp "$db_client" "$(dirname "$dest")/dsh-database-client.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-database-client.mjs"
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-database-client.mjs" || exit 8
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-repair-cycle.mjs" --self-test || { echo '[DSH] Coding Repair self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-tool-metrics.mjs" --self-test || { echo '[DSH] Tool Metrics self-test failed'; exit 8; }
   "$stage/usr/bin/node" "$(dirname "$dest")/dsh-code-task-link.mjs" --self-test || { echo '[DSH] Coding Task Link self-test failed'; exit 8; }

@@ -50,6 +50,18 @@ async function snapshot(root,paths){
 function sameSnapshot(a,b){
  return a.root===b.root&&a.files.length===b.files.length&&a.files.every((f,i)=>f.path===b.files[i].path&&f.sha256===b.files[i].sha256)
 }
+function withinWriteScope(path,scope){
+ return path===scope||path.startsWith(scope+'/')
+}
+function checkTaskPaths(task,paths){
+ // Read-only review tasks can legitimately have no write scopes.
+ // When scopes are declared, tracked implementation files must be within them.
+ if(!task.writeScopes.length)return
+ for(const file of paths){
+  if(!task.writeScopes.some(scope=>withinWriteScope(file.path,scope)))
+   throw Error('CODING_TASK_OUT_OF_SCOPE: '+file.path)
+ }
+}
 function guardTask(board,taskId,agentId,revision){
  const task=board.tasks.find(t=>t.id===taskId)
  if(!task)throw Error('coding task not found')
@@ -64,7 +76,8 @@ export function createCodingTaskLink(coordinator=createCoordinator()){
    if(typeof boardId!=='string'||typeof taskId!=='string'||typeof agentId!=='string'||!Number.isInteger(revision))throw Error('boardId, taskId, agentId and revision required')
    const verifiedPaths=await snapshot(input.root,input.trackedPaths)
    const board=await coordinator.status(boardId)
-   guardTask(board,taskId,agentId,revision)
+   const ownedTask=guardTask(board,taskId,agentId,revision)
+   checkTaskPaths(ownedTask,verifiedPaths.files)
    const existing=await codeTransactionStatus({root:verifiedPaths.root})
    if(existing.unresolved.length)throw Error('CODING_TASK_UNRESOLVED_TRANSACTION: recover before verification')
    const dryRun=input.dryRun!==false
@@ -113,11 +126,16 @@ async function selfTest(){
   await writeFile(join(root,'ok.mjs'),'export const ok=1\n')
   await writeFile(join(root,'broken.mjs'),'export const = 2\n')
   const coordinator=createCoordinator(home),link=createCodingTaskLink(coordinator)
-  const board=await coordinator.create({tasks:[{id:'impl',title:'Implement',writeScopes:['src']},
+  const board=await coordinator.create({tasks:[{id:'impl',title:'Implement',writeScopes:['ok.mjs']},
     {id:'qa',title:'Review',blockedBy:['impl'],writeScopes:['tests']}]})
   const claimed=await coordinator.claim({boardId:board.boardId,taskId:'impl',agentId:'agent-alpha'})
   const options={boardId:board.boardId,taskId:'impl',agentId:'agent-alpha',revision:claimed.task.revision,
     root,trackedPaths:['ok.mjs'],verifications:[{preset:'node-syntax',path:'ok.mjs'}]}
+  let wrongScope=false
+  try{await link.verify({...options,trackedPaths:['broken.mjs']})}catch(e){
+   wrongScope=/CODING_TASK_OUT_OF_SCOPE/.test(e.message)
+  }
+  if(!wrongScope)throw Error('task accepted source outside assigned write scope')
   const preview=await link.verify(options)
   if(!preview.dryRun||preview.finalized)throw Error('dry-run incorrectly completed task')
   const failing=await link.verify({...options,dryRun:false,verifications:[{preset:'node-syntax',path:'broken.mjs'}],finalize:true,summary:'not yet'})

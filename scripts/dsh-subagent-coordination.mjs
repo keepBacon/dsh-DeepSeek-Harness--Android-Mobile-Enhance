@@ -10,12 +10,30 @@ import {fileURLToPath} from 'node:url'
  * controls for actual child authentication, execution and interruption.
  */
 import { randomBytes } from 'node:crypto'
-import { open, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { open, mkdir, readFile, writeFile, rename, rm, stat } from 'node:fs/promises'
 import { resolve, join, posix } from 'node:path'
 
 const MAX_TASKS=64, MAX_BYTES=256*1024, MAX_LEASE=1800, MIN_LEASE=30
 const WAIT_MS=25, LOCK_WAIT_MS=3000, STALE_LOCK_MS=30000
 const pause=ms=>new Promise(done=>setTimeout(done,ms))
+async function mayReclaimLock(lock){
+ // A slow but living owner must NEVER lose its exclusive lock merely because
+ // its mtime is older than the stale threshold.
+ const info=await stat(lock)
+ if(Date.now()-info.mtimeMs<=STALE_LOCK_MS)return false
+ let owner
+ try{owner=JSON.parse(await readFile(lock,'utf8'))}catch{}
+ if(Number.isSafeInteger(owner?.pid)&&owner.pid>0){
+  try{process.kill(owner.pid,0);return false}
+  catch(error){if(error.code!=='ESRCH')return false}
+ }
+ // Recheck the inode before deleting a stale lock, avoiding a replacement race.
+ const current=await stat(lock)
+ if(info.ino!==current.ino||info.dev!==current.dev)return false
+ await rm(lock,{force:true})
+ return true
+}
+
 function checkName(s,field,max=80) {
  if(typeof s!=='string'||!s.length||s.length>max||!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(s)) throw new Error('invalid '+field)
  return s
@@ -25,7 +43,7 @@ function checkText(s,field,max) {
  return s.trim()
 }
 function scope(value) {
- if(typeof value!=='string'||value.includes('\\')||value.includes('\0')||value.startsWith('/')||value.startsWith('~'))throw new Error('invalid writeScope')
+ if(typeof value!=='string'||Buffer.byteLength(value)>512||value.includes('\\')||value.includes('\0')||value.startsWith('/')||value.startsWith('~'))throw new Error('invalid writeScope')
  const normalized=posix.normalize(value)
  if(normalized==='.'||normalized==='..'||normalized.startsWith('../')||normalized.startsWith('/'))throw new Error('unsafe writeScope')
  return normalized.replace(/\/$/,'')
@@ -105,10 +123,15 @@ export function createCoordinator(home=process.env.HOME||process.cwd()){
   const path=await boardFile(id),lock=path+'.lock',started=Date.now()
   let h
   while(!h){
-   try{h=await open(lock,'wx',0o600);await h.writeFile(JSON.stringify({pid:process.pid,at:Date.now()}))}
+   try{
+    h=await open(lock,'wx',0o600)
+    try{await h.writeFile(JSON.stringify({pid:process.pid,at:Date.now()}));await h.sync()}
+    catch(error){await h.close();h=null;await rm(lock,{force:true});throw error}
+   }
    catch(e){
     if(e.code!=='EEXIST')throw e
-    try{const info=await stat(lock);if(Date.now()-info.mtimeMs>STALE_LOCK_MS){await rm(lock,{force:true});continue}}catch(e2){if(e2.code!=='ENOENT')throw e2}
+    try{if(await mayReclaimLock(lock))continue}
+    catch(e2){if(e2.code!=='ENOENT')throw e2}
     if(Date.now()-started>LOCK_WAIT_MS)throw new Error('task board busy: '+id)
     await pause(WAIT_MS)
    }
@@ -116,10 +139,23 @@ export function createCoordinator(home=process.env.HOME||process.cwd()){
   try{
    const board=await load(path)
    const expired=refresh(board),previous=JSON.stringify(board)
-   const result=await fn(board)
+   // Lease expiry must be durable even when the requested update is rejected.
+   // Never persist a partially mutated callback state after an exception.
+   const refreshed=expired?JSON.parse(JSON.stringify(board)):null
+   let result
+   try{result=await fn(board)}
+   catch(error){
+    if(refreshed){
+     refreshed.version++
+     refreshed.updatedAt=Date.now()
+     await atomicWrite(path,refreshed)
+    }
+    throw error
+   }
    if(expired||JSON.stringify(board)!==previous){
     board.version++
     board.updatedAt=Date.now()
+    if(Buffer.byteLength(JSON.stringify(board))>MAX_BYTES)throw new Error('task board exceeds 256 KiB')
     await atomicWrite(path,board)
    }
    return result===undefined?status(board):result
@@ -132,6 +168,7 @@ export function createCoordinator(home=process.env.HOME||process.cwd()){
    const id='board-'+randomBytes(8).toString('hex'),path=await boardFile(id)
    const now=Date.now()
    const board={schema:1,id,version:1,createdAt:now,updatedAt:now,maxParallel,maxAttempts,tasks}
+   if(Buffer.byteLength(JSON.stringify(board))>MAX_BYTES)throw new Error('task board exceeds 256 KiB')
    const handle=await open(path,'wx',0o600)
    try{await handle.writeFile(JSON.stringify(board));await handle.sync()}finally{await handle.close()}
    return status(board)
@@ -212,6 +249,49 @@ async function selfTest(){
   let cycle=false
   try{await a.create({tasks:[{id:'a',title:'A',blockedBy:['b']},{id:'b',title:'B',blockedBy:['a']}]})}catch(e){cycle=/cyclic/.test(e.message)}
   if(!cycle)throw new Error('dependency cycle accepted')
+  // An oversized board must fail at creation, never become an unreadable
+  // persisted board that strands pending tasks after a process restart.
+  const huge=Array.from({length:64},(_,i)=>({
+   id:'huge'+i,title:'Oversized board regression',
+   writeScopes:Array.from({length:20},(_,j)=>'dir'+i+'_'+j+'_'+'x'.repeat(480))
+  }))
+  let oversized=false
+  try{await a.create({tasks:huge})}catch(e){oversized=/exceeds 256 KiB/.test(e.message)}
+  if(!oversized)throw new Error('oversized unreadable board was persisted')
+  let excessiveScope=false
+  try{await a.create({tasks:[{id:'long',title:'Long scope',writeScopes:['x'.repeat(513)]}]})}
+  catch(e){excessiveScope=/writeScope/.test(e.message)}
+  if(!excessiveScope)throw new Error('overlong write scope accepted')
+  // A lock held by this live process is not reclaimable merely due to age.
+  const ownLock=join(dir,'.dsh','mobile','coordination',board.boardId+'.json.lock')
+  await writeFile(ownLock,JSON.stringify({pid:process.pid,at:Date.now()-60000}))
+  const {utimes}=await import('node:fs/promises')
+  const oldTime=new Date(Date.now()-60000)
+  await utimes(ownLock,oldTime,oldTime)
+  if(await mayReclaimLock(ownLock))throw Error('stole live owner lock')
+  await rm(ownLock,{force:true})
+  // A lock whose owner has exited can be reclaimed.
+  await writeFile(ownLock,JSON.stringify({pid:999999999,at:Date.now()-60000}))
+  await utimes(ownLock,oldTime,oldTime)
+  if(!(await mayReclaimLock(ownLock)))throw Error('dead owner lock not reclaimed')
+  // A refused stale update must still persist the expired lease transition.
+  const expiry=await a.create({tasks:[{id:'exp',title:'Expire lease'}],maxAttempts:2})
+  const claim=await a.claim({boardId:expiry.boardId,taskId:'exp',agentId:'worker-exp',leaseSeconds:30})
+  const file=join(dir,'.dsh','mobile','coordination',expiry.boardId+'.json')
+  const data=JSON.parse(await readFile(file,'utf8'))
+  data.tasks[0].leaseUntil=Date.now()-1000
+  await atomicWrite(file,data)
+  let refused=false
+  try{await a.update({boardId:expiry.boardId,taskId:'exp',agentId:'worker-exp',
+    revision:claim.task.revision,action:'complete',summary:'invalid'})}
+  catch(e){refused=/not owned/.test(e.message)}
+  if(!refused)throw new Error('expired owner completed task')
+  const durable=JSON.parse(await readFile(file,'utf8'))
+  if(durable.tasks[0].status!=='pending'||durable.tasks[0].owner!==null||
+     durable.tasks[0].revision<=claim.task.revision)
+    throw new Error('lease expiry was not durably persisted after refused update')
+
+
   process.stdout.write('[DSH] Subagent coordination board self-test: OK\n')
  }finally{await rm(dir,{recursive:true,force:true})}
 }

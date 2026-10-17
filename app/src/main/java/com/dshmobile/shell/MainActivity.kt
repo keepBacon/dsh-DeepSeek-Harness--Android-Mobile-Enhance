@@ -62,6 +62,57 @@ class MainActivity : ComponentActivity() {
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val recoveryControls = mutableListOf<View>()
   private var pendingPickCallback: String? = null
+  private var pendingDatabaseExportReference: String? = null
+  private val databaseExportPicker=registerForActivityResult(
+    ActivityResultContracts.CreateDocument("application/octet-stream")
+  ){ uri ->
+    val reference=pendingDatabaseExportReference
+    pendingDatabaseExportReference=null
+    if(uri!=null && reference!=null){
+      Thread({
+        try {
+          val output=contentResolver.openOutputStream(uri)
+            ?: throw java.io.IOException("无法打开目标文件")
+          output.use {
+            DshDatabaseAttachments(this).exportTo(reference,it,
+              DshDatabaseStore.WriteAuthorization.fromConfirmedUserAction("attachment:read"))
+          }
+          runOnUiThread{showSimpleMessage("数据库文件已导出","文件已保存到选定位置")}
+        }catch(error:Throwable){
+          runOnUiThread{showSimpleMessage("数据库文件导出失败",error.message ?: "未知错误")}
+        }
+      },"dsh-database-export").start()
+    }
+  }
+  private fun exportDatabaseFile(reference:String,name:String){
+    pendingDatabaseExportReference=reference
+    databaseExportPicker.launch(name.take(120).ifBlank{"database-file"})
+  }
+
+  private var pendingDatabasePartitionId: String? = null
+  private val databaseFilePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val partition = pendingDatabasePartitionId
+    pendingDatabasePartitionId = null
+    if (uri != null && partition != null) {
+      Thread({
+        try {
+          val title=contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)
+            ?.use{ cursor->if(cursor.moveToFirst())cursor.getString(0) else null }
+            ?.take(180) ?: "导入文件"
+          contentResolver.openInputStream(uri)?.use { source ->
+            DshDatabaseUi(this,::pickDatabaseFile).importSelected(partition,source,title)
+          } ?: runOnUiThread{showSimpleMessage("导入失败","无法读取所选文件")}
+        } catch(error:Throwable) {
+          runOnUiThread{showSimpleMessage("数据库文件导入失败",error.message ?: "未知错误")}
+        }
+      },"dsh-database-import").start()
+    }
+  }
+  private fun pickDatabaseFile(partitionId: String) {
+    pendingDatabasePartitionId = partitionId
+    databaseFilePicker.launch(arrayOf("*/*"))
+  }
+
   private var filePathCallback: ValueCallback<Array<Uri>>? = null
   private var pendingWorkspaceImportPath: String? = null
   private var legacyDirectoryPermissionPending = false
@@ -296,6 +347,13 @@ class MainActivity : ComponentActivity() {
     root.addView(guideView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     setContentView(root)
     configureWebView()
+    try {
+      DshDatabaseBroker.attach(this)
+      DshDatabaseBroker.writeEndpoint(this)
+    } catch(error:Throwable) {
+      Log.e("DSH-Database","Database broker startup failed",error)
+      DshDatabaseBroker.deleteEndpoint(this)
+    }
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
         handleBackPressed()
@@ -326,6 +384,8 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    DshDatabaseBroker.deleteEndpoint(this)
+    DshDatabaseBroker.detach()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
     try {
@@ -590,6 +650,8 @@ class MainActivity : ComponentActivity() {
         onOpenPluginManager = { runOnUiThread { showPluginManager() } },
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
+        onOpenDatabase = { runOnUiThread { DshDatabaseUi(this, ::pickDatabaseFile, ::exportDatabaseFile).open() } },
+        onActiveDatabaseScope = { id, path -> verifyAndSetDatabaseScope(id, path) },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
         onOpenSkillImporter = { runOnUiThread { skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream")) } },
         onListSkills = { skillManager.listJson() },
@@ -2094,6 +2156,7 @@ class MainActivity : ComponentActivity() {
           if (name === 'processes') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h16M4 17h12"/><circle cx="17" cy="7" r="2"/><circle cx="7" cy="17" r="2"/></svg>';
           if (name === 'packages') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l8-4 8 4-8 4z"/><path d="M4 7v10l8 4 8-4V7M12 11v10"/></svg>';
           if (name === 'git') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v8a4 4 0 0 0 4 4h6"/><circle cx="7" cy="4" r="2"/><circle cx="17" cy="17" r="2"/><circle cx="7" cy="13" r="2"/></svg>';
+          if (name === 'database') return '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 4 18 4 18 0V5M3 12c0 4 18 4 18 0"/></svg>';
           if (name === 'network') return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
           return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h5"/></svg>';
         };
@@ -2177,8 +2240,18 @@ class MainActivity : ComponentActivity() {
         };
         const syncActiveWorkspace = async () => {
           const sessionId = activeSessionId();
-          if (!sessionId || workspaceSyncRunning) return;
+          if (!sessionId) {
+            try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+            lastWorkspaceSyncKey = '';
+            return;
+          }
+          if (workspaceSyncRunning) {
+            try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+            return;
+          }
           workspaceSyncRunning = true;
+          // Invalidate prior grants before asynchronous session/list verification.
+          try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
           try {
             const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
             const apiUrl = new URL('api/session/list', document.baseURI).href;
@@ -2200,7 +2273,11 @@ class MainActivity : ComponentActivity() {
               ? envelope.result.value.items : [];
             const session = items.find((item) => item && item.sessionId === sessionId);
             const cwd = session && typeof session.cwd === 'string' ? session.cwd : '';
-            if (!cwd || cwd.charAt(0) !== '/') return;
+            if (!cwd || cwd.charAt(0) !== '/') {
+              try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+              return;
+            }
+            if (activeSessionId() !== sessionId) return;
             const key = sessionId + '\n' + cwd;
             if (key === lastWorkspaceSyncKey) return;
             let accepted = false;
@@ -2208,7 +2285,11 @@ class MainActivity : ComponentActivity() {
               accepted = !!(window.androidBridge
                 && window.androidBridge.setCurrentWorkspacePath(BRIDGE_CAP, cwd));
             } catch (_) {}
-            if (accepted) lastWorkspaceSyncKey = key;
+            if (accepted) {
+              const scopeOk = !!(window.androidBridge &&
+                window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,sessionId,cwd));
+              if (scopeOk) lastWorkspaceSyncKey = key;
+            }
           } catch (_) {
             // Session navigation can race the Host list update. The next
             // structural navigation/click retries without changing the root.
@@ -2740,6 +2821,12 @@ class MainActivity : ComponentActivity() {
               appendToolButton(tool, () => runTool(tool));
             });
 
+            appendSectionLabel('数据');
+            appendToolButton({id:'database',label:'数据库',hint:'长期记忆、文件、权限与安全数据分区'}, () => {
+              closeToolsPanel();
+              try { window.androidBridge && window.androidBridge.openDatabase(BRIDGE_CAP); }
+              catch (error) { console.warn('Database UI unavailable',error); }
+            });
             appendSectionLabel('DSH 桌面功能');
             DSH_SURFACE_DEFS.forEach((surface) => {
               appendToolButton(surface, (button) => {
@@ -4884,6 +4971,32 @@ class MainActivity : ComponentActivity() {
     val file: java.io.File?,
     val parent: Boolean = false,
   )
+
+  /** Fail closed: scope identity is published only as a single validated pair. */
+  private fun verifyAndSetDatabaseScope(sessionId: String?, workspace: String?): Boolean {
+    if (sessionId == null || workspace == null) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return true
+    }
+    val validId = sessionId.length in 4..180 &&
+      sessionId.matches(Regex("[a-zA-Z0-9:_./-]+"))
+    if (!validId) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return false
+    }
+    val canonical = try {
+      java.io.File(workspace).canonicalFile
+    } catch (_: Throwable) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return false
+    }
+    val current = ShellState.lastWorkspacePath(this)
+    val valid = canonical.isDirectory && canonical.canRead() && canonical.canWrite() &&
+      current == canonical.absolutePath
+    DshDatabaseBroker.verifiedScope(if (valid) sessionId else null,
+      if (valid) canonical.absolutePath else null)
+    return valid
+  }
 
   /** Accept a DSH Session cwd only when it is an existing writable directory. */
   private fun rememberActiveWorkspacePath(path: String): Boolean {
