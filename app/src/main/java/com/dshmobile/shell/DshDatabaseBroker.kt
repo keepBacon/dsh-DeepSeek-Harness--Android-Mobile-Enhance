@@ -30,12 +30,18 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
   private val secret=ByteArray(32).also { SecureRandom().nextBytes(it) }
   val port:Int get()=server.localPort
   val token:String=Base64.encodeToString(secret,Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-  @Volatile private var sessionId:String?=null
+  @Volatile private var activeScope:DshDatabaseStore.AccessContext?=null
+  @Volatile private var scopeGeneration:Long=0L
 
-  fun setCurrentSession(id:String?) {
-    sessionId=id?.takeIf { it.length in 4..180 && it.matches(Regex("[a-zA-Z0-9:_./-]+")) }
+  @Synchronized fun setVerifiedScope(session:String?,workspace:String?) {
+    val id=session?.takeIf { it.length in 4..180 && it.matches(Regex("[a-zA-Z0-9:_./-]+")) }
+    val path=workspace?.takeIf { it.startsWith("/") && it.isNotBlank() }
+    activeScope=if(id!=null && path!=null)DshDatabaseStore.AccessContext(id,path,actor="model") else null
+    scopeGeneration++
   }
-  private fun context()=DshDatabaseStore.AccessContext(sessionId,ShellState.lastWorkspacePath(activity),actor="model")
+  @Synchronized private fun context():DshDatabaseStore.AccessContext =
+    activeScope ?: DshDatabaseStore.AccessContext(actor="model")
+  @Synchronized private fun snapshotGeneration():Long=scopeGeneration
   private fun enabled()=activity.getSharedPreferences("dsh-native-database",Context.MODE_PRIVATE).getBoolean("enabled",true)
 
   fun start() {
@@ -113,8 +119,13 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
   private fun scopeSnapshot():DshDatabaseStore.AccessContext = context()
 
   private fun readableIds():Set<String> {
-    val partitions=store.listPartitions(context(),forModel=true)
-    return (0 until partitions.length()).map{partitions.getJSONObject(it).getString("id")}.toSet()
+    val scope=context()
+    return store.listPartitions(scope,forModel=false).let { rows ->
+      (0 until rows.length()).mapNotNull { i ->
+        val id=rows.getJSONObject(i).getString("id")
+        if(store.canModelWrite(id,scope)) id else null
+      }.toSet()
+    }
   }
   private fun handle(request:JSONObject):JSONObject {
     require(alive.get() && enabled()){"Database disabled"}
@@ -167,6 +178,7 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
     val accepted=AtomicBoolean(false)
     val deadline=SystemClock.elapsedRealtime()+45000L
     val initialScope=context()
+    val initialGeneration=snapshotGeneration()
     ui.post {
       if(!alive.get()||activity.isFinishing||activity.isDestroyed){latch.countDown();return@post}
       val operation=when(action){"create"->"新增";"update"->"修改";else->"删除"}
@@ -178,7 +190,7 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
       dialog.setOnShowListener {
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
           if(SystemClock.elapsedRealtime()<=deadline && alive.get() && enabled() &&
-              context()==initialScope && partition in readableIds()) {
+              context()==initialScope && snapshotGeneration()==initialGeneration && partition in readableIds()) {
             try {
               // Do not trust a model-supplied approval boolean.
               if(action=="create")store.upsertText(partition,title,body,
@@ -221,6 +233,6 @@ internal class DshDatabaseBroker private constructor(private val activity: Activ
     }
 
     fun endpoint():Pair<Int,String>?=running?.takeIf{it.alive.get()}?.let{it.port to it.token}
-    fun activeSession(value:String?){running?.setCurrentSession(value)}
+    fun verifiedScope(session:String?,workspace:String?){running?.setVerifiedScope(session,workspace)}
   }
 }
