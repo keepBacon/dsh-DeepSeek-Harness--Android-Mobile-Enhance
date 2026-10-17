@@ -101,15 +101,17 @@ internal class DshDatabaseUi(private val activity: Activity, private val pickFil
       partitions()
     }
   }
-  fun importSelected(partitionId: String, source: java.io.InputStream, title: String) = safe {
+  fun importSelected(partitionId: String, source: java.io.InputStream, title: String) {
+    // IO may take seconds even for <=32 MiB: caller invokes this on an IO thread.
     val imported=files.importFile(source,auth("attachment:import"))
     try {
-      db.insertReference(partitionId,"file",title,"已导入的应用私有附件",imported.reference,auth("entry:write:"+partitionId))
-      message("附件已保存："+title)
+      db.insertReference(partitionId,"file",title,"已导入的应用私有附件",
+        imported.reference,auth("entry:write:"+partitionId))
     } catch(e:Throwable) {
       files.pruneUnreferenced(db.allAttachmentReferences())
       throw e
     }
+    activity.runOnUiThread { message("附件已保存："+title) }
   }
 
   private fun partition(p:JSONObject, page:Int=0): Unit = safe{
