@@ -99,7 +99,9 @@ async function index(root,force=false){
   for(const name of listing.files){
    safeRel(name)
    const target=resolve(root,name),st=await lstat(target)
-   if(!st.isFile()||st.size>MAX_SOURCE){skipped++;continue}
+   if(!st.isFile()||st.isSymbolicLink()||st.size>MAX_SOURCE){skipped++;continue}
+   const actual=await realpath(target)
+   if(!actual.startsWith(root+'/')){skipped++;continue}
    const prev=old.get(name)
    if(prev&&prev.size===st.size&&prev.mtimeMs===st.mtimeMs&&prev.ctimeMs===st.ctimeMs){files.push(prev);reused++;continue}
    const content=await readFile(target,'utf8')
