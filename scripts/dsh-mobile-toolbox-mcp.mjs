@@ -847,7 +847,7 @@ async function codingMcpSmoke(){
  const previous=process.env.DSH_CODE_INDEX_HOME
  process.env.DSH_CODE_INDEX_HOME=resolve(root,'cache')
  try{
-  await writeFile(resolve(root,'example.py'),'def alpha():\\n    return 1\\n')
+  await writeFile(resolve(root,'example.py'),'def alpha():\n    return 1\n')
   const index=await call('code_semantic_index',{root})
   if(index.indexed!==1)throw Error('MCP semantic index dispatch failed')
   const references=await call('code_symbol_references',{root,symbol:'alpha',backend:'python-ast'})
@@ -858,7 +858,7 @@ async function codingMcpSmoke(){
    oldName:'alpha',newName:'beta',dryRun:true})
   if(!preview.dryRun||!preview.changes?.length)throw Error('MCP refactor dry-run failed')
   if(!current.equals(await readFile(resolve(root,'example.py'))))throw Error('MCP dry-run modified source')
-  process.stdout.write('[DSH] MCP coding end-to-end dispatch: OK\\n')
+  process.stdout.write('[DSH] MCP coding end-to-end dispatch: OK\n')
  }finally{
   if(previous===undefined)delete process.env.DSH_CODE_INDEX_HOME
   else process.env.DSH_CODE_INDEX_HOME=previous
