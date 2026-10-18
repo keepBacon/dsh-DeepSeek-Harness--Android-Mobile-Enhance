@@ -1578,6 +1578,8 @@ install_mobile_mcp_toolbox() {
   cp "$p0" "$(dirname "$dest")/dsh-code-p0.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-code-p0.mjs"
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-p0.mjs" || exit 8
+  [ -f "$ROOT/scripts/dsh-code-semantic-ast.py" ] || { echo '[DSH] Missing semantic AST parser'; exit 8; }
+  cp "$ROOT/scripts/dsh-code-semantic-ast.py" "$(dirname "$dest")/dsh-code-semantic-ast.py"
   for extra in dsh-code-p1.mjs dsh-agent-p1.mjs dsh-code-p1-ast.py; do
     [ -f "$ROOT/scripts/$extra" ] || { echo "[DSH] Missing P1 module $extra"; exit 8; }
     cp "$ROOT/scripts/$extra" "$(dirname "$dest")/$extra"
