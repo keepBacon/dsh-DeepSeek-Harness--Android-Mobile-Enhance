@@ -115,6 +115,7 @@ export function createMcpGovernance({list,invoke,source='',telemetry}){
   try{
    const value=await invoke(name,args);
    checkedJson(value);
+   if(tool.outputSchema)validate(value,tool.outputSchema);
    ok=true;
    return value;
   }catch(e){
