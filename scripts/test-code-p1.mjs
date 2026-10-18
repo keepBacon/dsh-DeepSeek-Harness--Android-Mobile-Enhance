@@ -19,8 +19,18 @@ try{
  const applied=await codeAstEdit({...edit,dryRun:false})
  check(applied.state==='committed'&&(await readFile(join(root,'mod.py'),'utf8')).includes('return 2'),'ast apply')
  let stale=false;try{await codeAstEdit({...edit,dryRun:false})}catch{stale=true}check(stale,'sha guard')
- const rename=await codeRefactor({root,oldName:'alpha',newName:'beta',paths:['mod.py']})
- check(rename.dryRun&&rename.requiresSemanticReview,'unsafe refactor')
+ await writeFile(join(root,'client.py'),'from mod import alpha\\nprint(alpha())\\n')
+ const renArgs={root,oldName:'alpha',newName:'beta',originPath:'mod.py',paths:['mod.py','client.py']}
+ const rename=await codeRefactor(renArgs)
+ check(rename.dryRun&&await readFile(join(root,'client.py'),'utf8')==='from mod import alpha\\nprint(alpha())\\n','refactor preview mutated')
+ const committed=await codeRefactor({...renArgs,dryRun:false})
+ check(committed.state==='committed','refactor not committed')
+ check((await readFile(join(root,'mod.py'),'utf8')).includes('def beta('),'origin rename missing')
+ check((await readFile(join(root,'client.py'),'utf8')).includes('from mod import beta'),'import rename missing')
+ let deny=false
+ await writeFile(join(root,'ambiguous.py'),'from other import alpha\\n')
+ try{await codeRefactor({...renArgs,paths:[...renArgs.paths,'ambiguous.py'],dryRun:false})}catch{deny=true}
+ check(deny,'ambiguous import accepted')
  const contracts=await codeContractCheck({root});check(contracts.readOnly,'contract')
  const conflicts=await codePatchConflict({root,changes:[{path:'mod.py',expectedSha256:sha}]})
  check(!conflicts.safeToApply,'conflict')
