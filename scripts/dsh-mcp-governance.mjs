@@ -4,7 +4,7 @@
  * This module has no privileged filesystem or process side effects.
  */
 const MAX_INPUT=256*1024,MAX_OUTPUT=2*1024*1024;
-const SAFE_PROBES=new Set(['tool_registry_list','code_verify_recipes','reverse_capabilities','no_root_capabilities','tool_latency_report','mcp_server_health','mcp_tool_search']);
+const SAFE_PROBES=new Set(['tool_registry_list','code_verify_recipes','reverse_capabilities','no_root_capabilities','tool_latency_report','mcp_server_health']);
 const isObject=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const own=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key);
 const clean=s=>String(s??'').slice(0,350).replace(/[\u0000-\u001f]/g,' ');
