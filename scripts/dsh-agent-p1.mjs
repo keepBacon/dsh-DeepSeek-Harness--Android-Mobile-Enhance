@@ -67,8 +67,11 @@ export async function agentMergeGuard(a={}){
  const b=await board().status(a.boardId),task=b.tasks.find(t=>t.id===a.taskId)
  const dependencies=task.blockedBy.every(id=>b.tasks.some(t=>t.id===id&&t.status==='completed'))
  const verified=Array.isArray(task.evidence)&&task.evidence.some(e=>typeof e==='string'&&e.startsWith('PASSED '))
- const passed=task.status==='completed'&&verified&&!review.unresolved.length&&dependencies
- return {...review,dependenciesMet:dependencies,verificationEvidencePresent:verified,eligibleForManualMerge:passed,mergePerformed:false,
+ // A PASSED label alone does not bind verification to the current files.
+ const evidence=Array.isArray(task.evidence)?task.evidence:[]
+ const hashesBound=review.files.length<=4&&review.files.every(file=>evidence.includes(file.path+' sha256:'+file.sha256.slice(0,20)))
+ const passed=task.status==='completed'&&verified&&hashesBound&&!review.unresolved.length&&dependencies
+ return {...review,dependenciesMet:dependencies,verificationEvidencePresent:verified,trackedHashesMatchEvidence:hashesBound,eligibleForManualMerge:passed,mergePerformed:false,
   note:'No automatic merge, no bypass of code verification or repository protection.'}
 }
 export async function agentFailureRecovery(a={}){
