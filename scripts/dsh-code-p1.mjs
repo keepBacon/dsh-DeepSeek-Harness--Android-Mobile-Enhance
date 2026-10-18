@@ -68,22 +68,21 @@ export async function codeAstEdit(a={}){
  return {...result,backend:'python-ast',symbol:a.symbol}
 }
 export async function codeRefactor(a={}){
- // Preview-only for non-compiler-resolved references: committing a token search
- // would silently rename unrelated symbols, comments or unrelated namespaces.
- if(a.dryRun===false)throw Error('REFACTOR_REQUIRES_LANGUAGE_SERVER: preview only')
- if(typeof a.oldName!=='string'||typeof a.newName!=='string'||
-    !/^[A-Za-z_$][\w$]*$/.test(a.oldName)||!/^[A-Za-z_$][\w$]*$/.test(a.newName)||
-    a.oldName===a.newName)throw Error('invalid rename')
+ if(typeof a.oldName!=='string'||typeof a.newName!=='string'||!/^[A-Za-z_][A-Za-z_0-9]*$/.test(a.oldName)||!/^[A-Za-z_][A-Za-z_0-9]*$/.test(a.newName)||a.oldName===a.newName)throw Error('invalid Python identifiers')
  const root=await rootOf(a.root),selected=a.paths
- if(!Array.isArray(selected)||!selected.length||selected.length>16)throw Error('paths required')
- const files=[]
+ if(!Array.isArray(selected)||!selected.length||selected.length>16||new Set(selected).size!==selected.length)throw Error('paths required (1..16 distinct)')
+ if(typeof a.originPath!=='string'||!selected.includes(a.originPath))throw Error('originPath must be one of paths')
+ const files=[],hashes=new Map()
  for(const p of selected){
+  if(extname(p)!=='.py')throw Error('REFACTOR_REQUIRES_LANGUAGE_SERVER: only Python AST is supported')
   const f=await source(root,p)
-  const matches=[...f.text.matchAll(new RegExp('(^|[^\\w$])'+a.oldName+'(?=[^\\w$]|$)','g'))]
-  files.push({path:p,sha256:f.sha256,candidateOccurrences:matches.length})
+  if(Buffer.byteLength(f.text)>128*1024)throw Error('refactor source exceeds 128 KiB')
+  files.push({path:p,text:f.text});hashes.set(p,f.sha256)
  }
- return report('refactor',{dryRun:true,oldName:a.oldName,newName:a.newName,files,
-  requiresSemanticReview:true,note:'No edits made. AST/LSP rename resolution required before applying changes.'})
+ const result=await pythonAstHelper('rename',{originPath:a.originPath,oldName:a.oldName,newName:a.newName,files})
+ const changes=result.changes.map(c=>({path:c.path,expectedSha256:hashes.get(c.path),oldText:c.oldText,newText:c.newText}))
+ const tx=await runCodeTransaction({root,changes,dryRun:a.dryRun!==false})
+ return {...tx,backend:result.backend,manualReviewRequired:true,bindingResolved:false,filesScanned:files.length}
 }
 export async function codeContractCheck(a={}){
  const snap=await codeIndexSnapshot(a),list=[]
