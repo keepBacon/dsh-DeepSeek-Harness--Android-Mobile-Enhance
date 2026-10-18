@@ -1,4 +1,4 @@
-import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises'
+import {mkdtemp,mkdir,writeFile,readFile,rm,symlink} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {createHash} from 'node:crypto'
@@ -35,6 +35,16 @@ try{
  const scope=await agentScopeAllocate(a);check(scope.writeScopes.includes('mod.py'),'scope')
  const shared=await agentSharedContext({boardId:board.boardId});check(shared.tasks.length===1,'shared')
  const review=await agentResultReview({...a,root,paths:['mod.py']});check(review.approved===false,'review')
+ await symlink('mod.py',join(root,'linked.py'))
+ let symlinkRejected=false
+ try{await agentResultReview({...a,root,paths:['linked.py']})}catch(e){
+  symlinkRejected=/SYMLINK_IN_REVIEW_PATH/.test(String(e.message))
+ }
+ // Symlink defense is evaluated even when the task allows unrestricted scope.
+ const unrestricted=await agentTaskDecompose({tasks:[{id:'read',title:'Review unrestricted'}]})
+ try{await agentResultReview({boardId:unrestricted.boardId,taskId:'read',root,paths:['linked.py']})}
+ catch(e){symlinkRejected=/SYMLINK_IN_REVIEW_PATH/.test(String(e.message))}
+ check(symlinkRejected,'symlink review allowed')
  const guard=await agentMergeGuard({...a,root,paths:['mod.py']});check(!guard.eligibleForManualMerge,'merge guard')
  const recovery=await agentFailureRecovery({boardId:board.boardId});check(recovery.pending.includes('work'),'recovery')
  console.log('[DSH] P1 coding & coordination integration: OK')
