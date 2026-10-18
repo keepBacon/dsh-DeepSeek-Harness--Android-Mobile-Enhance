@@ -630,6 +630,7 @@ node "$ROOT/scripts/dsh-coding-engine.mjs" --self-test
 node "$ROOT/scripts/dsh-code-index.mjs" --self-test
 node "$ROOT/scripts/test-code-p0.mjs"
 node "$ROOT/scripts/test-code-p1.mjs"
+DSH_MOBILE_CODING_ENABLED=1 DSH_MOBILE_COORDINATION_ENABLED=1 node "$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs" --mcp-coding-self-test
 node "$ROOT/scripts/dsh-code-transactions.mjs" --self-test
 node "$ROOT/scripts/dsh-code-diagnostics.mjs" --self-test
 node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
