@@ -3,7 +3,7 @@ import {createCoordinator} from './dsh-subagent-coordination.mjs'
 import {codeIndexSnapshot} from './dsh-code-index.mjs'
 import {codePatchConflict} from './dsh-code-p1.mjs'
 import {codeTransactionStatus} from './dsh-code-transactions.mjs'
-import {realpath,readFile} from 'node:fs/promises'
+import {realpath,readFile,lstat} from 'node:fs/promises'
 import {resolve} from 'node:path'
 import {createHash} from 'node:crypto'
 const sha=x=>createHash('sha256').update(x).digest('hex')
@@ -42,6 +42,18 @@ export async function agentResultReview(a={}){
   if(task.writeScopes.length&&!task.writeScopes.some(s=>p===s||p.startsWith(s+'/')))throw Error('OUT_OF_SCOPE')
   const path=resolve(root,p)
   if(!path.startsWith(root+'/'))throw Error('outside workspace')
+  // Reject symlinks at every path segment, not only the final file.
+  let walk=root
+  for(const segment of p.split('/')){
+   if(!segment||segment==='.'||segment==='..')throw Error('unsafe file segment')
+   walk=resolve(walk,segment)
+   const st=await lstat(walk)
+   if(st.isSymbolicLink())throw Error('SYMLINK_IN_REVIEW_PATH')
+  }
+  const real=await realpath(path)
+  if(!real.startsWith(root+'/'))throw Error('outside workspace')
+  const st=await lstat(path)
+  if(!st.isFile()||st.size>1024*1024)throw Error('unsafe review file')
   const bytes=await readFile(path)
   if(bytes.length>1024*1024)throw Error('file oversized')
   files.push({path:p,sha256:sha(bytes)})
