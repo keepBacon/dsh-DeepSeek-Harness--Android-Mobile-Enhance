@@ -813,6 +813,14 @@ async function call(name,a={}){
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const [{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
 async function selfTest(){
  await sdk()
+ const p0search=await call('mcp_tool_search',{query:'protocol_decode',limit:5})
+ if(!p0search.tools.some(t=>t.name==='protocol_decode'))throw Error('dynamic MCP tool search failed')
+ const p0audit=await call('mcp_registry_audit',{})
+ if(!p0audit.consistent)throw Error('MCP registry audit failed: '+JSON.stringify(p0audit))
+ const p0probe=await call('mcp_tool_probe',{name:'tool_registry_list'})
+ if(p0probe.status!=='OK')throw Error('safe MCP probe failed: '+JSON.stringify(p0probe))
+ const p0unsafe=await call('mcp_tool_probe',{name:'command_run'})
+ if(p0unsafe.status!=='UNSAFE_TO_PROBE'||p0unsafe.called)throw Error('unsafe MCP probe executed')
  const empty=await call('tool_registry_list',null);if(empty.total!==visibleTools().length)throw new Error('null tool arguments contract failed')
  if(empty.tools.length>40||empty.nextOffset!==(visibleTools().length>40?40:null))throw new Error('tool registry pagination default failed')
  const lastPage=await call('tool_registry_list',{offset:visibleTools().length-1,limit:10})
