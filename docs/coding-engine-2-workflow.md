@@ -20,6 +20,25 @@ All Coding Engine tools remain hidden when Coding Engine is disabled. Closing th
 8. A failing test does not complete the task. Inspect returned diagnostics and repeat with the updated task revision. The adapter renews the task lease before running tests.
 9. Review the overall board using `coordination_status`. Do not call the project done until unit tests, Android Gradle CI, Termux build, and required device checks are reported separately.
 
+
+## P0 engineering analysis (experimental)
+
+Eight opt-in read-only tools are exposed by mobile_tools when Coding Engine 2.0 is enabled:
+`code_semantic_index`, `code_symbol_references`, `code_dependency_graph`,
+`code_call_graph`, `code_change_impact`, `code_root_cause`,
+`code_patch_plan`, `code_test_impact`.
+
+These tools share the existing incremental index. No model calls, mutation, test execution,
+or LSP server are initiated by them. The index is heuristic, not compiler-resolved.
+Symbols and references can match comments and string literals; relative import edges
+are candidate file dependencies only. Call sites do not prove invocation edges.
+Root-cause candidates do not prove causality, and the patch plan is advisory.
+
+Validation: `node scripts/test-code-p0.mjs` checks all eight interfaces and
+path traversal rejection. `scripts/check-remaining-fixes.sh` runs it in CI,
+and `build-termux.sh` packages `dsh-code-p0.mjs` with a syntax check.
+The complete Android rootfs build and device-side MCP calls require separate verification.
+
 ## Resource budgets
 
 - Project index: at most 4,000 source files and 8 MiB persisted JSON; heuristically extracted symbols and imports.
