@@ -39,6 +39,29 @@ path traversal rejection. `scripts/check-remaining-fixes.sh` runs it in CI,
 and `build-termux.sh` packages `dsh-code-p0.mjs` with a syntax check.
 The complete Android rootfs build and device-side MCP calls require separate verification.
 
+## P1 guarded engineering and coordination tools
+
+Coding Engine P1 registers eight operations: `code_ast_edit` (real Python AST validation and
+SHA-256 journaled replacement), `code_refactor` (read-only rename preview; applying a
+cross-language refactor requires compiler/LSP and is rejected), `code_contract_check`
+(candidate import-path problems), `code_patch_conflict`, `code_regression_bisect`
+(read-only Git candidate selection), `code_failure_cluster`, `code_fix_verify`
+(reuses the bounded repair cycle) and `code_checkpoint` (hash records, **not** restore backups).
+
+Coordination P1 registers six operations: `agent_task_decompose`,
+`agent_scope_allocate`, `agent_shared_context`, `agent_result_review`,
+`agent_merge_guard`, `agent_failure_recovery`. These remain advisory and do not
+spawn, authenticate or impersonate an actual DSH subagent. A merge guard
+never merges code, and requires completed dependencies, no unresolved transaction,
+and PASSED verification evidence from the task board. Review evidence is bounded
+to 16 tracked files; untracked edits are not proven absent.
+
+P1 tools are opt-in via Coding Engine/coordination switches. Python AST support
+requires `python3` inside the embedded runtime. No promise of general-purpose
+cross-language AST/LSP rename, whole-workspace atomicity or verified device behavior
+is made. CI runs `node scripts/test-code-p1.mjs` plus the previous regression suite;
+Android/Termux build and on-device tests remain independent gates.
+
 ## Resource budgets
 
 - Project index: at most 4,000 source files and 8 MiB persisted JSON; heuristically extracted symbols and imports.
