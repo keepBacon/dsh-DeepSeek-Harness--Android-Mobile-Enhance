@@ -637,6 +637,7 @@ node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
 node "$ROOT/scripts/dsh-code-task-link.mjs" --self-test
 node "$ROOT/scripts/test-tool-registry-parity.mjs"
 node "$ROOT/scripts/test-mcp-governance.mjs"
+node "$ROOT/scripts/test-mcp-modern-stdio.mjs"
 must "$ROOT/scripts/dsh-subagent-coordination.mjs" "task board exceeds 256 KiB"
 must "$ROOT/scripts/dsh-code-verify.mjs" "process.kill(-child.pid,'SIGKILL')"
 must "$ROOT/scripts/dsh-code-task-link.mjs" "CODING_TASK_OUT_OF_SCOPE"
