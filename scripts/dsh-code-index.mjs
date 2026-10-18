@@ -91,6 +91,14 @@ async function index(root,force=false){
   return {data:result,stats:{indexed:files.length,reused,reparsed,skipped,truncated:listing.truncated}}
  })
 }
+/**
+ * P0 read-only snapshot. Reuses the bounded incremental index rather than
+ * maintaining a second competing source tree. Syntax fidelity is heuristic.
+ */
+export async function codeIndexSnapshot(input={}){
+ const root=await workspace(input.root),indexed=await index(root,input.force===true)
+ return {root,files:indexed.data.files,stats:indexed.stats,updatedAt:indexed.data.updatedAt}
+}
 export async function codeIndexRefresh(input={}){
  const root=await workspace(input.root),indexed=await index(root,input.force===true)
  return {root,...indexed.stats,updatedAt:indexed.data.updatedAt,heuristic:true}
