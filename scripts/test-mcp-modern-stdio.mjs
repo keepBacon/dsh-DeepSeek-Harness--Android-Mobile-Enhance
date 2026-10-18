@@ -10,7 +10,7 @@ const list=await send('tools/list');assert(list.result?.tools?.length===1,'tools
 const call=await send('tools/call',{name:'read',arguments:{}})
 assert(call.result?.structuredContent?.value==='read','call result')
 assert(call.result?.resultType==='complete'&&call.result?.cacheScope==='private','result envelope')
-const bad=await handleModernRequest({jsonrpc:'2.0',id:3,method:'tools/list',params:{_meta:{'io.modelcontextprotocol/protocolVersion':'2025-11-25'}}},api)
+const bad=await handleModernRequest({jsonrpc:'2.0',id:3,method:'tools/list',params:{_meta:{'io.modelcontextprotocol/protocolVersion':'2025-11-25','io.modelcontextprotocol/clientCapabilities':{}}}},api)
 assert(bad.error?.code===-32022&&bad.error?.data?.supported?.includes('2026-07-28'),'protocol mismatch')
 const missing=await handleModernRequest({jsonrpc:'2.0',id:4,method:'tools/list',params:{_meta:{}}},api)
 assert(missing.error?.code===-32602,'missing metadata')
