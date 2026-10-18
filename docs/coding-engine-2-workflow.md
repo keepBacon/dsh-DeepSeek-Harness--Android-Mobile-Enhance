@@ -39,6 +39,24 @@ path traversal rejection. `scripts/check-remaining-fixes.sh` runs it in CI,
 and `build-termux.sh` packages `dsh-code-p0.mjs` with a syntax check.
 The complete Android rootfs build and device-side MCP calls require separate verification.
 
+## Semantic hardening — first of two finalization rounds
+
+`code_symbol_references` now accepts `backend: "python-ast"` to ask a
+bounded Python AST helper for syntax-level definitions, loads, assignments,
+attribute candidates and call candidates. The AST backend ignores comment and
+string-literal mentions; it does not establish symbol binding across modules.
+The existing heuristic backend remains the fallback for other languages.
+
+The indexed-file reader revalidates path containment, file size, regular-file
+status and symlink safety. AST subprocess work is bounded by input size,
+execution time and result size, and is copied into the embedded Termux runtime.
+Tests run from `scripts/test-code-p0.mjs`.
+
+Tree-sitter grammars, language-server rename, cross-language binding analysis,
+full performance benchmarks and Android device execution are not established
+by this first-round change. They must be assessed separately in the next
+round before describing the project as release-ready.
+
 ## P1 guarded engineering and coordination tools
 
 Coding Engine P1 registers eight operations: `code_ast_edit` (real Python AST validation and
