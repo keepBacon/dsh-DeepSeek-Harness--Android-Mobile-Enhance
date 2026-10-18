@@ -11,6 +11,7 @@ import {createCodingTaskLink} from './dsh-code-task-link.mjs'
 import {createToolTelemetry} from './dsh-tool-metrics.mjs'
 import {codeRepairCycle} from './dsh-code-repair-cycle.mjs'
 import {databaseCall} from './dsh-database-client.mjs'
+import {codeSemanticIndex,codeSymbolReferences,codeDependencyGraph,codeCallGraph,codeChangeImpact,codeRootCause,codePatchPlan,codeTestImpact} from './dsh-code-p0.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -35,10 +36,18 @@ const codingTaskLink=createCodingTaskLink(coordinator)
 const telemetry=createToolTelemetry({enabled:process.env.DSH_MOBILE_TOOL_METRICS_ENABLED==='1'})
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
 const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED==='1'
-const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes','code_task_verify','code_repair_cycle'])
+const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes','code_task_verify','code_repair_cycle','code_semantic_index','code_symbol_references','code_dependency_graph','code_call_graph','code_change_impact','code_root_cause','code_patch_plan','code_test_impact'])
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
 const tools=[
+ {name:'code_semantic_index',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:[],additionalProperties:false}},
+ {name:'code_symbol_references',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["symbol"],additionalProperties:false}},
+ {name:'code_dependency_graph',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:[],additionalProperties:false}},
+ {name:'code_call_graph',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["symbol"],additionalProperties:false}},
+ {name:'code_change_impact',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["paths"],additionalProperties:false}},
+ {name:'code_root_cause',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["log"],additionalProperties:false}},
+ {name:'code_patch_plan',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["paths"],additionalProperties:false}},
+ {name:'code_test_impact',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["paths"],additionalProperties:false}},
  {name:'database_partitions',description:'List database partitions readable by this active Android host context.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'database_search',description:'Search explicitly readable memory partition text; never returns secrets.',inputSchema:{type:'object',properties:{query:{type:'string',maxLength:120}},required:['query'],additionalProperties:false}},
  {name:'database_write_request',description:'Ask the Android user to approve a single text create/update/delete in a readable partition.',inputSchema:{type:'object',properties:{action:{type:'string',enum:['create','update','delete']},partitionId:{type:'string'},entryId:{type:'string'},title:{type:'string'},text:{type:'string'}},required:['action','partitionId'],additionalProperties:false}},
@@ -380,6 +389,14 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+   case 'code_semantic_index': return codeSemanticIndex(a)
+   case 'code_symbol_references': return codeSymbolReferences(a)
+   case 'code_dependency_graph': return codeDependencyGraph(a)
+   case 'code_call_graph': return codeCallGraph(a)
+   case 'code_change_impact': return codeChangeImpact(a)
+   case 'code_root_cause': return codeRootCause(a)
+   case 'code_patch_plan': return codePatchPlan(a)
+   case 'code_test_impact': return codeTestImpact(a)
   case 'database_partitions': return databaseCall({op:'list'})
   case 'database_search': return databaseCall({op:'search',query:a.query})
   case 'database_write_request': return databaseCall({op:'write',...a})
