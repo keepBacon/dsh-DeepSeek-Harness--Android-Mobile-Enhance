@@ -117,14 +117,25 @@ terminate the stdio server. Safe probing uses an explicit read-only allowlist;
 arbitrary shell, network, database or plugin tools are never probed with real
 side effects.
 
-**Compatibility:** the installed MCP SDK's legacy stdio transport remains
-unchanged. Streamable HTTP configs remain managed by the existing Android
-host. The 2026 protocol's `server/discover` and host-level reconnect/child
-process supervision are **not** fully implemented here. Do not advertise
-full 2026 protocol support or process restart without end-to-end host tests.
+**Compatibility:** legacy SDK stdio remains the default. Experimental
+`DSH_MCP_PROTOCOL_MODE=2026-07-28` enables a separate stateless stdio
+adapter for `server/discover`, `tools/list` and `tools/call` with
+per-request version metadata; this is NOT enabled for the legacy DSH client,
+and it does not constitute complete 2026 extensions/Streamable HTTP support.
+Existing Streamable HTTP connections remain managed by the Android Host.
 
-Verification: `node scripts/test-mcp-governance.mjs` and
-`node scripts/test-tool-registry-parity.mjs` run in static CI.
+**Child recovery:** an optional `dsh-mcp-supervisor.mjs` restarts crashed
+stdio MCP children with bounded backoff. It reports in-flight requests as
+failed, NEVER replays side-effectful calls, and restores the legacy
+initialize handshake. Android's `mcp-servers.json` supports
+`restartSupervisorEnabled:true` to use the wrapper for `mobile_tools`.
+It is OFF by default until device interoperability is confirmed. This is not
+remote HTTP reconnection, and it does not repair defective third-party
+plugin Handlers.
+
+Verification: `node scripts/test-mcp-governance.mjs`,
+`node scripts/test-mcp-modern-stdio.mjs`, `node scripts/test-mcp-supervisor.mjs`
+and `node scripts/test-tool-registry-parity.mjs` run in static CI.
 Termux APK packaging and Android-side plugin Handler checks are separate gates.
 
 ## Resource budgets
