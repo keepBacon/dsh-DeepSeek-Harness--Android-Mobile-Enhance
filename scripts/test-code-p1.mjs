@@ -23,7 +23,10 @@ try{
  const renArgs={root,oldName:'alpha',newName:'beta',originPath:'mod.py',paths:['mod.py','client.py']}
  const rename=await codeRefactor(renArgs)
  check(rename.dryRun&&await readFile(join(root,'client.py'),'utf8')==='from mod import alpha\nprint(alpha())\n','refactor preview mutated')
- const committed=await codeRefactor({...renArgs,dryRun:false})
+ let partialBlocked=false
+ try{await codeRefactor({...renArgs,dryRun:false})}catch(e){partialBlocked=/REFACTOR_PARTIAL_SCOPE_APPROVAL_REQUIRED/.test(e.message)}
+ check(partialBlocked,'unsafe partial-scope edit accepted')
+ const committed=await codeRefactor({...renArgs,allowPartialScope:true,dryRun:false})
  check(committed.state==='committed','refactor not committed')
  check((await readFile(join(root,'mod.py'),'utf8')).includes('def beta('),'origin rename missing')
  check((await readFile(join(root,'client.py'),'utf8')).includes('from mod import beta'),'import rename missing')
