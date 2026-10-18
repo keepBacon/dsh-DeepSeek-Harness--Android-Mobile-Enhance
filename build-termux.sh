@@ -1573,6 +1573,11 @@ install_mobile_mcp_toolbox() {
   [ -f "$coding" ] || { echo '[DSH] Missing Coding Engine module'; exit 8; }
   cp "$coding" "$(dirname "$dest")/dsh-coding-engine.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-coding-engine.mjs"
+  local p0="$ROOT/scripts/dsh-code-p0.mjs"
+  [ -f "$p0" ] || { echo '[DSH] Missing P0 coding analysis module'; exit 8; }
+  cp "$p0" "$(dirname "$dest")/dsh-code-p0.mjs"
+  chmod 0644 "$(dirname "$dest")/dsh-code-p0.mjs"
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-p0.mjs" || exit 8
   local code_index="$ROOT/scripts/dsh-code-index.mjs"
   [ -f "$code_index" ] || { echo '[DSH] Missing Coding Index module'; exit 8; }
   cp "$code_index" "$(dirname "$dest")/dsh-code-index.mjs"
