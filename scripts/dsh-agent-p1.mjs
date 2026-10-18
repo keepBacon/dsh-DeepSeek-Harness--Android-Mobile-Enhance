@@ -54,8 +54,9 @@ export async function agentMergeGuard(a={}){
  const review=await agentResultReview(a)
  const b=await board.status(a.boardId),task=b.tasks.find(t=>t.id===a.taskId)
  const dependencies=task.blockedBy.every(id=>b.tasks.some(t=>t.id===id&&t.status==='completed'))
- const passed=task.status==='completed'&&!review.unresolved.length&&dependencies
- return {...review,dependenciesMet:dependencies,eligibleForManualMerge:passed,mergePerformed:false,
+ const verified=Array.isArray(task.evidence)&&task.evidence.some(e=>typeof e==='string'&&e.startsWith('PASSED '))
+ const passed=task.status==='completed'&&verified&&!review.unresolved.length&&dependencies
+ return {...review,dependenciesMet:dependencies,verificationEvidencePresent:verified,eligibleForManualMerge:passed,mergePerformed:false,
   note:'No automatic merge, no bypass of code verification or repository protection.'}
 }
 export async function agentFailureRecovery(a={}){
