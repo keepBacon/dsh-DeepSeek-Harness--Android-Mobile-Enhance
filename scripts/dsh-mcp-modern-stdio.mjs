@@ -16,10 +16,16 @@ export function handleModernRequest(request,{list,execute}){
   return Promise.resolve(error(request?.id??null,-32600,'Invalid Request'))
  const {id,method}=request
  const meta=request.params?._meta||{}
- if(meta['io.modelcontextprotocol/protocolVersion']!==VERSION)
-  return Promise.resolve(error(id,-32001,'UnsupportedProtocolVersionError: supported '+VERSION))
- if(!meta['io.modelcontextprotocol/clientCapabilities']||typeof meta['io.modelcontextprotocol/clientCapabilities']!=='object')
+ if(!Object.prototype.hasOwnProperty.call(meta,'io.modelcontextprotocol/protocolVersion'))
+  return Promise.resolve(error(id,-32602,'Protocol version metadata required'))
+ if(!Object.prototype.hasOwnProperty.call(meta,'io.modelcontextprotocol/clientCapabilities')||
+    !meta['io.modelcontextprotocol/clientCapabilities']||
+    typeof meta['io.modelcontextprotocol/clientCapabilities']!=='object'||
+    Array.isArray(meta['io.modelcontextprotocol/clientCapabilities']))
   return Promise.resolve(error(id,-32602,'Client capabilities metadata required'))
+ if(meta['io.modelcontextprotocol/protocolVersion']!==VERSION)
+  return Promise.resolve({jsonrpc:'2.0',id,error:{code:-32022,
+   message:'UnsupportedProtocolVersionError',data:{requested:String(meta['io.modelcontextprotocol/protocolVersion']),supported:[VERSION]}}})
  if(method==='server/discover')return Promise.resolve(result(id,{supportedVersions:[VERSION],
   capabilities:{tools:{}},instructions:'DSH mobile tools; stateful operations require explicit user consent.',
   _meta:{'io.modelcontextprotocol/serverInfo':{name:'dsh-mobile-toolbox',version:'4.0.0'}}}))
@@ -41,7 +47,7 @@ export async function startModernStdio({list,execute,input=process.stdin,output=
   if(Buffer.byteLength(line)>262144){
    output.write(checkedJson(error(null,-32700,'Request too large'))+'\n');continue
   }
-  if(running>=4){output.write(checkedJson(error(null,-32000,'Server busy'))+'\n');continue}
+  if(running>=4){let id=null;try{id=JSON.parse(line)?.id??null}catch{}output.write(checkedJson(error(id,-32000,'Server busy'))+'\n');continue}
   let request
   try{request=JSON.parse(line)}catch{
    output.write(checkedJson(error(null,-32700,'Parse error'))+'\n');continue
