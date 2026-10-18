@@ -1,6 +1,6 @@
 import {fileURLToPath} from 'node:url'
 import {createHash,randomBytes} from 'node:crypto'
-import {open,readFile,readdir,lstat,realpath,mkdir,rename,rm,mkdtemp,writeFile} from 'node:fs/promises'
+import {open,readFile,readdir,lstat,stat,realpath,mkdir,rename,rm,mkdtemp,writeFile} from 'node:fs/promises'
 import {resolve,join,extname,relative} from 'node:path'
 import {tmpdir} from 'node:os'
 
@@ -55,12 +55,36 @@ async function writeAtomic(path,payload){
  try{const file=await open(temp,'wx',0o600);try{await file.writeFile(payload);await file.sync()}finally{await file.close()}await rename(temp,path)}
  catch(e){await rm(temp,{force:true}).catch(()=>{});throw e}
 }
+async function reclaimStaleIndexLock(lock){
+ const info=await stat(lock)
+ if(Date.now()-info.mtimeMs<=120000)return false
+ let owner
+ try{owner=JSON.parse(await readFile(lock,'utf8'))}catch{}
+ if(Number.isSafeInteger(owner?.pid)&&owner.pid>0){
+  try{process.kill(owner.pid,0);return false}
+  catch(error){if(error.code!=='ESRCH')return false}
+ }
+ const check=await stat(lock)
+ if(info.dev!==check.dev||info.ino!==check.ino)return false
+ await rm(lock,{force:true})
+ return true
+}
 async function mutex(path,fn){
  const lock=path+'.lock',start=Date.now();let handle
- for(;;){try{handle=await open(lock,'wx',0o600);break}catch(e){if(e.code!=='EEXIST')throw e
-  try{const state=await lstat(lock);if(Date.now()-state.mtimeMs>120000){await rm(lock,{force:true});continue}}catch(e2){if(e2.code!=='ENOENT')throw e2}
-  if(Date.now()-start>5000)throw Error('project index busy');await delay(40)
- }}
+ for(;;){
+  try{
+   handle=await open(lock,'wx',0o600)
+   try{await handle.writeFile(JSON.stringify({pid:process.pid,at:Date.now()}));await handle.sync()}
+   catch(error){await handle.close();handle=null;await rm(lock,{force:true});throw error}
+   break
+  }catch(e){
+   if(e.code!=='EEXIST')throw e
+   try{if(await reclaimStaleIndexLock(lock))continue}
+   catch(e2){if(e2.code!=='ENOENT')throw e2}
+   if(Date.now()-start>5000)throw Error('project index busy')
+   await delay(40)
+  }
+ }
  try{return await fn()}finally{await handle.close();await rm(lock,{force:true}).catch(()=>{})}
 }
 async function index(root,force=false){
@@ -136,6 +160,18 @@ async function test(){
   const hit=await codeIndexQuery({root,mode:'symbols',query:'alpha'});if(hit.matches.length!==1)throw Error('symbol query')
   const imports=await codeIndexQuery({root,mode:'imports',query:'./a.js'});if(imports.matches.length!==1)throw Error('import query')
   await writeFile(join(root,'src','a.js'),'export function gamma() { return 1234 }\n')
+  // Old timestamps do not make a live worker's lock reclaimable.
+  const indexPath=join(process.env.DSH_CODE_INDEX_HOME,digest(root)+'.json')
+  const lock=indexPath+'.lock'
+  const {utimes}=await import('node:fs/promises')
+  const oldTime=new Date(Date.now()-180000)
+  await writeFile(lock,JSON.stringify({pid:process.pid,at:Date.now()-180000}))
+  await utimes(lock,oldTime,oldTime)
+  if(await reclaimStaleIndexLock(lock))throw Error('live index lock was stolen')
+  await rm(lock)
+  await writeFile(lock,JSON.stringify({pid:999999999,at:Date.now()-180000}))
+  await utimes(lock,oldTime,oldTime)
+  if(!(await reclaimStaleIndexLock(lock)))throw Error('dead index lock not reclaimed')
   const third=await codeIndexRefresh({root});if(third.reparsed!==1||third.reused!==1)throw Error('incremental invalidation')
   const removed=await codeIndexQuery({root,query:'alpha'});if(removed.matches.length)throw Error('stale symbol retained')
   await rm(join(root,'src','b.js'))
