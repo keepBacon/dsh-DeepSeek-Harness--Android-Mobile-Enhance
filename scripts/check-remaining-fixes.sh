@@ -629,6 +629,7 @@ must "$BT" 'dsh-coding-engine.mjs'
 node "$ROOT/scripts/dsh-coding-engine.mjs" --self-test
 node "$ROOT/scripts/dsh-code-index.mjs" --self-test
 node "$ROOT/scripts/test-code-p0.mjs"
+node "$ROOT/scripts/test-code-p1.mjs"
 node "$ROOT/scripts/dsh-code-transactions.mjs" --self-test
 node "$ROOT/scripts/dsh-code-diagnostics.mjs" --self-test
 node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
