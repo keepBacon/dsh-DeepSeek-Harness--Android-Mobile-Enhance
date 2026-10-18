@@ -1578,6 +1578,12 @@ install_mobile_mcp_toolbox() {
   cp "$p0" "$(dirname "$dest")/dsh-code-p0.mjs"
   chmod 0644 "$(dirname "$dest")/dsh-code-p0.mjs"
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-p0.mjs" || exit 8
+  for extra in dsh-code-p1.mjs dsh-agent-p1.mjs dsh-code-p1-ast.py; do
+    [ -f "$ROOT/scripts/$extra" ] || { echo "[DSH] Missing P1 module $extra"; exit 8; }
+    cp "$ROOT/scripts/$extra" "$(dirname "$dest")/$extra"
+  done
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-p1.mjs" || exit 8
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-agent-p1.mjs" || exit 8
   local code_index="$ROOT/scripts/dsh-code-index.mjs"
   [ -f "$code_index" ] || { echo '[DSH] Missing Coding Index module'; exit 8; }
   cp "$code_index" "$(dirname "$dest")/dsh-code-index.mjs"
