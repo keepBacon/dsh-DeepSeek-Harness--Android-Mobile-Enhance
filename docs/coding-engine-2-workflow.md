@@ -80,6 +80,27 @@ cross-language AST/LSP rename, whole-workspace atomicity or verified device beha
 is made. CI runs `node scripts/test-code-p1.mjs` plus the previous regression suite;
 Android/Termux build and on-device tests remain independent gates.
 
+## Final round: bounded Python cross-file rename and merge evidence
+
+`code_refactor` accepts `originPath` and a list of 1–16 explicit Python
+`paths`, then uses Python `ast` plus token positions to prepare a bounded
+multi-file rename. It rejects ambiguous imports, shadowing/collisions and
+module-qualified attribute access. Dry-run is the default. Committing requires
+`dryRun:false` **and** `allowPartialScope:true` because the path set is
+caller-supplied and can omit other project files. The edit reuses checked
+SHA-256 transactions and rollback; it does **not** prove global name binding.
+Other languages need a compiler/LSP backend and remain unsupported for writes.
+
+`agent_merge_guard` now compares tracked file hashes with SHA-256 evidence
+recorded by task verification (maximum four evidence-bound files). It only
+advises manual merge; the cooperative task owner label is not an authenticated
+identity, and the guard is not a substitute for human review or repository
+branch protection.
+
+CI runs regression tests but cannot verify Android hardware and local DSH
+plugin execution. Do not merge or advertise production readiness until a
+Termux package build and on-device MCP exercise are independently observed.
+
 ## Resource budgets
 
 - Project index: at most 4,000 source files and 8 MiB persisted JSON; heuristically extracted symbols and imports.
