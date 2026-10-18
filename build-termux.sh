@@ -1586,6 +1586,9 @@ install_mobile_mcp_toolbox() {
   done
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-p1.mjs" || exit 8
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-agent-p1.mjs" || exit 8
+  [ -f "$ROOT/scripts/dsh-mcp-governance.mjs" ] || { echo '[DSH] Missing MCP governance module'; exit 8; }
+  cp "$ROOT/scripts/dsh-mcp-governance.mjs" "$(dirname "$dest")/dsh-mcp-governance.mjs"
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-mcp-governance.mjs" || exit 8
   local code_index="$ROOT/scripts/dsh-code-index.mjs"
   [ -f "$code_index" ] || { echo '[DSH] Missing Coding Index module'; exit 8; }
   cp "$code_index" "$(dirname "$dest")/dsh-code-index.mjs"
