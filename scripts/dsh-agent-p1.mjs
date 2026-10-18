@@ -9,15 +9,15 @@ import {createHash} from 'node:crypto'
 const sha=x=>createHash('sha256').update(x).digest('hex')
 const text=(x,k)=>{if(typeof x!=='string'||!x.trim()||x.length>2000)throw Error('invalid '+k);return x}
 const safe=p=>typeof p==='string'&&p.length>0&&p.length<=512&&!p.startsWith('/')&&!p.includes('\\')&&!p.split('/').includes('..')
-const board=createCoordinator()
+const board=()=>createCoordinator()
 export async function agentTaskDecompose(a={}){
  if(!Array.isArray(a.tasks)||a.tasks.length<1||a.tasks.length>64)throw Error('tasks required')
- const created=await board.create({tasks:a.tasks,maxParallel:a.maxParallel,maxAttempts:a.maxAttempts})
+ const created=await board().create({tasks:a.tasks,maxParallel:a.maxParallel,maxAttempts:a.maxAttempts})
  return {...created,spawnedAgents:0,advisory:true}
 }
 export async function agentScopeAllocate(a={}){
  // Scopes are fixed in board tasks: never silently mutate scope of running jobs.
- const b=await board.status(text(a.boardId,'boardId'))
+ const b=await board().status(text(a.boardId,'boardId'))
  const t=b.tasks.find(x=>x.id===a.taskId)
  if(!t)throw Error('task not found')
  return {boardId:b.boardId,taskId:t.id,writeScopes:t.writeScopes,owner:t.owner,
@@ -25,14 +25,14 @@ export async function agentScopeAllocate(a={}){
   note:'Scope assignment is immutable; create a reviewed board for a changed allocation.'}
 }
 export async function agentSharedContext(a={}){
- const b=await board.status(text(a.boardId,'boardId'))
+ const b=await board().status(text(a.boardId,'boardId'))
  return {boardId:b.boardId,version:b.version,tasks:b.tasks.map(x=>({
   id:x.id,status:x.status,blockedBy:x.blockedBy,writeScopes:x.writeScopes,summary:x.summary,
   evidence:x.evidence,revision:x.revision
  })),advisory:true,credentialsShared:false}
 }
 export async function agentResultReview(a={}){
- const b=await board.status(text(a.boardId,'boardId'))
+ const b=await board().status(text(a.boardId,'boardId'))
  const task=b.tasks.find(x=>x.id===a.taskId)
  if(!task)throw Error('task not found')
  const root=await realpath(resolve(a.root||'.')),files=[]
@@ -52,7 +52,7 @@ export async function agentResultReview(a={}){
 }
 export async function agentMergeGuard(a={}){
  const review=await agentResultReview(a)
- const b=await board.status(a.boardId),task=b.tasks.find(t=>t.id===a.taskId)
+ const b=await board().status(a.boardId),task=b.tasks.find(t=>t.id===a.taskId)
  const dependencies=task.blockedBy.every(id=>b.tasks.some(t=>t.id===id&&t.status==='completed'))
  const verified=Array.isArray(task.evidence)&&task.evidence.some(e=>typeof e==='string'&&e.startsWith('PASSED '))
  const passed=task.status==='completed'&&verified&&!review.unresolved.length&&dependencies
@@ -60,7 +60,7 @@ export async function agentMergeGuard(a={}){
   note:'No automatic merge, no bypass of code verification or repository protection.'}
 }
 export async function agentFailureRecovery(a={}){
- const b=await board.status(text(a.boardId,'boardId'))
+ const b=await board().status(text(a.boardId,'boardId'))
  return {boardId:b.boardId,version:b.version,failed:b.tasks.filter(t=>t.status==='failed'),
   pending:b.tasks.filter(t=>t.status==='pending').map(t=>t.id),
   ready:b.ready,automaticReassign:false,
