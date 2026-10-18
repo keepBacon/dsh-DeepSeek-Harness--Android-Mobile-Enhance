@@ -40,6 +40,7 @@ class McpConfigManager(
   fun coordinationEnabled(): Boolean = readRootSafe().optBoolean("coordinationEnabled", true)
   fun codingEnabled(): Boolean = readRootSafe().optBoolean("codingEnabled", false)
   fun toolMetricsEnabled(): Boolean = readRootSafe().optBoolean("toolMetricsEnabled", false)
+  fun restartSupervisorEnabled(): Boolean = readRootSafe().optBoolean("restartSupervisorEnabled", false)
 
   fun builtInExtensionEnabled(id: String): Boolean = when (id) {
     "mobile_tools" -> toolboxEnabled()
@@ -230,7 +231,14 @@ class McpConfigManager(
     append("    serverName: mobile_tools\n")
     append("    transport: stdio\n")
     append("    command: ").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append('\n')
-    append("    args: [").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\n")
+    if (restartSupervisorEnabled()) {
+      append("    args: [")
+        .append(JSONObject.quote(File(toolboxFile.parentFile, "dsh-mcp-supervisor.mjs").absolutePath))
+        .append(", ").append(JSONObject.quote(toolboxFile.absolutePath))
+        .append("]\\n")
+    } else {
+      append("    args: [").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\\n")
+    }
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
