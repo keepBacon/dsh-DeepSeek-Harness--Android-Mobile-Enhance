@@ -101,6 +101,32 @@ CI runs regression tests but cannot verify Android hardware and local DSH
 plugin execution. Do not merge or advertise production readiness until a
 Termux package build and on-device MCP exercise are independently observed.
 
+## MCP P0 governance (experimental)
+
+The mobile MCP server now exposes `mcp_tool_search`, `mcp_registry_audit`,
+`mcp_tool_probe` and `mcp_server_health`. Search is over the **currently visible**
+runtime catalogue, not a stale static model prompt. Audit compares declared names
+with this bundled server's dispatch cases. It does not inspect all third-party
+Cordis plugin handlers or prove Android device functionality.
+
+The call layer validates bounded JSON input against the advertised input
+schema, rejects non-lossless structured outputs (including undefined, NaN,
+non-finite numbers, BigInt, circular structures and excessive size), and
+returns handler failures as MCP `isError` messages so one failed call does not
+terminate the stdio server. Safe probing uses an explicit read-only allowlist;
+arbitrary shell, network, database or plugin tools are never probed with real
+side effects.
+
+**Compatibility:** the installed MCP SDK's legacy stdio transport remains
+unchanged. Streamable HTTP configs remain managed by the existing Android
+host. The 2026 protocol's `server/discover` and host-level reconnect/child
+process supervision are **not** fully implemented here. Do not advertise
+full 2026 protocol support or process restart without end-to-end host tests.
+
+Verification: `node scripts/test-mcp-governance.mjs` and
+`node scripts/test-tool-registry-parity.mjs` run in static CI.
+Termux APK packaging and Android-side plugin Handler checks are separate gates.
+
 ## Resource budgets
 
 - Project index: at most 4,000 source files and 8 MiB persisted JSON; heuristically extracted symbols and imports.
