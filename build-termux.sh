@@ -1586,6 +1586,9 @@ install_mobile_mcp_toolbox() {
   done
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-p1.mjs" || exit 8
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-agent-p1.mjs" || exit 8
+  [ -f "$ROOT/scripts/dsh-mcp-supervisor.mjs" ] || { echo '[DSH] Missing MCP reconnect supervisor'; exit 8; }
+  cp "$ROOT/scripts/dsh-mcp-supervisor.mjs" "$(dirname "$dest")/dsh-mcp-supervisor.mjs"
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-mcp-supervisor.mjs" || exit 8
   [ -f "$ROOT/scripts/dsh-mcp-modern-stdio.mjs" ] || { echo '[DSH] Missing modern MCP transport'; exit 8; }
   cp "$ROOT/scripts/dsh-mcp-modern-stdio.mjs" "$(dirname "$dest")/dsh-mcp-modern-stdio.mjs"
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-mcp-modern-stdio.mjs" || exit 8
