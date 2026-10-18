@@ -235,9 +235,9 @@ class McpConfigManager(
       append("    args: [")
         .append(JSONObject.quote(File(toolboxFile.parentFile, "dsh-mcp-supervisor.mjs").absolutePath))
         .append(", ").append(JSONObject.quote(toolboxFile.absolutePath))
-        .append("]\\n")
+        .append("]\n")
     } else {
-      append("    args: [").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\\n")
+      append("    args: [").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\n")
     }
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
