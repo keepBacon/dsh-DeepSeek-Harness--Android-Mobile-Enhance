@@ -79,6 +79,9 @@ export async function codeRefactor(a={}){
   if(Buffer.byteLength(f.text)>128*1024)throw Error('refactor source exceeds 128 KiB')
   files.push({path:p,text:f.text});hashes.set(p,f.sha256)
  }
+ // The caller supplies a bounded file set; do not imply project-wide coverage.
+ // Any committed partial-scope rewrite requires explicit opt-in.
+ if(a.dryRun===false&&a.allowPartialScope!==true)throw Error('REFACTOR_PARTIAL_SCOPE_APPROVAL_REQUIRED')
  const result=await pythonAstHelper('rename',{originPath:a.originPath,oldName:a.oldName,newName:a.newName,files})
  const changes=result.changes.map(c=>({path:c.path,expectedSha256:hashes.get(c.path),oldText:c.oldText,newText:c.newText}))
  const tx=await runCodeTransaction({root,changes,dryRun:a.dryRun!==false})
