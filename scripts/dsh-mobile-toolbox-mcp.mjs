@@ -841,5 +841,29 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--feature-test')){const shown=new Set(visibleTools().map(t=>t.name));for(const id of CODING_NAMES){if(shown.has(id)!==(CODING_ENABLED&&(id!=='code_task_verify'||COORDINATION_ENABLED)))throw new Error('coding tool visibility mismatch: '+id)}for(const id of COORDINATION_NAMES){if(shown.has(id)!==COORDINATION_ENABLED)throw new Error('coordination tool visibility mismatch: '+id)}if(shown.has('code_task_verify')!==(CODING_ENABLED&&COORDINATION_ENABLED))throw new Error('coordination dependency mismatch');if(!CODING_ENABLED){try{await call('code_repair_cycle',{});throw new Error('disabled coding tool callable')}catch(e){if(!String(e.message).includes('coding extension disabled'))throw e}}process.stdout.write('[DSH] MCP extension gating: OK coding='+CODING_ENABLED+' coordination='+COORDINATION_ENABLED+'\n');return}if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const began=Date.now();let success=false;try{const value=await call(req.params.name,req.params.arguments??{});success=true;return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}}finally{telemetry.record(req.params.name,Date.now()-began,success)}});await server.connect(new StdioServerTransport())}
+async function codingMcpSmoke(){
+ if(!CODING_ENABLED)throw Error('coding smoke requires enabled extension')
+ const root=await mkdtemp(resolve(process.env.TMPDIR||process.cwd(),'.dsh-coding-smoke-'))
+ const previous=process.env.DSH_CODE_INDEX_HOME
+ process.env.DSH_CODE_INDEX_HOME=resolve(root,'cache')
+ try{
+  await writeFile(resolve(root,'example.py'),'def alpha():\\n    return 1\\n')
+  const index=await call('code_semantic_index',{root})
+  if(index.indexed!==1)throw Error('MCP semantic index dispatch failed')
+  const references=await call('code_symbol_references',{root,symbol:'alpha',backend:'python-ast'})
+  if(references.backend!=='python-ast'||!references.matches.some(x=>x.kind==='definition'))
+   throw Error('MCP AST backend dispatch failed')
+  const current=await readFile(resolve(root,'example.py'))
+  const preview=await call('code_refactor',{root,originPath:'example.py',paths:['example.py'],
+   oldName:'alpha',newName:'beta',dryRun:true})
+  if(!preview.dryRun||!preview.changes?.length)throw Error('MCP refactor dry-run failed')
+  if(!current.equals(await readFile(resolve(root,'example.py'))))throw Error('MCP dry-run modified source')
+  process.stdout.write('[DSH] MCP coding end-to-end dispatch: OK\\n')
+ }finally{
+  if(previous===undefined)delete process.env.DSH_CODE_INDEX_HOME
+  else process.env.DSH_CODE_INDEX_HOME=previous
+  await rm(root,{recursive:true,force:true})
+ }
+}
+async function main(){if(process.argv.includes('--mcp-coding-self-test'))return codingMcpSmoke();if(process.argv.includes('--feature-test')){const shown=new Set(visibleTools().map(t=>t.name));for(const id of CODING_NAMES){if(shown.has(id)!==(CODING_ENABLED&&(id!=='code_task_verify'||COORDINATION_ENABLED)))throw new Error('coding tool visibility mismatch: '+id)}for(const id of COORDINATION_NAMES){if(shown.has(id)!==COORDINATION_ENABLED)throw new Error('coordination tool visibility mismatch: '+id)}if(shown.has('code_task_verify')!==(CODING_ENABLED&&COORDINATION_ENABLED))throw new Error('coordination dependency mismatch');if(!CODING_ENABLED){try{await call('code_repair_cycle',{});throw new Error('disabled coding tool callable')}catch(e){if(!String(e.message).includes('coding extension disabled'))throw e}}process.stdout.write('[DSH] MCP extension gating: OK coding='+CODING_ENABLED+' coordination='+COORDINATION_ENABLED+'\n');return}if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const began=Date.now();let success=false;try{const value=await call(req.params.name,req.params.arguments??{});success=true;return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}}finally{telemetry.record(req.params.name,Date.now()-began,success)}});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
