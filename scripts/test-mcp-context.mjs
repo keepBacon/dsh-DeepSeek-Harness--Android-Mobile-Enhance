@@ -36,6 +36,7 @@ try{
  await writeFile(join(saf,safId+'.txt'),'TAMPER')
  denied=false;try{await authorized.readResource({uri:'dsh://android/saf/'+safId})}catch{denied=true}
  assert(denied,'SAF hash tamper undetected')
+ const tools=await ctx.environment();assert(tools.programs.some(x=>x.name==='node'&&x.available),'environment tools')
  const android=await ctx.nativeSnapshot();assert(android.root==='not-probed','no privilege claims')
  const meta={'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{}}
  const rpc=await handleModernRequest({jsonrpc:'2.0',id:1,method:'resources/list',params:{_meta:meta}},
