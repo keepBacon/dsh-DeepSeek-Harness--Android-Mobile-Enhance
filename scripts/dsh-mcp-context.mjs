@@ -71,6 +71,11 @@ export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||
    if(!obj(v)||v.schema!==1||v.source!=='android-native')throw Error('invalid native snapshot')
    return {source:'android-native',nativeBridge:true,sdkInt:v.sdkInt,deviceAbi:v.deviceAbi,
     permissions:obj(v.permissions)?v.permissions:{},collectedAt:v.collectedAt,
+    safPersistedReadGrantCount:Number.isSafeInteger(v.safPersistedReadGrantCount)?v.safPersistedReadGrantCount:0,
+    safContentBridgeAvailable:false,
+    availableMemoryBytes:Number.isSafeInteger(v.availableMemoryBytes)?v.availableMemoryBytes:null,
+    lowMemory:v.lowMemory===true,
+    batteryOptimizationExempt:v.batteryOptimizationExempt===true,
     root:'not-probed',shizuku:'not-probed',accessibility:'not-probed',
     note:'Permission and provider availability are separate from authorization.'}
   }catch(e){return {...fallback,source:'snapshot-unavailable',error:String(e.code||e.message).slice(0,80)}}
