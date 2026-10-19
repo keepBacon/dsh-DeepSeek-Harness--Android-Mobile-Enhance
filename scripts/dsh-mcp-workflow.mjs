@@ -90,7 +90,7 @@ export function compactMcpResult(input={},limitDefault=1600){
  return {sha256:hash(serialized),bytes,truncated:serialized.length>maxChars,preview:summary,
   originalInResponse:serialized.length<=maxChars,format:'json',note:'Preview is not a lossless replacement; SHA-256 refers to original JSON.'}
 }
-export function createMcpWorkflowEngine({list,execute,storageDir=join(process.env.HOME||process.cwd(),'.dsh','mobile','mcp-workflows'),metrics}={}){
+export function createMcpWorkflowEngine({list,execute,storageDir=join(process.env.HOME||process.cwd(),'.dsh','mobile','mcp-workflows'),metrics,resourceBudget}={}){
  if(typeof list!=='function'||typeof execute!=='function')throw Error('MCP_WORKFLOW_DEPENDENCIES_REQUIRED')
  const running=new Map(), locks=new Map(), allEvents=[]
  let storeReady=null
@@ -137,6 +137,7 @@ export function createMcpWorkflowEngine({list,execute,storageDir=join(process.en
    ...(includeResults&&n.status==='completed'?{result:n.result}: {})}))
   return {id:doc.id,status:doc.status,createdAt:doc.createdAt,updatedAt:doc.updatedAt,
    cancelled:!!doc.cancelRequested,allowSideEffects:doc.allowSideEffects,nodes,revision:doc.revision,
+   effectiveConcurrency:doc.concurrency,resourceLimited:!!doc.resourceLimited,
    recovery:'Interrupted or running steps are NEVER re-executed automatically; use checkpoint restore.'}
  }
  function plan(input={}){
@@ -147,10 +148,16 @@ export function createMcpWorkflowEngine({list,execute,storageDir=join(process.en
  }
  async function create(input={}){
   const parsed=validateNodes(input.nodes,list,{allowSideEffects:input.allowSideEffects===true})
+  let budget={}
+  if(typeof resourceBudget==='function'){
+   try{budget=await resourceBudget()||{}}catch{budget={}}
+  }
+  const pressure=budget.lowMemory===true||(Number.isInteger(budget.thermalStatus)&&budget.thermalStatus>=4)
+  const effectiveConcurrency=Math.min(maxInt(input.concurrency,2,4),pressure?1:4)
   const id='wf-'+randomBytes(12).toString('hex'),now=Date.now()
   const doc={schema:1,id,status:'queued',createdAt:now,updatedAt:now,revision:0,
    cancelRequested:false,allowSideEffects:input.allowSideEffects===true,
-   concurrency:maxInt(input.concurrency,2,4),nodes:parsed.nodes.map(n=>({...n,status:'pending'})),
+   concurrency:effectiveConcurrency,resourceLimited:pressure,nodes:parsed.nodes.map(n=>({...n,status:'pending'})),
    events:[]}
   event(doc,'created')
   await persist(doc)
