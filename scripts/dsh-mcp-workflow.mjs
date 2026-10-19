@@ -182,7 +182,10 @@ export function createMcpWorkflowEngine({list,execute,storageDir=join(process.en
      n.status='blocked';event(doc,'blocked',n.id);changed=true
     }
    }
-   const ready=doc.nodes.filter(n=>n.status==='pending'&&n.dependsOn.every(d=>doc.nodes.find(x=>x.id===d)?.status==='completed')).slice(0,doc.concurrency)
+   const eligible=doc.nodes.filter(n=>n.status==='pending'&&n.dependsOn.every(d=>doc.nodes.find(x=>x.id===d)?.status==='completed'))
+   // Never run writes concurrently with each other or with reads within a batch.
+   const nextWrite=eligible.find(n=>n.effect==='write')
+   const ready=nextWrite?[nextWrite]:eligible.slice(0,doc.concurrency)
    if(!ready.length){if(changed)continue;break}
    for(const n of ready){n.status='running';n.startedAt=Date.now();event(doc,'start',n.id)}
    doc.updatedAt=Date.now();doc.revision++;await persist(doc)
