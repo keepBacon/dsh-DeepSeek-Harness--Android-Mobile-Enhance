@@ -845,6 +845,9 @@ async function call(name,a={}){
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const [{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
 async function selfTest(){
  await sdk()
+ const ctxTypes=await import(pathToFileURL(requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js')).href)
+ for(const key of ['ListResourcesRequestSchema','ListResourceTemplatesRequestSchema','ReadResourceRequestSchema','ListPromptsRequestSchema','GetPromptRequestSchema'])
+  if(!ctxTypes[key])throw Error('Installed MCP SDK lacks P2 '+key)
  const p0search=await call('mcp_tool_search',{query:'protocol_decode',limit:5})
  if(!p0search.tools.some(t=>t.name==='protocol_decode'))throw Error('dynamic MCP tool search failed')
  const p0audit=await call('mcp_registry_audit',{})
