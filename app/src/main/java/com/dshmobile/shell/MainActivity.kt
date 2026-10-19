@@ -89,6 +89,19 @@ class MainActivity : ComponentActivity() {
     databaseExportPicker.launch(name.take(120).ifBlank{"database-file"})
   }
 
+  private val mcpSafBridge by lazy { McpSafBridge(this) }
+  private val mcpSafPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      Thread({
+        try {
+          val name = mcpSafBridge.importSelected(uri)
+          runOnUiThread { showSimpleMessage("已导入 MCP 文档", name + "\n通过 dsh://android/saf 可列出。文档已复制到应用私有目录，可随时清空。") }
+        } catch (error: Throwable) {
+          runOnUiThread { showSimpleMessage("MCP 文档导入失败", error.message ?: "未知错误") }
+        }
+      }, "dsh-mcp-saf-import").start()
+    }
+  }
   private var pendingDatabasePartitionId: String? = null
   private val databaseFilePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
     val partition = pendingDatabasePartitionId
@@ -4269,6 +4282,30 @@ class MainActivity : ComponentActivity() {
       }
     })
 
+    root.addView(Button(this).apply {
+      text = "选择文本文件供 MCP 读取（SAF · 最多 12 个，每个 128 KiB）"
+      setOnClickListener { dialog.dismiss(); mcpSafPicker.launch(arrayOf("text/*", "application/json", "application/xml")) }
+    })
+    root.addView(Button(this).apply {
+      text = "清空已导入的 MCP SAF 文档"
+      setOnClickListener {
+        dialog.dismiss()
+        android.app.AlertDialog.Builder(this@MainActivity)
+          .setTitle("清空 MCP 授权文档")
+          .setMessage("永久删除通过 MCP 文件选择器复制到应用私有目录的全部文档；原始手机文件不受影响。")
+          .setNegativeButton("取消", null)
+          .setPositiveButton("清空") { _, _ ->
+            Thread({
+              try {
+                val count = mcpSafBridge.clear()
+                runOnUiThread { showSimpleMessage("MCP 文档已清空", "已移除 " + count + " 个 MCP 文档副本") }
+              } catch (error: Throwable) {
+                runOnUiThread { showSimpleMessage("清空失败", error.message ?: "未知错误") }
+              }
+            }, "dsh-mcp-saf-clear").start()
+          }.show()
+      }
+    })
     engineManager.listMcpServers().forEach { server ->
       val target = if (server.transport == McpConfigManager.HTTP) server.url else server.command + " " + server.args.joinToString(" ")
       root.addView(TextView(this).apply {
