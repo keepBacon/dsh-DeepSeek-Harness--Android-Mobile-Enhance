@@ -77,6 +77,7 @@ export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||
     safContentBridgeAvailable:v.safContentBridgeAvailable===true,
     availableMemoryBytes:Number.isSafeInteger(v.availableMemoryBytes)?v.availableMemoryBytes:null,
     lowMemory:v.lowMemory===true,
+    thermalStatus:Number.isSafeInteger(v.thermalStatus)?v.thermalStatus:-1,
     batteryOptimizationExempt:v.batteryOptimizationExempt===true,
     root:'not-probed',shizuku:'not-probed',accessibility:'not-probed',
     note:'Permission and provider availability are separate from authorization.'}
