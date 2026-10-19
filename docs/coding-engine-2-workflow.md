@@ -202,14 +202,28 @@ The Android native configuration manager publishes an atomic capability
 snapshot with SDK, ABI and observed app permission checks, passed through
 `DSH_MCP_ANDROID_CAPABILITIES_FILE`. Root and Shizuku remain explicitly
 "not-probed", not authorized. Snapshot status is not a substitute for
-real Shizuku/Root permission negotiation. Arbitrary SAF ContentResolver
-URIs are **not** exported into Node MCP resources; this requires an
-explicit Android consent and URI-grant bridge before claiming support.
+real Shizuku/Root permission negotiation. An explicit native Android
+SAF picker (MCP Manager > select text document) copies user-selected
+UTF-8 text only (maximum 12 files, 128 KiB each) into a private folder;
+a dedicated native UI control deletes those copies. Node may only read
+the authorized indexed copy at `dsh://android/saf/{id}` after checking
+ID, file hash, size and symlink status. `dsh://android/saf` lists
+the selected copies but never reveals original `content://` URIs or
+scans arbitrary SAF grants.
+
+Native capability snapshots now also contain persisted SAF read grant
+count, available memory, low-memory status, thermal status (where supported)
+and battery-optimization exemption status. When the workflow scheduler
+starts while Android reports low memory or severe thermal pressure, it
+limits concurrency to one. Existing `android_logcat` has bounded
+time-window filtering; `mcp_android_log_delta` adds a process-local
+incremental cursor that never stores raw log output across restarts.
+
 The workflow engine cannot promise execution after the Android process is
 killed; background persistence is for recovery, not guaranteed continuation.
 
-Run `node scripts/test-mcp-context.mjs` for resource/prompt safety
-tests. A green CI result does not establish device integration success.
+Run `node scripts/test-mcp-context.mjs` and `node scripts/test-mcp-log-cursor.mjs`
+for resource/prompt/SAF/log safety tests. A green CI result does not establish device integration success.
 
 ## Resource budgets
 
