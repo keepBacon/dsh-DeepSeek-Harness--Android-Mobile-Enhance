@@ -75,14 +75,18 @@ export async function codeVerify(input={}){
   let child,ended=false,timedOut=false,spawnFailure=null
   const stdout=ringBuffer(MAX_CAPTURE),stderr=ringBuffer(MAX_CAPTURE)
   let timer
-  try{child=spawn(binary,argv,{cwd:root,shell:false,stdio:['ignore','pipe','pipe'],env:{...process.env,GIT_TERMINAL_PROMPT:'0',CI:'1',NO_COLOR:'1'}})}
+  try{child=spawn(binary,argv,{cwd:root,shell:false,detached:process.platform!=='win32',stdio:['ignore','pipe','pipe'],env:{...process.env,GIT_TERMINAL_PROMPT:'0',CI:'1',NO_COLOR:'1'}})}
   catch(error){done({preset:input.preset,ok:false,exitCode:null,error:String(error),durationMs:0});return}
   child.stdout.on('data',b=>stdout.add(b))
   child.stderr.on('data',b=>stderr.add(b))
   child.on('error',e=>{spawnFailure=e})
   timer=setTimeout(()=>{
    timedOut=true
-   try{child.kill('SIGKILL')}catch{}
+   // Kill the entire verifier process group, including npm/Gradle descendants.
+   // Android and Linux support POSIX groups; Windows falls back to direct child.
+   if(process.platform!=='win32'&&child.pid){
+    try{process.kill(-child.pid,'SIGKILL')}catch{try{child.kill('SIGKILL')}catch{}}
+   }else{try{child.kill('SIGKILL')}catch{}}
   },timeoutMs)
   child.on('close',(code,signal)=>{
    if(ended)return;ended=true;clearTimeout(timer)

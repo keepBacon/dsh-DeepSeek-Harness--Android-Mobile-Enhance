@@ -61,7 +61,73 @@ class MainActivity : ComponentActivity() {
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val recoveryControls = mutableListOf<View>()
+  private var pluginRecoveryButton: Button? = null
+  private var pageWatchGeneration = 0
   private var pendingPickCallback: String? = null
+  private var pendingDatabaseExportReference: String? = null
+  private val databaseExportPicker=registerForActivityResult(
+    ActivityResultContracts.CreateDocument("application/octet-stream")
+  ){ uri ->
+    val reference=pendingDatabaseExportReference
+    pendingDatabaseExportReference=null
+    if(uri!=null && reference!=null){
+      Thread({
+        try {
+          val output=contentResolver.openOutputStream(uri)
+            ?: throw java.io.IOException("无法打开目标文件")
+          output.use {
+            DshDatabaseAttachments(this).exportTo(reference,it,
+              DshDatabaseStore.WriteAuthorization.fromConfirmedUserAction("attachment:read"))
+          }
+          runOnUiThread{showSimpleMessage("数据库文件已导出","文件已保存到选定位置")}
+        }catch(error:Throwable){
+          runOnUiThread{showSimpleMessage("数据库文件导出失败",error.message ?: "未知错误")}
+        }
+      },"dsh-database-export").start()
+    }
+  }
+  private fun exportDatabaseFile(reference:String,name:String){
+    pendingDatabaseExportReference=reference
+    databaseExportPicker.launch(name.take(120).ifBlank{"database-file"})
+  }
+
+  private val mcpSafBridge by lazy { McpSafBridge(this) }
+  private val mcpSafPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri != null) {
+      Thread({
+        try {
+          val name = mcpSafBridge.importSelected(uri)
+          runOnUiThread { showSimpleMessage("已导入 MCP 文档", name + "\n通过 dsh://android/saf 可列出。文档已复制到应用私有目录，可随时清空。") }
+        } catch (error: Throwable) {
+          runOnUiThread { showSimpleMessage("MCP 文档导入失败", error.message ?: "未知错误") }
+        }
+      }, "dsh-mcp-saf-import").start()
+    }
+  }
+  private var pendingDatabasePartitionId: String? = null
+  private val databaseFilePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val partition = pendingDatabasePartitionId
+    pendingDatabasePartitionId = null
+    if (uri != null && partition != null) {
+      Thread({
+        try {
+          val title=contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)
+            ?.use{ cursor->if(cursor.moveToFirst())cursor.getString(0) else null }
+            ?.take(180) ?: "导入文件"
+          contentResolver.openInputStream(uri)?.use { source ->
+            DshDatabaseUi(this,::pickDatabaseFile).importSelected(partition,source,title)
+          } ?: runOnUiThread{showSimpleMessage("导入失败","无法读取所选文件")}
+        } catch(error:Throwable) {
+          runOnUiThread{showSimpleMessage("数据库文件导入失败",error.message ?: "未知错误")}
+        }
+      },"dsh-database-import").start()
+    }
+  }
+  private fun pickDatabaseFile(partitionId: String) {
+    pendingDatabasePartitionId = partitionId
+    databaseFilePicker.launch(arrayOf("*/*"))
+  }
+
   private var filePathCallback: ValueCallback<Array<Uri>>? = null
   private var pendingWorkspaceImportPath: String? = null
   private var legacyDirectoryPermissionPending = false
@@ -294,8 +360,25 @@ class MainActivity : ComponentActivity() {
     root.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     guideView = buildGuideView()
     root.addView(guideView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    // Native escape hatch independent of the Cordis/React plugin tree.
+    pluginRecoveryButton = Button(this).apply {
+      text = "插件故障恢复"
+      visibility = View.GONE
+      setOnClickListener { confirmPluginFailureRecovery() }
+    }
+    root.addView(pluginRecoveryButton, FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+      android.view.Gravity.TOP or android.view.Gravity.END,
+    ).apply { topMargin = (75 * resources.displayMetrics.density).toInt() })
     setContentView(root)
     configureWebView()
+    try {
+      DshDatabaseBroker.attach(this)
+      DshDatabaseBroker.writeEndpoint(this)
+    } catch(error:Throwable) {
+      Log.e("DSH-Database","Database broker startup failed",error)
+      DshDatabaseBroker.deleteEndpoint(this)
+    }
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
         handleBackPressed()
@@ -326,6 +409,8 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    DshDatabaseBroker.deleteEndpoint(this)
+    DshDatabaseBroker.detach()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
     try {
@@ -382,6 +467,46 @@ class MainActivity : ComponentActivity() {
 
   private fun fallbackBackNavigation() {
     if (webView.canGoBack()) webView.goBack() else finishAfterTransition()
+  }
+
+  private fun confirmPluginFailureRecovery() {
+    android.app.AlertDialog.Builder(this)
+      .setTitle("恢复插件故障")
+      .setMessage("DSH 页面加载/重连异常。是否备份 web profile 配置并停用第三方插件？保留安装文件、聊天记录和 API Key。此操作由你确认后才执行。")
+      .setNegativeButton("取消", null)
+      .setNeutralButton("复制诊断") { _, _ ->
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("DSH diagnostics", engineManager.engineDiagnostics(12000)))
+      }
+      .setPositiveButton("备份并安全恢复") { _, _ ->
+        runProfileMutation("正在隔离故障插件…") { engineManager.disableAllUserPluginsForRecovery() }
+      }.show()
+  }
+
+  /**
+   * WebSocket reconnection can leave HTTP healthy while the React plugin UI
+   * remains stuck. Observe text only, never run a loop that reloads the Host.
+   * The recovery control is native and requires an explicit user decision.
+   */
+  private fun monitorPluginPageStall(view: WebView) {
+    val generation = ++pageWatchGeneration
+    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    var consecutiveStalls = 0
+    fun check(remaining: Int) {
+      if (remaining <= 0 || generation != pageWatchGeneration || isFinishing || isDestroyed) return
+      if (view.visibility != View.VISIBLE) return
+      view.evaluateJavascript("""(() => {
+        const txt = (document.body?.innerText || '').slice(0,12000);
+        return /自动重连中|正在重新连接|reconnecting|正在加载|加载中/.test(txt);
+      })()""") { raw ->
+        if (generation != pageWatchGeneration) return@evaluateJavascript
+        consecutiveStalls = if (raw == "true") consecutiveStalls + 1 else 0
+        if (consecutiveStalls >= 3) pluginRecoveryButton?.visibility = View.VISIBLE
+        if (consecutiveStalls == 0) pluginRecoveryButton?.visibility = View.GONE
+        handler.postDelayed({ check(remaining - 1) }, 6_000L)
+      }
+    }
+    handler.postDelayed({ check(25) }, 6_000L)
   }
 
   private fun configureWebView() {
@@ -445,11 +570,33 @@ class MainActivity : ComponentActivity() {
         return true
       }
 
-      override fun onReceivedError(view: WebView, errorCode: Int, description: String, failingUrl: String) {
-        if (isEngineSource(failingUrl)) {
-          showStartingState("正在重新连接 DSH…", description)
-          startEngineFlow()
+      // Modern WebView reports failed JS/CSS/plugin fetches separately from
+      // main-document navigation. A broken plugin resource must not hide the
+      // entire chat shell and start an endless Host reload loop.
+      override fun onReceivedError(
+        view: WebView, request: WebResourceRequest,
+        error: android.webkit.WebResourceError,
+      ) {
+        val url = request.url.toString()
+        if (!request.isForMainFrame || !isEngineSource(url)) {
+          if (isEngineSource(url)) {
+            Log.w("dsh-web", "Non-main-frame resource failed (no Host restart): " +
+              url.substringBefore('?').take(240))
+          }
+          return
         }
+        pluginRecoveryButton?.visibility = View.VISIBLE
+        showStartingState("正在重新连接 DSH…", error.description?.toString().orEmpty())
+        startEngineFlow()
+      }
+
+      @Suppress("DEPRECATION")
+      override fun onReceivedError(view: WebView, errorCode: Int, description: String, failingUrl: String) {
+        // On API 23+ the overload with isForMainFrame is authoritative.
+        if (Build.VERSION.SDK_INT >= 23) return
+        if (!isEngineSource(failingUrl)) return
+        showStartingState("正在重新连接 DSH…", description)
+        startEngineFlow()
       }
 
       override fun onReceivedHttpError(
@@ -476,6 +623,7 @@ class MainActivity : ComponentActivity() {
         pushSystemDark(view)
         installMobileUiBridge(view)
         installPassiveToolCallMonitor(view)
+        monitorPluginPageStall(view)
       }
     }
     // WebView 下载：会话日志导出（/api/session.export）与其余引擎源下载
@@ -590,6 +738,8 @@ class MainActivity : ComponentActivity() {
         onOpenPluginManager = { runOnUiThread { showPluginManager() } },
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
+        onOpenDatabase = { runOnUiThread { DshDatabaseUi(this, ::pickDatabaseFile, ::exportDatabaseFile).open() } },
+        onActiveDatabaseScope = { id, path -> verifyAndSetDatabaseScope(id, path) },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
         onOpenSkillImporter = { runOnUiThread { skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream")) } },
         onListSkills = { skillManager.listJson() },
@@ -2094,6 +2244,7 @@ class MainActivity : ComponentActivity() {
           if (name === 'processes') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h16M4 17h12"/><circle cx="17" cy="7" r="2"/><circle cx="7" cy="17" r="2"/></svg>';
           if (name === 'packages') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l8-4 8 4-8 4z"/><path d="M4 7v10l8 4 8-4V7M12 11v10"/></svg>';
           if (name === 'git') return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v8a4 4 0 0 0 4 4h6"/><circle cx="7" cy="4" r="2"/><circle cx="17" cy="17" r="2"/><circle cx="7" cy="13" r="2"/></svg>';
+          if (name === 'database') return '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 4 18 4 18 0V5M3 12c0 4 18 4 18 0"/></svg>';
           if (name === 'network') return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
           return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h5"/></svg>';
         };
@@ -2177,8 +2328,18 @@ class MainActivity : ComponentActivity() {
         };
         const syncActiveWorkspace = async () => {
           const sessionId = activeSessionId();
-          if (!sessionId || workspaceSyncRunning) return;
+          if (!sessionId) {
+            try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+            lastWorkspaceSyncKey = '';
+            return;
+          }
+          if (workspaceSyncRunning) {
+            try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+            return;
+          }
           workspaceSyncRunning = true;
+          // Invalidate prior grants before asynchronous session/list verification.
+          try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
           try {
             const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
             const apiUrl = new URL('api/session/list', document.baseURI).href;
@@ -2200,7 +2361,11 @@ class MainActivity : ComponentActivity() {
               ? envelope.result.value.items : [];
             const session = items.find((item) => item && item.sessionId === sessionId);
             const cwd = session && typeof session.cwd === 'string' ? session.cwd : '';
-            if (!cwd || cwd.charAt(0) !== '/') return;
+            if (!cwd || cwd.charAt(0) !== '/') {
+              try { window.androidBridge && window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,null,null); } catch (_) {}
+              return;
+            }
+            if (activeSessionId() !== sessionId) return;
             const key = sessionId + '\n' + cwd;
             if (key === lastWorkspaceSyncKey) return;
             let accepted = false;
@@ -2208,7 +2373,11 @@ class MainActivity : ComponentActivity() {
               accepted = !!(window.androidBridge
                 && window.androidBridge.setCurrentWorkspacePath(BRIDGE_CAP, cwd));
             } catch (_) {}
-            if (accepted) lastWorkspaceSyncKey = key;
+            if (accepted) {
+              const scopeOk = !!(window.androidBridge &&
+                window.androidBridge.setActiveDatabaseScope(BRIDGE_CAP,sessionId,cwd));
+              if (scopeOk) lastWorkspaceSyncKey = key;
+            }
           } catch (_) {
             // Session navigation can race the Host list update. The next
             // structural navigation/click retries without changing the root.
@@ -2740,6 +2909,12 @@ class MainActivity : ComponentActivity() {
               appendToolButton(tool, () => runTool(tool));
             });
 
+            appendSectionLabel('数据');
+            appendToolButton({id:'database',label:'数据库',hint:'长期记忆、文件、权限与安全数据分区'}, () => {
+              closeToolsPanel();
+              try { window.androidBridge && window.androidBridge.openDatabase(BRIDGE_CAP); }
+              catch (error) { console.warn('Database UI unavailable',error); }
+            });
             appendSectionLabel('DSH 桌面功能');
             DSH_SURFACE_DEFS.forEach((surface) => {
               appendToolButton(surface, (button) => {
@@ -4182,6 +4357,30 @@ class MainActivity : ComponentActivity() {
       }
     })
 
+    root.addView(Button(this).apply {
+      text = "选择文本文件供 MCP 读取（SAF · 最多 12 个，每个 128 KiB）"
+      setOnClickListener { dialog.dismiss(); mcpSafPicker.launch(arrayOf("text/*", "application/json", "application/xml")) }
+    })
+    root.addView(Button(this).apply {
+      text = "清空已导入的 MCP SAF 文档"
+      setOnClickListener {
+        dialog.dismiss()
+        android.app.AlertDialog.Builder(this@MainActivity)
+          .setTitle("清空 MCP 授权文档")
+          .setMessage("永久删除通过 MCP 文件选择器复制到应用私有目录的全部文档；原始手机文件不受影响。")
+          .setNegativeButton("取消", null)
+          .setPositiveButton("清空") { _, _ ->
+            Thread({
+              try {
+                val count = mcpSafBridge.clear()
+                runOnUiThread { showSimpleMessage("MCP 文档已清空", "已移除 " + count + " 个 MCP 文档副本") }
+              } catch (error: Throwable) {
+                runOnUiThread { showSimpleMessage("清空失败", error.message ?: "未知错误") }
+              }
+            }, "dsh-mcp-saf-clear").start()
+          }.show()
+      }
+    })
     engineManager.listMcpServers().forEach { server ->
       val target = if (server.transport == McpConfigManager.HTTP) server.url else server.command + " " + server.args.joinToString(" ")
       root.addView(TextView(this).apply {
@@ -4884,6 +5083,32 @@ class MainActivity : ComponentActivity() {
     val file: java.io.File?,
     val parent: Boolean = false,
   )
+
+  /** Fail closed: scope identity is published only as a single validated pair. */
+  private fun verifyAndSetDatabaseScope(sessionId: String?, workspace: String?): Boolean {
+    if (sessionId == null || workspace == null) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return true
+    }
+    val validId = sessionId.length in 4..180 &&
+      sessionId.matches(Regex("[a-zA-Z0-9:_./-]+"))
+    if (!validId) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return false
+    }
+    val canonical = try {
+      java.io.File(workspace).canonicalFile
+    } catch (_: Throwable) {
+      DshDatabaseBroker.verifiedScope(null, null)
+      return false
+    }
+    val current = ShellState.lastWorkspacePath(this)
+    val valid = canonical.isDirectory && canonical.canRead() && canonical.canWrite() &&
+      current == canonical.absolutePath
+    DshDatabaseBroker.verifiedScope(if (valid) sessionId else null,
+      if (valid) canonical.absolutePath else null)
+    return valid
+  }
 
   /** Accept a DSH Session cwd only when it is an existing writable directory. */
   private fun rememberActiveWorkspacePath(path: String): Boolean {

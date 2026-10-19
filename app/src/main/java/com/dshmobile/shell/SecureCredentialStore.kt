@@ -25,6 +25,7 @@ object SecureCredentialStore {
   private const val GIT_TOKEN = "git-token"
   private const val SSH_PASSPHRASE = "ssh-passphrase"
   private const val MCP_TOKEN_PREFIX = "mcp-bearer:"
+  private const val DATABASE_SECRET_PREFIX = "database-secret:"
 
   private fun prefs(context: Context) = context.applicationContext
     .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -144,6 +145,28 @@ object SecureCredentialStore {
 
   fun hasMcpBearerToken(context: Context, id: String): Boolean =
     !mcpBearerToken(context, id).isNullOrBlank()
+
+  /** Keystore-encrypted database secrets. Never expose plaintext to MCP JSON. */
+  private fun databaseSecretKey(id: String): String {
+    require(id.matches(Regex("[0-9a-f]{32}"))) { "数据库密钥引用无效" }
+    return DATABASE_SECRET_PREFIX + id
+  }
+
+  fun saveDatabaseSecret(context: Context, id: String, secret: String) {
+    require(secret.isNotBlank() && secret.length <= 16 * 1024 &&
+      secret.none { it.code == 0 }) { "特殊数据无效" }
+    check(prefs(context).edit().putString(databaseSecretKey(id), encrypt(secret)).commit()) {
+      "密钥持久化失败"
+    }
+  }
+
+  /** User-facing UI can check existence, not retrieve actual credentials. */
+  fun hasDatabaseSecret(context: Context, id: String): Boolean =
+    !decrypt(prefs(context).getString(databaseSecretKey(id), null)).isNullOrBlank()
+
+  fun deleteDatabaseSecret(context: Context, id: String) {
+    check(prefs(context).edit().remove(databaseSecretKey(id)).commit()) { "清除凭据失败" }
+  }
 
   fun clearMcpBearerToken(context: Context, id: String) {
     prefs(context).edit().remove(mcpTokenKey(id)).apply()

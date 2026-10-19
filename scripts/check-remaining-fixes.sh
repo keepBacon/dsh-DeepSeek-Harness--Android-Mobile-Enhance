@@ -628,10 +628,25 @@ must "$MTB" "case 'code_edit_transaction': return runCodeTransaction(a)"
 must "$BT" 'dsh-coding-engine.mjs'
 node "$ROOT/scripts/dsh-coding-engine.mjs" --self-test
 node "$ROOT/scripts/dsh-code-index.mjs" --self-test
+node "$ROOT/scripts/test-code-p0.mjs"
+node "$ROOT/scripts/test-code-p1.mjs"
+DSH_MOBILE_CODING_ENABLED=1 DSH_MOBILE_COORDINATION_ENABLED=1 node "$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs" --mcp-coding-self-test
 node "$ROOT/scripts/dsh-code-transactions.mjs" --self-test
 node "$ROOT/scripts/dsh-code-diagnostics.mjs" --self-test
 node "$ROOT/scripts/dsh-code-verify.mjs" --self-test
 node "$ROOT/scripts/dsh-code-task-link.mjs" --self-test
+node "$ROOT/scripts/test-tool-registry-parity.mjs"
+node "$ROOT/scripts/test-mcp-governance.mjs"
+node "$ROOT/scripts/test-mcp-modern-stdio.mjs"
+node "$ROOT/scripts/test-mcp-supervisor.mjs"
+node "$ROOT/scripts/test-mcp-workflow.mjs"
+bash "$ROOT/scripts/check-webview-plugin-failure-isolation.sh"
+node "$ROOT/scripts/test-mcp-context.mjs"
+node "$ROOT/scripts/test-mcp-log-cursor.mjs"
+must "$ROOT/scripts/dsh-subagent-coordination.mjs" "task board exceeds 256 KiB"
+must "$ROOT/scripts/dsh-code-verify.mjs" "process.kill(-child.pid,'SIGKILL')"
+must "$ROOT/scripts/dsh-code-task-link.mjs" "CODING_TASK_OUT_OF_SCOPE"
+
 node "$ROOT/scripts/dsh-tool-metrics.mjs" --self-test
 node "$ROOT/scripts/dsh-code-repair-cycle.mjs" --self-test
 # Feature switches must affect actual MCP capability discovery and invocation.
@@ -648,4 +663,31 @@ import_output="$(cd "$ROOT" && node --input-type=module -e 'await import("./scri
 [ -z "$import_output" ] || { echo "[FAIL] Coding module import had side effects: $import_output"; exit 1; }
 must "$MCM" 'DSH_MOBILE_TOOL_METRICS_ENABLED'
 must "$MTB" "case 'code_task_verify': return codingTaskLink.verify(a)"
+# Database native foundation: execute the actual SQL schema against SQLite.
+python3 "$ROOT/scripts/test-database-schema.py"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'authorization.check("entry:write:$partitionId")'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'Model read denied'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'special") JSONObject.NULL'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseAttachments.kt" 'authorization.check("attachment:import")'
+must "$MA" "openDatabase(BRIDGE_CAP)"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/AndroidBridge.kt" "fun openDatabase(capability: String)"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseUi.kt" "private fun confirmFormat()"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseUi.kt" "5000L"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseAttachments.kt" "fun pruneUnreferenced("
+node --check "$ROOT/scripts/dsh-database-client.mjs"
+node "$ROOT/scripts/test-database-broker.mjs"
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseBroker.kt" 'val approved=try{confirm(action,partition,title,body,entry)}'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseBroker.kt" 'store.listPartitions(scope,forModel=true)'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseBroker.kt" 'store.canModelWrite(id,scope)'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseBroker.kt" 'snapshotGeneration()==initialGeneration'
+must "$ROOT/app/src/main/java/com/dshmobile/shell/DshDatabaseStore.kt" 'fun canModelWrite('
+must "$ROOT/app/src/main/java/com/dshmobile/shell/AndroidBridge.kt" 'fun setActiveDatabaseScope('
+must "$MA" 'verifyAndSetDatabaseScope(id, path)'
+if grep -Fq 'setActiveDatabaseSession(' "$MA"; then
+  echo '[FAIL] Stale unpaired database session bridge remains' >&2
+  exit 1
+fi
+must "$ROOT/app/src/main/java/com/dshmobile/shell/McpConfigManager.kt" 'DSH_DATABASE_ENDPOINT_FILE'
+must "$ROOT/scripts/dsh-mobile-toolbox-mcp.mjs" "case 'database_search': return databaseCall("
+must "$ROOT/build-termux.sh" 'dsh-database-client.mjs'
 echo '[OK] remaining medium/low regression checks passed'

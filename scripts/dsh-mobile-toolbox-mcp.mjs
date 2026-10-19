@@ -10,6 +10,16 @@ import {codeVerify,codeVerifyBatch,verificationRecipes} from './dsh-code-verify.
 import {createCodingTaskLink} from './dsh-code-task-link.mjs'
 import {createToolTelemetry} from './dsh-tool-metrics.mjs'
 import {codeRepairCycle} from './dsh-code-repair-cycle.mjs'
+import {databaseCall} from './dsh-database-client.mjs'
+import {createMcpGovernance} from './dsh-mcp-governance.mjs'
+import {createMcpWorkflowEngine} from './dsh-mcp-workflow.mjs'
+import {createMcpContext} from './dsh-mcp-context.mjs'
+import {createMcpLogCursor} from './dsh-mcp-log-cursor.mjs'
+import {startModernStdio} from './dsh-mcp-modern-stdio.mjs'
+import {readFileSync} from 'node:fs'
+import {codeAstEdit,codeRefactor,codeContractCheck,codePatchConflict,codeRegressionBisect,codeFailureCluster,codeFixVerify,codeCheckpoint} from './dsh-code-p1.mjs'
+import {agentTaskDecompose,agentScopeAllocate,agentSharedContext,agentResultReview,agentMergeGuard,agentFailureRecovery} from './dsh-agent-p1.mjs'
+import {codeSemanticIndex,codeSymbolReferences,codeDependencyGraph,codeCallGraph,codeChangeImpact,codeRootCause,codePatchPlan,codeTestImpact} from './dsh-code-p0.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -34,10 +44,53 @@ const codingTaskLink=createCodingTaskLink(coordinator)
 const telemetry=createToolTelemetry({enabled:process.env.DSH_MOBILE_TOOL_METRICS_ENABLED==='1'})
 const COORDINATION_ENABLED=process.env.DSH_MOBILE_COORDINATION_ENABLED!=='0'
 const CODING_ENABLED=process.env.DSH_MOBILE_CODING_ENABLED==='1'
-const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes','code_task_verify','code_repair_cycle'])
-const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update'])
+const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_edit_transaction','code_index_refresh','code_index_query','code_transaction_apply','code_transaction_status','code_transaction_recover','code_diagnostics','code_test_select','code_verify','code_verify_batch','code_verify_recipes','code_task_verify','code_repair_cycle','code_semantic_index','code_symbol_references','code_dependency_graph','code_call_graph','code_change_impact','code_root_cause','code_patch_plan','code_test_impact','code_ast_edit','code_refactor','code_contract_check','code_patch_conflict','code_regression_bisect','code_failure_cluster','code_fix_verify','code_checkpoint'])
+const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update','agent_task_decompose','agent_scope_allocate','agent_shared_context','agent_result_review','agent_merge_guard','agent_failure_recovery'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
 const tools=[
+ {name:'mcp_android_environment',description:'Report executable availability for Termux, Git and Android development tools',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'mcp_android_log_delta',description:'Read bounded Android logcat delta with process-local cursor and deduplication',inputSchema:{type:'object',properties:{cursor:{type:'string'},package:{type:'string'},tag:{type:'string'},level:{type:'string'},maxLines:{type:'integer'}},additionalProperties:false}},
+ {name:'mcp_context_budget',description:'Extract bounded query-relevant lines preserving source fingerprint',inputSchema:{type:'object',properties:{text:{type:'string'},query:{type:'string'},maxChars:{type:'integer'}},required:['text'],additionalProperties:false}},
+ {name:'mcp_android_diagnostics',description:'Read native Android capabilities snapshot or report unavailable',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'mcp_build_artifacts',description:'Inspect configured APK build output metadata without claiming verification',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'mcp_workflow_plan',description:'Validate workflow DAG and estimate execution without running tools',inputSchema:{type:'object',properties:{nodes:{type:'array'},concurrency:{type:'integer'},allowSideEffects:{type:'boolean'}},required:["nodes"],additionalProperties:false}},
+ {name:'mcp_workflow_execute',description:'Start persisted bounded workflow; returns ID without awaiting completion',inputSchema:{type:'object',properties:{nodes:{type:'array'},concurrency:{type:'integer'},allowSideEffects:{type:'boolean'}},required:["nodes"],additionalProperties:false}},
+ {name:'mcp_workflow_status',description:'Read persisted workflow state',inputSchema:{type:'object',properties:{id:{type:'string'},includeResults:{type:'boolean'}},required:["id"],additionalProperties:false}},
+ {name:'mcp_workflow_cancel',description:'Cooperatively cancel workflow without unsafe killing running tools',inputSchema:{type:'object',properties:{id:{type:'string'}},required:["id"],additionalProperties:false}},
+ {name:'mcp_checkpoint_restore',description:'Inspect or explicitly resume read-only pending nodes; never replay interrupted writes',inputSchema:{type:'object',properties:{id:{type:'string'},action:{type:'string',enum:['inspect','resume']}},required:["id"],additionalProperties:false}},
+ {name:'mcp_result_compact',description:'Generate SHA-256 evidence and bounded JSON preview',inputSchema:{type:'object',properties:{value:{},maxChars:{type:'integer'}},required:["value"],additionalProperties:false}},
+ {name:'mcp_capability_report',description:'Report registered tool and runtime workflow capabilities',inputSchema:{type:'object',properties:{},required:[],additionalProperties:false}},
+ {name:'mcp_trace_analyze',description:'Inspect bounded execution trace and latencies without recording tool args',inputSchema:{type:'object',properties:{id:{type:'string'},limit:{type:'integer'}},required:[],additionalProperties:false}},
+ {name:'mcp_tool_search',description:'Search active MCP tools by name and description',inputSchema:{type:'object',properties:{query:{type:'string',minLength:1,maxLength:160},limit:{type:'integer',minimum:1,maximum:30}},required:["query"],additionalProperties:false}},
+ {name:'mcp_registry_audit',description:'Audit local declared handlers and schema registrations',inputSchema:{type:'object',properties:{},required:[],additionalProperties:false}},
+ {name:'mcp_tool_probe',description:'Safe non-mutating handler probe; unsupported tools are not invoked',inputSchema:{type:'object',properties:{name:{type:'string',minLength:1,maxLength:180}},required:["name"],additionalProperties:false}},
+ {name:'mcp_server_health',description:'Check embedded server calls errors and uptime',inputSchema:{type:'object',properties:{},required:[],additionalProperties:false}},
+
+ {name:'code_ast_edit',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},paths:{type:'array',items:{type:'string'}},symbol:{type:'string'},expectedSha256:{type:'string'},newText:{type:'string'},oldName:{type:'string'},newName:{type:'string'},originPath:{type:'string'},allowPartialScope:{type:'boolean'},dryRun:{type:'boolean'},limit:{type:'integer'},changes:{type:'array'},good:{type:'string'},bad:{type:'string'},log:{type:'string'},candidates:{type:'array'},verifications:{type:'array'},action:{type:'string'},id:{type:'string'}},required:["path","symbol","expectedSha256","newText"],additionalProperties:false}},
+ {name:'code_refactor',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},paths:{type:'array',items:{type:'string'}},symbol:{type:'string'},expectedSha256:{type:'string'},newText:{type:'string'},oldName:{type:'string'},newName:{type:'string'},originPath:{type:'string'},allowPartialScope:{type:'boolean'},dryRun:{type:'boolean'},limit:{type:'integer'},changes:{type:'array'},good:{type:'string'},bad:{type:'string'},log:{type:'string'},candidates:{type:'array'},verifications:{type:'array'},action:{type:'string'},id:{type:'string'}},required:["oldName","newName","originPath","paths"],additionalProperties:false}},
+ {name:'code_contract_check',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},paths:{type:'array',items:{type:'string'}},symbol:{type:'string'},expectedSha256:{type:'string'},newText:{type:'string'},oldName:{type:'string'},newName:{type:'string'},originPath:{type:'string'},allowPartialScope:{type:'boolean'},dryRun:{type:'boolean'},limit:{type:'integer'},changes:{type:'array'},good:{type:'string'},bad:{type:'string'},log:{type:'string'},candidates:{type:'array'},verifications:{type:'array'},action:{type:'string'},id:{type:'string'}},required:[],additionalProperties:false}},
+ {name:'code_patch_conflict',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},paths:{type:'array',items:{type:'string'}},symbol:{type:'string'},expectedSha256:{type:'string'},newText:{type:'string'},oldName:{type:'string'},newName:{type:'string'},originPath:{type:'string'},allowPartialScope:{type:'boolean'},dryRun:{type:'boolean'},limit:{type:'integer'},changes:{type:'array'},good:{type:'string'},bad:{type:'string'},log:{type:'string'},candidates:{type:'array'},verifications:{type:'array'},action:{type:'string'},id:{type:'string'}},required:["changes"],additionalProperties:false}},
+ {name:'code_regression_bisect',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},paths:{type:'array',items:{type:'string'}},symbol:{type:'string'},expectedSha256:{type:'string'},newText:{type:'string'},oldName:{type:'string'},newName:{type:'string'},originPath:{type:'string'},allowPartialScope:{type:'boolean'},dryRun:{type:'boolean'},limit:{type:'integer'},changes:{type:'array'},good:{type:'string'},bad:{type:'string'},log:{type:'string'},candidates:{type:'array'},verifications:{type:'array'},action:{type:'string'},id:{type:'string'}},required:["good","bad"],additionalProperties:false}},
+ {name:'code_failure_cluster',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},paths:{type:'array',items:{type:'string'}},symbol:{type:'string'},expectedSha256:{type:'string'},newText:{type:'string'},oldName:{type:'string'},newName:{type:'string'},originPath:{type:'string'},allowPartialScope:{type:'boolean'},dryRun:{type:'boolean'},limit:{type:'integer'},changes:{type:'array'},good:{type:'string'},bad:{type:'string'},log:{type:'string'},candidates:{type:'array'},verifications:{type:'array'},action:{type:'string'},id:{type:'string'}},required:["log"],additionalProperties:false}},
+ {name:'code_fix_verify',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},paths:{type:'array',items:{type:'string'}},symbol:{type:'string'},expectedSha256:{type:'string'},newText:{type:'string'},oldName:{type:'string'},newName:{type:'string'},originPath:{type:'string'},allowPartialScope:{type:'boolean'},dryRun:{type:'boolean'},limit:{type:'integer'},changes:{type:'array'},good:{type:'string'},bad:{type:'string'},log:{type:'string'},candidates:{type:'array'},verifications:{type:'array'},action:{type:'string'},id:{type:'string'}},required:["candidates","verifications"],additionalProperties:false}},
+ {name:'code_checkpoint',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{root:{type:'string'},path:{type:'string'},paths:{type:'array',items:{type:'string'}},symbol:{type:'string'},expectedSha256:{type:'string'},newText:{type:'string'},oldName:{type:'string'},newName:{type:'string'},originPath:{type:'string'},allowPartialScope:{type:'boolean'},dryRun:{type:'boolean'},limit:{type:'integer'},changes:{type:'array'},good:{type:'string'},bad:{type:'string'},log:{type:'string'},candidates:{type:'array'},verifications:{type:'array'},action:{type:'string'},id:{type:'string'}},required:["paths"],additionalProperties:false}},
+ {name:'agent_task_decompose',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},root:{type:'string'},paths:{type:'array',items:{type:'string'}},tasks:{type:'array'},maxParallel:{type:'integer'},maxAttempts:{type:'integer'}},required:["tasks"],additionalProperties:false}},
+ {name:'agent_scope_allocate',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},root:{type:'string'},paths:{type:'array',items:{type:'string'}},tasks:{type:'array'},maxParallel:{type:'integer'},maxAttempts:{type:'integer'}},required:["boardId","taskId"],additionalProperties:false}},
+ {name:'agent_shared_context',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},root:{type:'string'},paths:{type:'array',items:{type:'string'}},tasks:{type:'array'},maxParallel:{type:'integer'},maxAttempts:{type:'integer'}},required:["boardId"],additionalProperties:false}},
+ {name:'agent_result_review',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},root:{type:'string'},paths:{type:'array',items:{type:'string'}},tasks:{type:'array'},maxParallel:{type:'integer'},maxAttempts:{type:'integer'}},required:["boardId","taskId","paths"],additionalProperties:false}},
+ {name:'agent_merge_guard',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},root:{type:'string'},paths:{type:'array',items:{type:'string'}},tasks:{type:'array'},maxParallel:{type:'integer'},maxAttempts:{type:'integer'}},required:["boardId","taskId","paths"],additionalProperties:false}},
+ {name:'agent_failure_recovery',description:'Bounded P1 engineering operation; see P1 documentation.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},root:{type:'string'},paths:{type:'array',items:{type:'string'}},tasks:{type:'array'},maxParallel:{type:'integer'},maxAttempts:{type:'integer'}},required:["boardId"],additionalProperties:false}},
+ {name:'code_semantic_index',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:[],additionalProperties:false}},
+ {name:'code_symbol_references',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},backend:{type:'string',enum:['python-ast','heuristic']},path:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["symbol"],additionalProperties:false}},
+ {name:'code_dependency_graph',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:[],additionalProperties:false}},
+ {name:'code_call_graph',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["symbol"],additionalProperties:false}},
+ {name:'code_change_impact',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["paths"],additionalProperties:false}},
+ {name:'code_root_cause',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["log"],additionalProperties:false}},
+ {name:'code_patch_plan',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["paths"],additionalProperties:false}},
+ {name:'code_test_impact',description:'Bounded read-only P0 engineering analysis.',inputSchema:{type:'object',properties:{root:{type:'string'},symbol:{type:'string'},paths:{type:'array',items:{type:'string'}},log:{type:'string'},limit:{type:'integer'},depth:{type:'integer'}},required:["paths"],additionalProperties:false}},
+ {name:'database_partitions',description:'List database partitions readable by this active Android host context.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'database_search',description:'Search explicitly readable memory partition text; never returns secrets.',inputSchema:{type:'object',properties:{query:{type:'string',maxLength:120}},required:['query'],additionalProperties:false}},
+ {name:'database_write_request',description:'Ask the Android user to approve a single text create/update/delete in a readable partition.',inputSchema:{type:'object',properties:{action:{type:'string',enum:['create','update','delete']},partitionId:{type:'string'},entryId:{type:'string'},title:{type:'string'},text:{type:'string'}},required:['action','partitionId'],additionalProperties:false}},
  {name:'code_repair_cycle',description:'Execute 1-3 explicitly supplied, SHA-256-guarded candidate fixes, verify with safe recipes, rollback failed edits. Dry-run by default.',inputSchema:{type:'object',properties:{root:{type:'string'},dryRun:{type:'boolean'},budgetMs:{type:'integer',minimum:10000,maximum:300000},candidates:{type:'array',minItems:1,maxItems:3,items:{type:'object',properties:{changes:{type:'array',minItems:1,maxItems:16,items:{type:'object',properties:{path:{type:'string'},expectedSha256:{type:'string'},oldText:{type:'string'},newText:{type:'string'}},required:['path','expectedSha256','oldText','newText']}}},required:['changes']}},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset']}}},required:['candidates','verifications'],additionalProperties:false}},
  {name:'tool_latency_report',description:'Return bounded in-memory MCP tool latency measurements; opt-in via settings.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'code_task_verify',description:'Link a claimed subagent task to bounded verification, evidence and optional finalization; dryRun by default.',inputSchema:{type:'object',properties:{boardId:{type:'string'},taskId:{type:'string'},agentId:{type:'string'},revision:{type:'integer',minimum:0},root:{type:'string'},trackedPaths:{type:'array',minItems:1,maxItems:16,items:{type:'string'}},verifications:{type:'array',minItems:1,maxItems:4,items:{type:'object',properties:{preset:{type:'string',enum:['node-syntax','npm-test','gradle-test','go-test','cargo-test','pytest']},path:{type:'string'},timeoutMs:{type:'integer',minimum:1000,maximum:120000}},required:['preset']}},dryRun:{type:'boolean'},finalize:{type:'boolean'},summary:{type:'string'},concurrency:{type:'integer',minimum:1,maximum:2},stopOnFailure:{type:'boolean'}},required:['boardId','taskId','agentId','revision','trackedPaths','verifications'],additionalProperties:false}},
@@ -369,6 +422,10 @@ function miCommand(session,command,timeoutMs=5000){if(session.closed)throw new E
 function waitDebugStop(session,timeoutMs){for(let i=session.lines.length-1;i>=0&&i>=session.lines.length-20;i--){if(session.lines[i].startsWith('*stopped'))return Promise.resolve(session.lines[i])}return new Promise((resolvePromise,reject)=>{const waiter={resolve:resolvePromise,reject,timer:null};waiter.timer=setTimeout(()=>{session.stopWaiters.delete(waiter);resolvePromise(null)},timeoutMs);session.stopWaiters.add(waiter)})}
 async function closeDebug(session){if(session.closed)return;try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}try{await miCommand(session,'-gdb-exit',3000)}catch{}try{session.child.kill('SIGKILL')}catch{}session.closed=true;DEBUG_SESSIONS.delete(session.id)}
 
+const mcpContext=createMcpContext()
+const mcpLogCursor=createMcpLogCursor({read:a=>call('android_logcat',a)})
+const workflow=createMcpWorkflowEngine({list:visibleTools,execute:(name,args)=>governance.execute(name,args),metrics:telemetry,resourceBudget:()=>mcpContext.nativeSnapshot()})
+const governance=createMcpGovernance({list:visibleTools,catalogue:()=>tools,invoke:(name,args)=>call(name,args),source:()=>readFileSync(fileURLToPath(import.meta.url),'utf8'),telemetry})
 async function call(name,a={}){
  if(!COORDINATION_ENABLED&&COORDINATION_NAMES.has(name))throw new Error('coordination extension disabled in Android settings')
  if(!CODING_ENABLED&&CODING_NAMES.has(name))throw new Error('coding extension disabled in Android settings')
@@ -376,6 +433,50 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'mcp_android_environment': return mcpContext.environment()
+  case 'mcp_android_log_delta': return mcpLogCursor.delta(a)
+  case 'mcp_context_budget': return mcpContext.contextBudget(a)
+  case 'mcp_android_diagnostics': return mcpContext.nativeSnapshot()
+  case 'mcp_build_artifacts': return mcpContext.builds()
+  case 'mcp_workflow_plan': return workflow.plan(a)
+  case 'mcp_workflow_execute': return workflow.execute(a)
+  case 'mcp_workflow_status': return workflow.status(a)
+  case 'mcp_workflow_cancel': return workflow.cancel(a)
+  case 'mcp_checkpoint_restore': return workflow.restore(a)
+  case 'mcp_result_compact': return workflow.compact(a)
+  case 'mcp_capability_report': return workflow.capabilities()
+  case 'mcp_trace_analyze': return workflow.trace(a)
+
+  case 'mcp_tool_search': return governance.search(a)
+  case 'mcp_registry_audit': return governance.audit()
+  case 'mcp_tool_probe': return governance.probe(a)
+  case 'mcp_server_health': return governance.status()
+
+  case 'code_ast_edit': return codeAstEdit(a)
+  case 'code_refactor': return codeRefactor(a)
+  case 'code_contract_check': return codeContractCheck(a)
+  case 'code_patch_conflict': return codePatchConflict(a)
+  case 'code_regression_bisect': return codeRegressionBisect(a)
+  case 'code_failure_cluster': return codeFailureCluster(a)
+  case 'code_fix_verify': return codeFixVerify(a)
+  case 'code_checkpoint': return codeCheckpoint(a)
+  case 'agent_task_decompose': return agentTaskDecompose(a)
+  case 'agent_scope_allocate': return agentScopeAllocate(a)
+  case 'agent_shared_context': return agentSharedContext(a)
+  case 'agent_result_review': return agentResultReview(a)
+  case 'agent_merge_guard': return agentMergeGuard(a)
+  case 'agent_failure_recovery': return agentFailureRecovery(a)
+   case 'code_semantic_index': return codeSemanticIndex(a)
+   case 'code_symbol_references': return codeSymbolReferences(a)
+   case 'code_dependency_graph': return codeDependencyGraph(a)
+   case 'code_call_graph': return codeCallGraph(a)
+   case 'code_change_impact': return codeChangeImpact(a)
+   case 'code_root_cause': return codeRootCause(a)
+   case 'code_patch_plan': return codePatchPlan(a)
+   case 'code_test_impact': return codeTestImpact(a)
+  case 'database_partitions': return databaseCall({op:'list'})
+  case 'database_search': return databaseCall({op:'search',query:a.query})
+  case 'database_write_request': return databaseCall({op:'write',...a})
   case 'tool_latency_report': return telemetry.report()
   case 'code_repair_cycle': return codeRepairCycle(a)
   case 'code_task_verify': return codingTaskLink.verify(a)
@@ -746,6 +847,17 @@ async function call(name,a={}){
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const [{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
 async function selfTest(){
  await sdk()
+ const ctxTypes=await import(pathToFileURL(requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js')).href)
+ for(const key of ['ListResourcesRequestSchema','ListResourceTemplatesRequestSchema','ReadResourceRequestSchema','ListPromptsRequestSchema','GetPromptRequestSchema'])
+  if(!ctxTypes[key])throw Error('Installed MCP SDK lacks P2 '+key)
+ const p0search=await call('mcp_tool_search',{query:'protocol_decode',limit:5})
+ if(!p0search.tools.some(t=>t.name==='protocol_decode'))throw Error('dynamic MCP tool search failed')
+ const p0audit=await call('mcp_registry_audit',{})
+ if(!p0audit.consistent)throw Error('MCP registry audit failed: '+JSON.stringify(p0audit))
+ const p0probe=await call('mcp_tool_probe',{name:'tool_registry_list'})
+ if(p0probe.status!=='OK')throw Error('safe MCP probe failed: '+JSON.stringify(p0probe))
+ const p0unsafe=await call('mcp_tool_probe',{name:'command_run'})
+ if(p0unsafe.status!=='UNSAFE_TO_PROBE'||p0unsafe.called)throw Error('unsafe MCP probe executed')
  const empty=await call('tool_registry_list',null);if(empty.total!==visibleTools().length)throw new Error('null tool arguments contract failed')
  if(empty.tools.length>40||empty.nextOffset!==(visibleTools().length>40?40:null))throw new Error('tool registry pagination default failed')
  const lastPage=await call('tool_registry_list',{offset:visibleTools().length-1,limit:10})
@@ -787,5 +899,65 @@ async function selfTest(){
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--feature-test')){const shown=new Set(visibleTools().map(t=>t.name));for(const id of CODING_NAMES){if(shown.has(id)!==(CODING_ENABLED&&(id!=='code_task_verify'||COORDINATION_ENABLED)))throw new Error('coding tool visibility mismatch: '+id)}for(const id of COORDINATION_NAMES){if(shown.has(id)!==COORDINATION_ENABLED)throw new Error('coordination tool visibility mismatch: '+id)}if(shown.has('code_task_verify')!==(CODING_ENABLED&&COORDINATION_ENABLED))throw new Error('coordination dependency mismatch');if(!CODING_ENABLED){try{await call('code_repair_cycle',{});throw new Error('disabled coding tool callable')}catch(e){if(!String(e.message).includes('coding extension disabled'))throw e}}process.stdout.write('[DSH] MCP extension gating: OK coding='+CODING_ENABLED+' coordination='+COORDINATION_ENABLED+'\n');return}if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{const began=Date.now();let success=false;try{const value=await call(req.params.name,req.params.arguments??{});success=true;return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}}finally{telemetry.record(req.params.name,Date.now()-began,success)}});await server.connect(new StdioServerTransport())}
+async function codingMcpSmoke(){
+ if(!CODING_ENABLED)throw Error('coding smoke requires enabled extension')
+ const root=await mkdtemp(resolve(process.env.TMPDIR||process.cwd(),'.dsh-coding-smoke-'))
+ const previous=process.env.DSH_CODE_INDEX_HOME
+ process.env.DSH_CODE_INDEX_HOME=resolve(root,'cache')
+ try{
+  await writeFile(resolve(root,'example.py'),'def alpha():\n    return 1\n')
+  const index=await call('code_semantic_index',{root})
+  if(index.indexed!==1)throw Error('MCP semantic index dispatch failed')
+  const references=await call('code_symbol_references',{root,symbol:'alpha',backend:'python-ast'})
+  if(references.backend!=='python-ast'||!references.matches.some(x=>x.kind==='definition'))
+   throw Error('MCP AST backend dispatch failed')
+  const current=await readFile(resolve(root,'example.py'))
+  const preview=await call('code_refactor',{root,originPath:'example.py',paths:['example.py'],
+   oldName:'alpha',newName:'beta',dryRun:true})
+  if(!preview.dryRun||!preview.changes?.length)throw Error('MCP refactor dry-run failed')
+  if(!current.equals(await readFile(resolve(root,'example.py'))))throw Error('MCP dry-run modified source')
+  const wfPlan=await call('mcp_workflow_plan',{nodes:[{id:'decode',tool:'protocol_decode',args:{data:'4142',encoding:'hex'}}]})
+  if(!wfPlan.valid||wfPlan.estimatedCalls!==1)throw Error('MCP workflow planning dispatch failed')
+  const workflow=await call('mcp_workflow_execute',{nodes:[{id:'decode',tool:'protocol_decode',args:{data:'4142',encoding:'hex'}}]})
+  let workflowState
+  for(let k=0;k<60;k++){
+   workflowState=await call('mcp_workflow_status',{id:workflow.id,includeResults:true})
+   if(workflowState.status==='completed'||workflowState.status==='failed')break
+   await new Promise(r=>setTimeout(r,15))
+  }
+  if(workflowState.status!=='completed'||workflowState.nodes[0].result?.utf8!=='AB')throw Error('MCP workflow dispatch failed: '+JSON.stringify(workflowState))
+  const mcpCaps=await call('mcp_capability_report',{})
+  if(!mcpCaps.capabilities?.dag)throw Error('MCP capability report dispatch failed')
+  const mcpTrace=await call('mcp_trace_analyze',{id:workflow.id})
+  if(mcpTrace.completed!==1)throw Error('MCP trace tool dispatch failed')
+  const compact=await call('mcp_context_budget',{text:'alpha\nbeta\ngamma',query:'beta',maxChars:256})
+  if(compact.selectedLines!==1||!compact.excerpt.includes('beta'))throw Error('MCP P2 context budget dispatch failed')
+  const native=await call('mcp_android_diagnostics',{})
+  if(!native.source||!native.root)throw Error('MCP native diagnostics dispatch failed')
+  const resources=mcpContext.listResources()
+  if(resources.resources.length<3||mcpContext.listPrompts().prompts.length<5)throw Error('MCP P2 catalogue failed')
+  process.stdout.write('[DSH] MCP coding end-to-end dispatch: OK\n')
+ }finally{
+  if(previous===undefined)delete process.env.DSH_CODE_INDEX_HOME
+  else process.env.DSH_CODE_INDEX_HOME=previous
+  await rm(root,{recursive:true,force:true})
+ }
+}
+async function main(){if(process.env.DSH_MCP_PROTOCOL_MODE==='2026-07-28')return startModernStdio({list:visibleTools,execute:governance.execute,context:mcpContext});if(process.argv.includes('--mcp-coding-self-test'))return codingMcpSmoke();if(process.argv.includes('--feature-test')){const shown=new Set(visibleTools().map(t=>t.name));for(const id of CODING_NAMES){if(shown.has(id)!==(CODING_ENABLED&&(id!=='code_task_verify'||COORDINATION_ENABLED)))throw new Error('coding tool visibility mismatch: '+id)}for(const id of COORDINATION_NAMES){if(shown.has(id)!==COORDINATION_ENABLED)throw new Error('coordination tool visibility mismatch: '+id)}if(shown.has('code_task_verify')!==(CODING_ENABLED&&COORDINATION_ENABLED))throw new Error('coordination dependency mismatch');if(!CODING_ENABLED){try{await call('code_repair_cycle',{});throw new Error('disabled coding tool callable')}catch(e){if(!String(e.message).includes('coding extension disabled'))throw e}}process.stdout.write('[DSH] MCP extension gating: OK coding='+CODING_ENABLED+' coordination='+COORDINATION_ENABLED+'\n');return}if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{},resources:{},prompts:{}}});
+ const types=await import(pathToFileURL(requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js')).href)
+ server.setRequestHandler(types.ListResourcesRequestSchema,async()=>mcpContext.listResources())
+ server.setRequestHandler(types.ListResourceTemplatesRequestSchema,async()=>mcpContext.listResourceTemplates())
+ server.setRequestHandler(types.ReadResourceRequestSchema,async req=>mcpContext.readResource(req.params))
+ server.setRequestHandler(types.ListPromptsRequestSchema,async()=>mcpContext.listPrompts())
+ server.setRequestHandler(types.GetPromptRequestSchema,async req=>mcpContext.getPrompt(req.params))
+ server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{
+ try{
+  const value=await governance.execute(req.params.name,req.params.arguments??{})
+  return {content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}
+ }catch(error){
+  const message=String(error?.message||'Tool failed').slice(0,500)
+  // Tool-level errors must not terminate the MCP connection or expose stacks.
+  return {isError:true,content:[{type:'text',text:message}]}
+ }
+});await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
