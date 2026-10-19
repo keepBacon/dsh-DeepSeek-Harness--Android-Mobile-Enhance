@@ -12,6 +12,7 @@ import {createToolTelemetry} from './dsh-tool-metrics.mjs'
 import {codeRepairCycle} from './dsh-code-repair-cycle.mjs'
 import {databaseCall} from './dsh-database-client.mjs'
 import {createMcpGovernance} from './dsh-mcp-governance.mjs'
+import {createMcpWorkflowEngine} from './dsh-mcp-workflow.mjs'
 import {startModernStdio} from './dsh-mcp-modern-stdio.mjs'
 import {readFileSync} from 'node:fs'
 import {codeAstEdit,codeRefactor,codeContractCheck,codePatchConflict,codeRegressionBisect,codeFailureCluster,codeFixVerify,codeCheckpoint} from './dsh-code-p1.mjs'
@@ -45,6 +46,14 @@ const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_ed
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update','agent_task_decompose','agent_scope_allocate','agent_shared_context','agent_result_review','agent_merge_guard','agent_failure_recovery'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
 const tools=[
+ {name:'mcp_workflow_plan',description:'Validate workflow DAG and estimate execution without running tools',inputSchema:{type:'object',properties:{nodes:{type:'array'},concurrency:{type:'integer'},allowSideEffects:{type:'boolean'}},required:["nodes"],additionalProperties:false}},
+ {name:'mcp_workflow_execute',description:'Start persisted bounded workflow; returns ID without awaiting completion',inputSchema:{type:'object',properties:{nodes:{type:'array'},concurrency:{type:'integer'},allowSideEffects:{type:'boolean'}},required:["nodes"],additionalProperties:false}},
+ {name:'mcp_workflow_status',description:'Read persisted workflow state',inputSchema:{type:'object',properties:{id:{type:'string'},includeResults:{type:'boolean'}},required:["id"],additionalProperties:false}},
+ {name:'mcp_workflow_cancel',description:'Cooperatively cancel workflow without unsafe killing running tools',inputSchema:{type:'object',properties:{id:{type:'string'}},required:["id"],additionalProperties:false}},
+ {name:'mcp_checkpoint_restore',description:'Inspect or explicitly resume read-only pending nodes; never replay interrupted writes',inputSchema:{type:'object',properties:{id:{type:'string'},action:{type:'string',enum:['inspect','resume']}},required:["id"],additionalProperties:false}},
+ {name:'mcp_result_compact',description:'Generate SHA-256 evidence and bounded JSON preview',inputSchema:{type:'object',properties:{value:{},maxChars:{type:'integer'}},required:["value"],additionalProperties:false}},
+ {name:'mcp_capability_report',description:'Report registered tool and runtime workflow capabilities',inputSchema:{type:'object',properties:{},required:[],additionalProperties:false}},
+ {name:'mcp_trace_analyze',description:'Inspect bounded execution trace and latencies without recording tool args',inputSchema:{type:'object',properties:{id:{type:'string'},limit:{type:'integer'}},required:[],additionalProperties:false}},
  {name:'mcp_tool_search',description:'Search active MCP tools by name and description',inputSchema:{type:'object',properties:{query:{type:'string',minLength:1,maxLength:160},limit:{type:'integer',minimum:1,maximum:30}},required:["query"],additionalProperties:false}},
  {name:'mcp_registry_audit',description:'Audit local declared handlers and schema registrations',inputSchema:{type:'object',properties:{},required:[],additionalProperties:false}},
  {name:'mcp_tool_probe',description:'Safe non-mutating handler probe; unsupported tools are not invoked',inputSchema:{type:'object',properties:{name:{type:'string',minLength:1,maxLength:180}},required:["name"],additionalProperties:false}},
@@ -406,6 +415,7 @@ function miCommand(session,command,timeoutMs=5000){if(session.closed)throw new E
 function waitDebugStop(session,timeoutMs){for(let i=session.lines.length-1;i>=0&&i>=session.lines.length-20;i--){if(session.lines[i].startsWith('*stopped'))return Promise.resolve(session.lines[i])}return new Promise((resolvePromise,reject)=>{const waiter={resolve:resolvePromise,reject,timer:null};waiter.timer=setTimeout(()=>{session.stopWaiters.delete(waiter);resolvePromise(null)},timeoutMs);session.stopWaiters.add(waiter)})}
 async function closeDebug(session){if(session.closed)return;try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}try{await miCommand(session,'-gdb-exit',3000)}catch{}try{session.child.kill('SIGKILL')}catch{}session.closed=true;DEBUG_SESSIONS.delete(session.id)}
 
+const workflow=createMcpWorkflowEngine({list:visibleTools,execute:(name,args)=>governance.execute(name,args),metrics:telemetry})
 const governance=createMcpGovernance({list:visibleTools,invoke:(name,args)=>call(name,args),source:()=>readFileSync(fileURLToPath(import.meta.url),'utf8'),telemetry})
 async function call(name,a={}){
  if(!COORDINATION_ENABLED&&COORDINATION_NAMES.has(name))throw new Error('coordination extension disabled in Android settings')
@@ -414,6 +424,15 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'mcp_workflow_plan': return workflow.plan(a)
+  case 'mcp_workflow_execute': return workflow.execute(a)
+  case 'mcp_workflow_status': return workflow.status(a)
+  case 'mcp_workflow_cancel': return workflow.cancel(a)
+  case 'mcp_checkpoint_restore': return workflow.restore(a)
+  case 'mcp_result_compact': return workflow.compact(a)
+  case 'mcp_capability_report': return workflow.capabilities()
+  case 'mcp_trace_analyze': return workflow.trace(a)
+
   case 'mcp_tool_search': return governance.search(a)
   case 'mcp_registry_audit': return governance.audit()
   case 'mcp_tool_probe': return governance.probe(a)
