@@ -934,7 +934,8 @@ async function main(){if(process.env.DSH_MCP_PROTOCOL_MODE==='2026-07-28')return
  server.setRequestHandler(types.ListResourceTemplatesRequestSchema,async()=>mcpContext.listResourceTemplates())
  server.setRequestHandler(types.ReadResourceRequestSchema,async req=>mcpContext.readResource(req.params))
  server.setRequestHandler(types.ListPromptsRequestSchema,async()=>mcpContext.listPrompts())
- server.setRequestHandler(types.GetPromptRequestSchema,async req=>mcpContext.getPrompt(req.params))server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{
+ server.setRequestHandler(types.GetPromptRequestSchema,async req=>mcpContext.getPrompt(req.params))
+ server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{
  try{
   const value=await governance.execute(req.params.name,req.params.arguments??{})
   return {content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}
