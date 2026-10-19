@@ -15,7 +15,7 @@ const SAFE_TOOLS=new Set([
  'protocol_parse_http','reverse_capabilities','no_root_capabilities','code_verify_recipes',
  'code_index_query','code_semantic_index','code_symbol_references','code_dependency_graph',
  'code_call_graph','code_change_impact','code_test_impact','code_patch_plan',
- 'code_contract_check','code_regression_bisect','code_checkpoint','code_diagnostics',
+ 'code_contract_check','code_regression_bisect','code_diagnostics',
  'git_status','git_diff','git_log','process_list','android_shell_health'
 ])
 // Write operations are explicitly bounded and always executed at most once.
