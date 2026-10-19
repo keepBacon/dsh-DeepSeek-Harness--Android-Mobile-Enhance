@@ -176,6 +176,41 @@ the workflow tools end to end. These are source/runtime tests, **not**
 device-side verification or a guarantee that a long-running workflow keeps
 progressing after the Android process is killed.
 
+## MCP P2 Resources, Prompts, Android context
+
+Resources are exposed over legacy SDK and experimental 2026-07-28 stdio:
+`resources/list`, `resources/templates/list`, `resources/read`,
+`prompts/list` and `prompts/get`. The resource names are
+`dsh://workspace/tree`, `dsh://android/capabilities`,
+`dsh://android/build`; the URI template
+`dsh://workspace/file/{path}` reads bounded UTF-8 sources with
+`?startLine=1&maxLines=80`. Files are scoped to
+`DSH_MCP_WORKSPACE_ROOT` (default process working directory), reject
+path traversal, hidden segments, symlinks, binary content and large files.
+An opt-in 3-second/16-entry in-process cache and SHA-256 source
+fingerprints reduce repeated context extraction.
+
+Five reusable prompts cover architecture review, root cause, safe patch,
+Android build and plugin diagnosis. The `mcp_context_budget` tool extracts
+bounded matching source lines without generating new claims. Existing
+`android_logcat` already accepts `sinceSeconds`; existing
+`apk_inspect` verifies basic manifest/ABI metadata. New
+`mcp_android_diagnostics` and `mcp_build_artifacts` expose read-only
+capabilities and declared artifact paths.
+
+The Android native configuration manager publishes an atomic capability
+snapshot with SDK, ABI and observed app permission checks, passed through
+`DSH_MCP_ANDROID_CAPABILITIES_FILE`. Root and Shizuku remain explicitly
+"not-probed", not authorized. Snapshot status is not a substitute for
+real Shizuku/Root permission negotiation. Arbitrary SAF ContentResolver
+URIs are **not** exported into Node MCP resources; this requires an
+explicit Android consent and URI-grant bridge before claiming support.
+The workflow engine cannot promise execution after the Android process is
+killed; background persistence is for recovery, not guaranteed continuation.
+
+Run `node scripts/test-mcp-context.mjs` for resource/prompt safety
+tests. A green CI result does not establish device integration success.
+
 ## Resource budgets
 
 - Project index: at most 4,000 source files and 8 MiB persisted JSON; heuristically extracted symbols and imports.
