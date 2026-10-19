@@ -74,7 +74,7 @@ export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||
    return {source:'android-native',nativeBridge:true,sdkInt:v.sdkInt,deviceAbi:v.deviceAbi,
     permissions:obj(v.permissions)?v.permissions:{},collectedAt:v.collectedAt,
     safPersistedReadGrantCount:Number.isSafeInteger(v.safPersistedReadGrantCount)?v.safPersistedReadGrantCount:0,
-    safContentBridgeAvailable:false,
+    safContentBridgeAvailable:v.safContentBridgeAvailable===true,
     availableMemoryBytes:Number.isSafeInteger(v.availableMemoryBytes)?v.availableMemoryBytes:null,
     lowMemory:v.lowMemory===true,
     batteryOptimizationExempt:v.batteryOptimizationExempt===true,
