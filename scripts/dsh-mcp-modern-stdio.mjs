@@ -11,7 +11,7 @@ const base={resultType:'complete',cacheScope:'private',ttlMs:0}
 const own=(o,k)=>Object.prototype.hasOwnProperty.call(o,k)
 const error=(id,code,message)=>({jsonrpc:'2.0',id,error:{code,message:String(message).slice(0,300)}})
 const result=(id,value)=>({jsonrpc:'2.0',id,result:{...base,...value}})
-export function handleModernRequest(request,{list,execute}){
+export function handleModernRequest(request,{list,execute,context}){
  if(!request||request.jsonrpc!=='2.0'||!own(request,'id')||typeof request.method!=='string')
   return Promise.resolve(error(request?.id??null,-32600,'Invalid Request'))
  const {id,method}=request
@@ -27,8 +27,13 @@ export function handleModernRequest(request,{list,execute}){
   return Promise.resolve({jsonrpc:'2.0',id,error:{code:-32022,
    message:'UnsupportedProtocolVersionError',data:{requested:String(meta['io.modelcontextprotocol/protocolVersion']),supported:[VERSION]}}})
  if(method==='server/discover')return Promise.resolve(result(id,{supportedVersions:[VERSION],
-  capabilities:{tools:{}},instructions:'DSH mobile tools; stateful operations require explicit user consent.',
+  capabilities:{tools:{},resources:{},prompts:{}},instructions:'DSH mobile tools; stateful operations require explicit user consent.',
   _meta:{'io.modelcontextprotocol/serverInfo':{name:'dsh-mobile-toolbox',version:'4.0.0'}}}))
+ if(method==='resources/list'&&context)return Promise.resolve(result(id,context.listResources()))
+ if(method==='resources/templates/list'&&context)return Promise.resolve(result(id,context.listResourceTemplates()))
+ if(method==='resources/read'&&context)return Promise.resolve().then(()=>context.readResource(request.params||{})).then(v=>result(id,v)).catch(e=>error(id,-32602,e.message))
+ if(method==='prompts/list'&&context)return Promise.resolve(result(id,context.listPrompts()))
+ if(method==='prompts/get'&&context)return Promise.resolve().then(()=>context.getPrompt(request.params||{})).then(v=>result(id,v)).catch(e=>error(id,-32602,e.message))
  if(method==='tools/list')return Promise.resolve(result(id,{tools:list()}))
  if(method==='tools/call'){
   if(typeof request.params?.name!=='string'||!request.params.name)
@@ -39,7 +44,7 @@ export function handleModernRequest(request,{list,execute}){
  }
  return Promise.resolve(error(id,-32601,'Method not found'))
 }
-export async function startModernStdio({list,execute,input=process.stdin,output=process.stdout}){
+export async function startModernStdio({list,execute,context,input=process.stdin,output=process.stdout}){
  let running=0
  const lines=createInterface({input,crlfDelay:Infinity})
  for await(const line of lines){
@@ -53,7 +58,7 @@ export async function startModernStdio({list,execute,input=process.stdin,output=
    output.write(checkedJson(error(null,-32700,'Parse error'))+'\n');continue
   }
   running++
-  void handleModernRequest(request,{list,execute})
+  void handleModernRequest(request,{list,execute,context})
    .then(response=>output.write(checkedJson(response)+'\n'))
    .catch(()=>output.write(checkedJson(error(request?.id??null,-32603,'Internal error'))+'\n'))
    .finally(()=>{running--})
