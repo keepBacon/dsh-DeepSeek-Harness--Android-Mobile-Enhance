@@ -56,6 +56,11 @@ try{
  for(let k=0;k<80;k++){recovered=await recovery.status({id:recoveredId});if(['failed','interrupted'].includes(recovered.status))break;await new Promise(r=>setTimeout(r,15))}
  check(replayed===0&&recovered.nodes[0].status==='interrupted'&&recovered.nodes[1].status==='blocked',
   'interrupted write was replayed')
+ const governed=createMcpWorkflowEngine({storageDir:dir,list:()=>defs,
+  execute:async n=>({value:n}),resourceBudget:async()=>({lowMemory:true,thermalStatus:5})})
+ const limitedJob=await governed.execute({nodes:[{id:'limited',tool:'protocol_decode'}],concurrency:4})
+ const limited=await governed.status({id:limitedJob.id})
+ check(limited.effectiveConcurrency===1&&limited.resourceLimited,'Android budget did not throttle')
  const cancelled=await engine.cancel({id:job.id});check(cancelled.alreadyTerminal,'cancel terminal')
  console.log('[DSH] P1 MCP DAG persistent workflow self-test: OK')
 }finally{await rm(dir,{recursive:true,force:true})}
