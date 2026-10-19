@@ -61,6 +61,8 @@ class MainActivity : ComponentActivity() {
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val recoveryControls = mutableListOf<View>()
+  private var pluginRecoveryButton: Button? = null
+  private var pageWatchGeneration = 0
   private var pendingPickCallback: String? = null
   private var pendingDatabaseExportReference: String? = null
   private val databaseExportPicker=registerForActivityResult(
@@ -358,6 +360,16 @@ class MainActivity : ComponentActivity() {
     root.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     guideView = buildGuideView()
     root.addView(guideView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    // Native escape hatch independent of the Cordis/React plugin tree.
+    pluginRecoveryButton = Button(this).apply {
+      text = "插件故障恢复"
+      visibility = View.GONE
+      setOnClickListener { confirmPluginFailureRecovery() }
+    }
+    root.addView(pluginRecoveryButton, FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+      android.view.Gravity.TOP or android.view.Gravity.END,
+    ).apply { topMargin = (75 * resources.displayMetrics.density).toInt() })
     setContentView(root)
     configureWebView()
     try {
@@ -457,6 +469,46 @@ class MainActivity : ComponentActivity() {
     if (webView.canGoBack()) webView.goBack() else finishAfterTransition()
   }
 
+  private fun confirmPluginFailureRecovery() {
+    android.app.AlertDialog.Builder(this)
+      .setTitle("恢复插件故障")
+      .setMessage("DSH 页面加载/重连异常。是否备份 web profile 配置并停用第三方插件？保留安装文件、聊天记录和 API Key。此操作由你确认后才执行。")
+      .setNegativeButton("取消", null)
+      .setNeutralButton("复制诊断") { _, _ ->
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("DSH diagnostics", engineManager.engineDiagnostics(12000)))
+      }
+      .setPositiveButton("备份并安全恢复") { _, _ ->
+        runProfileMutation("正在隔离故障插件…") { engineManager.disableAllUserPluginsForRecovery() }
+      }.show()
+  }
+
+  /**
+   * WebSocket reconnection can leave HTTP healthy while the React plugin UI
+   * remains stuck. Observe text only, never run a loop that reloads the Host.
+   * The recovery control is native and requires an explicit user decision.
+   */
+  private fun monitorPluginPageStall(view: WebView) {
+    val generation = ++pageWatchGeneration
+    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    var consecutiveStalls = 0
+    fun check(remaining: Int) {
+      if (remaining <= 0 || generation != pageWatchGeneration || isFinishing || isDestroyed) return
+      if (view.visibility != View.VISIBLE) return
+      view.evaluateJavascript("""(() => {
+        const txt = (document.body?.innerText || '').slice(0,12000);
+        return /自动重连中|正在重新连接|reconnecting|正在加载|加载中/.test(txt);
+      })()""") { raw ->
+        if (generation != pageWatchGeneration) return@evaluateJavascript
+        consecutiveStalls = if (raw == "true") consecutiveStalls + 1 else 0
+        if (consecutiveStalls >= 3) pluginRecoveryButton?.visibility = View.VISIBLE
+        if (consecutiveStalls == 0) pluginRecoveryButton?.visibility = View.GONE
+        handler.postDelayed({ check(remaining - 1) }, 6_000L)
+      }
+    }
+    handler.postDelayed({ check(25) }, 6_000L)
+  }
+
   private fun configureWebView() {
     // WebView 远程调试（debug 构建）：真机/模拟器 CDP 自动化验证 UI 行为。
     // AGP 8 默认不生成 BuildConfig，用 debuggable 标志判断。
@@ -533,6 +585,7 @@ class MainActivity : ComponentActivity() {
           }
           return
         }
+        pluginRecoveryButton?.visibility = View.VISIBLE
         showStartingState("正在重新连接 DSH…", error.description?.toString().orEmpty())
         startEngineFlow()
       }
@@ -570,6 +623,7 @@ class MainActivity : ComponentActivity() {
         pushSystemDark(view)
         installMobileUiBridge(view)
         installPassiveToolCallMonitor(view)
+        monitorPluginPageStall(view)
       }
     }
     // WebView 下载：会话日志导出（/api/session.export）与其余引擎源下载
