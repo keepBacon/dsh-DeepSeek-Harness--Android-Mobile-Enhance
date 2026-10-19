@@ -1592,6 +1592,9 @@ install_mobile_mcp_toolbox() {
   [ -f "$ROOT/scripts/dsh-mcp-modern-stdio.mjs" ] || { echo '[DSH] Missing modern MCP transport'; exit 8; }
   cp "$ROOT/scripts/dsh-mcp-modern-stdio.mjs" "$(dirname "$dest")/dsh-mcp-modern-stdio.mjs"
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-mcp-modern-stdio.mjs" || exit 8
+  [ -f "$ROOT/scripts/dsh-mcp-context.mjs" ] || { echo '[DSH] Missing MCP context module'; exit 8; }
+  cp "$ROOT/scripts/dsh-mcp-context.mjs" "$(dirname "$dest")/dsh-mcp-context.mjs"
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-mcp-context.mjs" || exit 8
   [ -f "$ROOT/scripts/dsh-mcp-workflow.mjs" ] || { echo '[DSH] Missing MCP workflow'; exit 8; }
   cp "$ROOT/scripts/dsh-mcp-workflow.mjs" "$(dirname "$dest")/dsh-mcp-workflow.mjs"
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-mcp-workflow.mjs" || exit 8
