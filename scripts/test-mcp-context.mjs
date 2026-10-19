@@ -24,5 +24,14 @@ try{
  const rpc=await handleModernRequest({jsonrpc:'2.0',id:1,method:'resources/list',params:{_meta:meta}},
   {list:()=>[],execute:async()=>{},context:ctx})
  assert(rpc.result?.resources?.length===3,'modern route')
+ const promptRpc=await handleModernRequest({jsonrpc:'2.0',id:2,method:'prompts/get',
+  params:{_meta:meta,name:'safe-patch',arguments:{goal:'fix workflow'}}},
+  {list:()=>[],execute:async()=>{},context:ctx})
+ assert(promptRpc.result?.messages?.length===1,'modern prompt route')
+ const readRpc=await handleModernRequest({jsonrpc:'2.0',id:3,method:'resources/read',
+  params:{_meta:meta,uri:'dsh://workspace/file/src/main.js?startLine=1&maxLines=1'}},
+  {list:()=>[],execute:async()=>{},context:ctx})
+ assert(readRpc.result?.contents?.[0]?.mimeType==='text/plain','modern read route')
+
  console.log('[DSH] MCP P2 Resources/Prompts/Android context self-test: OK')
 }finally{await rm(root,{recursive:true,force:true})}
