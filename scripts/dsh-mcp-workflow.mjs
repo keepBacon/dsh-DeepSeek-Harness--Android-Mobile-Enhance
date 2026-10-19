@@ -212,7 +212,13 @@ export function createMcpWorkflowEngine({list,execute,storageDir=join(process.en
   await persist(doc);running.delete(id)
  }
  async function status(input={}){
-  const id=input.id,doc=running.get(id)?.doc||await read(id)
+  const id=input.id,active=running.get(id)
+  if(active&&['completed','failed','cancelled','interrupted'].includes(active.doc.status)){
+   // A terminal status must not be visible before its durable snapshot commits.
+   const pending=locks.get(id)
+   if(pending)await pending
+  }
+  const doc=running.get(id)?.doc||await read(id)
   return publicDoc(doc,input.includeResults===true)
  }
  async function cancel(input={}){
