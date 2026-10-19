@@ -899,6 +899,20 @@ async function codingMcpSmoke(){
    oldName:'alpha',newName:'beta',dryRun:true})
   if(!preview.dryRun||!preview.changes?.length)throw Error('MCP refactor dry-run failed')
   if(!current.equals(await readFile(resolve(root,'example.py'))))throw Error('MCP dry-run modified source')
+  const wfPlan=await call('mcp_workflow_plan',{nodes:[{id:'decode',tool:'protocol_decode',args:{data:'4142',encoding:'hex'}}]})
+  if(!wfPlan.valid||wfPlan.estimatedCalls!==1)throw Error('MCP workflow planning dispatch failed')
+  const workflow=await call('mcp_workflow_execute',{nodes:[{id:'decode',tool:'protocol_decode',args:{data:'4142',encoding:'hex'}}]})
+  let workflowState
+  for(let k=0;k<60;k++){
+   workflowState=await call('mcp_workflow_status',{id:workflow.id,includeResults:true})
+   if(workflowState.status==='completed'||workflowState.status==='failed')break
+   await new Promise(r=>setTimeout(r,15))
+  }
+  if(workflowState.status!=='completed'||workflowState.nodes[0].result?.utf8!=='AB')throw Error('MCP workflow dispatch failed: '+JSON.stringify(workflowState))
+  const mcpCaps=await call('mcp_capability_report',{})
+  if(!mcpCaps.capabilities?.dag)throw Error('MCP capability report dispatch failed')
+  const mcpTrace=await call('mcp_trace_analyze',{id:workflow.id})
+  if(mcpTrace.completed!==1)throw Error('MCP trace tool dispatch failed')
   process.stdout.write('[DSH] MCP coding end-to-end dispatch: OK\n')
  }finally{
   if(previous===undefined)delete process.env.DSH_CODE_INDEX_HOME
