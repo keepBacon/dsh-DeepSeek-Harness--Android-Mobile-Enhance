@@ -271,7 +271,7 @@ export function createMcpWorkflowEngine({list,execute,storageDir=join(process.en
    if(!e.nodeId)continue
    perTool[e.type]=(perTool[e.type]||0)+1
   }
-  const completed=events.filter(e=>e.type==='completed'),latency=completed.map(x=>x.durationMs||0).sort((a,b)=>a-b)
+  const completed=events.filter(e=>e.type==='completed'&&e.nodeId),latency=completed.map(x=>x.durationMs||0).sort((a,b)=>a-b)
   return {id:id||null,events:events.slice(-maxInt(input.limit,40,100)),counts:perTool,
    completed:completed.length,p50Ms:latency.length?latency[Math.floor((latency.length-1)*.5)]:null,
    p95Ms:latency.length?latency[Math.ceil(latency.length*.95)-1]:null,
