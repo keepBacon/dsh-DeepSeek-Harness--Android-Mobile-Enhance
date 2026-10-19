@@ -26,6 +26,20 @@ try{
  const failureJob=await failing.execute({nodes:[{id:'first',tool:'protocol_decode'},{id:'dependent',tool:'protocol_hash',dependsOn:['first']}]})
  let state;for(let k=0;k<80;k++){state=await failing.status({id:failureJob.id});if(state.status==='failed')break;await new Promise(r=>setTimeout(r,20))}
  check(state.status==='failed'&&state.nodes.find(n=>n.id==='dependent').status==='blocked','failure propagation')
+ let release;let entered=false
+ const wait=new Promise(resolve=>{release=resolve})
+ const abortable=createMcpWorkflowEngine({storageDir:dir,list:()=>defs,
+  execute:async(name)=>{entered=true;await wait;return {name}}})
+ const cancelJob=await abortable.execute({nodes:[{id:'slow',tool:'protocol_decode'},{id:'later',tool:'protocol_hash',dependsOn:['slow']}]})
+ for(let k=0;k<50&&!entered;k++)await new Promise(r=>setTimeout(r,10))
+ check(entered,'async job did not start')
+ const cancelState=await abortable.cancel({id:cancelJob.id})
+ check(cancelState.inFlightNotAborted,'unsafe cancellation semantics')
+ release()
+ let terminal;for(let k=0;k<80;k++){terminal=await abortable.status({id:cancelJob.id});if(terminal.status==='cancelled')break;await new Promise(r=>setTimeout(r,15))}
+ check(terminal.status==='cancelled'&&terminal.nodes.find(n=>n.id==='later').status==='cancelled','cancel did not prevent dependent task')
+ const trace=await engine.trace({id:job.id})
+ check(trace.completed===2&&trace.events.length>0,'trace aggregates')
  const cancelled=await engine.cancel({id:job.id});check(cancelled.alreadyTerminal,'cancel terminal')
  console.log('[DSH] P1 MCP DAG persistent workflow self-test: OK')
 }finally{await rm(dir,{recursive:true,force:true})}
