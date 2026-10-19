@@ -85,7 +85,10 @@ function rankTool(t,query){
  const name=t.name.toLowerCase(),desc=(t.description||'').toLowerCase();
  return q.reduce((n,term)=>n+(name===term?12:name.includes(term)?7:0)+(desc.includes(term)?2:0),0);
 }
-export function createMcpGovernance({list,invoke,source='',telemetry}){
+export function createMcpGovernance({list,invoke,source='',telemetry,catalogue}){
+ // `list` is the active, feature-filtered runtime surface. `catalogue`
+ // is the complete local declaration set used only for static parity auditing.
+ const auditCatalogue=typeof catalogue==='function'?catalogue:list;
  if(typeof list!=='function'||typeof invoke!=='function')throw Error('catalogue/invoke required');
  const since=Date.now(),health={calls:0,errors:0,lastError:null};
  const lookup=name=>list().find(x=>x.name===name);
@@ -98,12 +101,20 @@ export function createMcpGovernance({list,invoke,source='',telemetry}){
   return {query,total:matches.length,tools:matches.slice(0,limit),truncated:matches.length>limit,dynamic:true};
  }
  function audit(){
-  const src=source(),all=list();
-  // The runtime catalogue can be feature-filtered: audit declaration parity
-  // against all registered definitions when caller supplies an unfiltered list.
-  return catalogueAudit(all,src);
- }
- function status(){return {server:'mobile_tools',alive:true,uptimeMs:Date.now()-since,visibleTools:list().length,
+   const src=source(),all=auditCatalogue(),active=list();
+   const report=catalogueAudit(all,src);
+   const names=new Set(all.map(t=>t?.name).filter(Boolean));
+   const activeNames=active.map(t=>t?.name).filter(Boolean);
+   const unknownVisible=[...new Set(activeNames.filter(name=>!names.has(name)))];
+   const visibleSet=new Set(activeNames);
+   return {...report,
+    visibleDeclarations:active.length,
+    disabledDeclarations:all.filter(t=>t?.name&&!visibleSet.has(t.name)).map(t=>t.name),
+    unknownVisibleDeclarations:unknownVisible,
+    consistent:report.consistent&&unknownVisible.length===0,
+    scope:'mobile_tools local declarations and dispatcher; visibility is feature-filtered; external Cordis plugin handlers are not inspected'};
+  }
+  function status(){return {server:'mobile_tools',alive:true,uptimeMs:Date.now()-since,visibleTools:list().length,
   calls:health.calls,failed:health.errors,lastError:health.lastError,
   supportsToolIsolation:true,protocolUpgrade:'modern-stdio opt-in + legacy SDK'};
  }
