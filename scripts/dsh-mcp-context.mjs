@@ -9,9 +9,11 @@ const valid=(x,cap=500)=>typeof x==='string'&&x.trim().length>0&&x.length<=cap
 const resources=[
  {uri:'dsh://workspace/tree',name:'Workspace Tree',description:'Bounded shallow source tree',mimeType:'application/json'},
  {uri:'dsh://android/capabilities',name:'Android Capabilities',description:'Native permission and ABI observations',mimeType:'application/json'},
- {uri:'dsh://android/build',name:'Android Build Metadata',description:'Unverified local APK artifact metadata',mimeType:'application/json'}
+ {uri:'dsh://android/build',name:'Android Build Metadata',description:'Unverified local APK artifact metadata',mimeType:'application/json'},
+ {uri:'dsh://android/saf',name:'Authorized SAF Imports',description:'List documents explicitly selected for MCP access',mimeType:'application/json'}
 ]
-const templates=[{uriTemplate:'dsh://workspace/file/{path}',name:'Workspace File',description:'Bounded UTF-8 source, ?startLine=1&maxLines=80',mimeType:'text/plain'}]
+const templates=[{uriTemplate:'dsh://workspace/file/{path}',name:'Workspace File',description:'Bounded UTF-8 source, ?startLine=1&maxLines=80',mimeType:'text/plain'},
+ {uriTemplate:'dsh://android/saf/{id}',name:'Imported SAF Text',description:'User-selected private text copy, limited to 32 KiB per resource read',mimeType:'text/plain'}]
 const prompts=[
  {name:'engineering-audit',description:'Review architecture and regression risks',arguments:[{name:'scope',required:true}]},
  {name:'root-cause-analysis',description:'Evidence-based bug analysis',arguments:[{name:'symptom',required:true}]},
@@ -31,7 +33,7 @@ function safeRel(path){
  if(path.split('/').some(x=>!x||x==='.'||x==='..'||x.startsWith('.')||['node_modules','build','dist'].includes(x)))throw Error('MCP_RESOURCE_UNSAFE_PATH')
  return path
 }
-export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||process.cwd(),androidSnapshotFile=process.env.DSH_MCP_ANDROID_CAPABILITIES_FILE||'',buildDir=process.env.DSH_MCP_BUILD_DIR||''}={}){
+export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||process.cwd(),androidSnapshotFile=process.env.DSH_MCP_ANDROID_CAPABILITIES_FILE||'',buildDir=process.env.DSH_MCP_BUILD_DIR||'',safDir=process.env.DSH_MCP_SAF_DIR||''}={}){
  const cache=new Map()
  let rootPromise
  const root=()=>rootPromise??=(async()=>{const p=await realpath(resolve(workspace));if(!(await lstat(p)).isDirectory())throw Error('MCP_WORKSPACE_NOT_DIRECTORY');return p})()
@@ -91,6 +93,53 @@ export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||
   }
   return {enabled:true,artifacts:found,buildVerified:false,signingVerified:false}
  }
+ async function safIndex(){
+  if(!safDir)return {available:false,documents:[],note:'Android user-imported SAF bridge is not configured.'}
+  const base=resolve(safDir)
+  let dir
+  try{dir=await lstat(base)}
+  catch(e){if(e.code==='ENOENT')return {available:true,documents:[],note:'No user-selected documents.'};throw e}
+  if(!dir.isDirectory()||dir.isSymbolicLink())throw Error('MCP_SAF_UNSAFE_DIRECTORY')
+  const index=join(base,'index.json')
+  let st
+  try{st=await lstat(index)}
+  catch(e){if(e.code==='ENOENT')return {available:true,documents:[]};throw e}
+  if(!st.isFile()||st.isSymbolicLink()||st.size>32768)throw Error('MCP_SAF_UNSAFE_INDEX')
+  const data=JSON.parse(await readFile(index,'utf8'))
+  if(data.schema!==1||!Array.isArray(data.documents)||data.documents.length>12)throw Error('MCP_SAF_INVALID_INDEX')
+  const docs=data.documents.map(x=>{
+   if(!obj(x)||typeof x.id!=='string'||!/^saf-[0-9a-f]{32}$/.test(x.id)||
+      !valid(x.name,100)||!Number.isSafeInteger(x.sizeBytes)||x.sizeBytes<1||x.sizeBytes>131072||
+      typeof x.sha256!=='string'||!/^[0-9a-f]{64}$/.test(x.sha256))
+     throw Error('MCP_SAF_INVALID_ENTRY')
+   return {id:x.id,name:x.name,sizeBytes:x.sizeBytes,sha256:x.sha256,addedAt:x.addedAt}
+  })
+  if(new Set(docs.map(x=>x.id)).size!==docs.length)throw Error('MCP_SAF_DUPLICATE_ENTRY')
+  return {available:true,documents:docs,resourceTemplate:'dsh://android/saf/{id}',note:'Only explicitly selected copies are listed. Original content:// URIs are never exposed.'}
+ }
+ async function safFile(uri){
+  const u=new URL(uri),id=u.pathname.slice('/saf/'.length)
+  if(!/^saf-[0-9a-f]{32}$/.test(id))throw Error('MCP_SAF_INVALID_ID')
+  const allowed=await safIndex(),doc=allowed.documents.find(x=>x.id===id)
+  if(!doc)throw Error('MCP_SAF_NOT_AUTHORIZED')
+  const base=await realpath(resolve(safDir)),file=join(base,id+'.txt')
+  const st=await lstat(file)
+  if(!st.isFile()||st.isSymbolicLink()||st.size!==doc.sizeBytes||st.size>131072)
+   throw Error('MCP_SAF_UNSAFE_FILE')
+  const bytes=await readFile(file),text=bytes.toString('utf8')
+  if(sha(bytes)!==doc.sha256||!Buffer.from(text).equals(bytes)||text.includes('\0'))
+   throw Error('MCP_SAF_CONTENT_MISMATCH')
+  const start=u.searchParams.has('startLine')?Number(u.searchParams.get('startLine')):1
+  const count=u.searchParams.has('maxLines')?Number(u.searchParams.get('maxLines')):80
+  if([...u.searchParams.keys()].some(x=>!['startLine','maxLines'].includes(x))||
+    !Number.isSafeInteger(start)||start<1||!Number.isSafeInteger(count)||count<1||count>160)
+   throw Error('MCP_SAF_INVALID_LINE_RANGE')
+  const rows=text.split('\n'),chosen=rows.slice(start-1,start-1+count)
+  let excerpt=chosen.join('\n'),truncated=excerpt.length>MAX_READ
+  if(truncated)excerpt=excerpt.slice(0,MAX_READ)
+  return {text:excerpt,metadata:{id,sha256:doc.sha256,totalLines:rows.length,
+    startLine:start,returnedLines:chosen.length,truncated:truncated||start-1+count<rows.length}}
+ }
  async function sourceFile(uri){
   const u=new URL(uri),p=decodeURIComponent(u.pathname.slice('/file/'.length))
   const start=u.searchParams.has('startLine')?Number(u.searchParams.get('startLine')):1
@@ -124,6 +173,8 @@ export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||
   if(u.protocol!=='dsh:'||u.username||u.password||u.hash||u.port)throw Error('MCP_RESOURCE_UNSAFE_URI')
   let result,mimeType='application/json'
   if(u.hostname==='workspace'&&u.pathname.startsWith('/file/')){result=await sourceFile(uri);mimeType='text/plain'}
+  else if(u.hostname==='android'&&u.pathname.startsWith('/saf/')){result=await safFile(uri);mimeType='text/plain'}
+  else if(uri==='dsh://android/saf')result={text:JSON.stringify(await safIndex())}
   else if(uri==='dsh://workspace/tree')result={text:JSON.stringify(await tree())}
   else if(uri==='dsh://android/capabilities')result={text:JSON.stringify(await nativeSnapshot())}
   else if(uri==='dsh://android/build')result={text:JSON.stringify(await builds())}
