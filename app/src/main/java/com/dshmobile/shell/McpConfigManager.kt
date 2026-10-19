@@ -114,7 +114,32 @@ class McpConfigManager(
     return result
   }
 
+  private fun publishNativeCapabilities(): File {
+    val file = File(context.filesDir, "mcp/native-capabilities.json")
+    file.parentFile?.mkdirs()
+    val permissions = JSONObject()
+    for (name in arrayOf("android.permission.POST_NOTIFICATIONS", "android.permission.READ_EXTERNAL_STORAGE")) {
+      val granted = try {
+        context.checkSelfPermission(name) == android.content.pm.PackageManager.PERMISSION_GRANTED
+      } catch (_: Exception) { false }
+      permissions.put(name, granted)
+    }
+    val value = JSONObject()
+      .put("schema", 1)
+      .put("source", "android-native")
+      .put("sdkInt", android.os.Build.VERSION.SDK_INT)
+      .put("deviceAbi", android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown")
+      .put("permissions", permissions)
+      .put("collectedAt", System.currentTimeMillis())
+    val temp = File(file.parentFile, ".native-capabilities.tmp")
+    temp.writeText(value.toString())
+    if (file.exists() && !file.delete()) throw java.io.IOException("无法替换 MCP 能力快照")
+    if (!temp.renameTo(file)) throw java.io.IOException("无法发布 MCP 能力快照")
+    return file
+  }
+
   @Synchronized fun ensureRuntimePatch(): File {
+    publishNativeCapabilities()
     val rows = mutableListOf<String>()
     if (toolboxEnabled() && toolboxFile.isFile) rows += toolboxRow()
     if (basicToolboxEnabled() && basicToolboxFile.isFile) rows += basicToolboxRow()
@@ -245,6 +270,7 @@ class McpConfigManager(
     append("      DSH_MOBILE_COORDINATION_ENABLED: ").append(JSONObject.quote(if (coordinationEnabled()) "1" else "0")).append('\n')
     append("      DSH_MOBILE_CODING_ENABLED: ").append(JSONObject.quote(if (codingEnabled()) "1" else "0")).append('\n')
     append("      DSH_MOBILE_TOOL_METRICS_ENABLED: ").append(JSONObject.quote(if (toolMetricsEnabled()) "1" else "0")).append('\n')
+      append("      DSH_MCP_ANDROID_CAPABILITIES_FILE: ").append(JSONObject.quote(File(context.filesDir, "mcp/native-capabilities.json").absolutePath)).append('\n')
     append("      DSH_DATABASE_ENDPOINT_FILE: ").append(JSONObject.quote(File(context.filesDir, "database-broker-endpoint.json").absolutePath)).append('\n')
     append("      LD_LIBRARY_PATH: ").append(JSONObject.quote(File(usrDir, "lib").absolutePath)).append('\n')
     append("      PATH: ").append(JSONObject.quote(File(usrDir, "libexec/dsh/wrappers").absolutePath + ":" + File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
