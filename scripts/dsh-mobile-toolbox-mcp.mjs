@@ -423,7 +423,7 @@ async function closeDebug(session){if(session.closed)return;try{if(session.attac
 
 const mcpContext=createMcpContext()
 const mcpLogCursor=createMcpLogCursor({read:a=>call('android_logcat',a)})
-const workflow=createMcpWorkflowEngine({list:visibleTools,execute:(name,args)=>governance.execute(name,args),metrics:telemetry})
+const workflow=createMcpWorkflowEngine({list:visibleTools,execute:(name,args)=>governance.execute(name,args),metrics:telemetry,resourceBudget:()=>mcpContext.nativeSnapshot()})
 const governance=createMcpGovernance({list:visibleTools,invoke:(name,args)=>call(name,args),source:()=>readFileSync(fileURLToPath(import.meta.url),'utf8'),telemetry})
 async function call(name,a={}){
  if(!COORDINATION_ENABLED&&COORDINATION_NAMES.has(name))throw new Error('coordination extension disabled in Android settings')
