@@ -138,6 +138,44 @@ Verification: `node scripts/test-mcp-governance.mjs`,
 and `node scripts/test-tool-registry-parity.mjs` run in static CI.
 Termux APK packaging and Android-side plugin Handler checks are separate gates.
 
+## MCP P1 workflow orchestration
+
+The MCP toolbox adds eight bounded tools: `mcp_workflow_plan`,
+`mcp_workflow_execute`, `mcp_workflow_status`, `mcp_workflow_cancel`,
+`mcp_checkpoint_restore`, `mcp_result_compact`,
+`mcp_capability_report`, and `mcp_trace_analyze`. These complement
+the four governance tools added in P0 (12 total).
+
+Workflow plans are acyclic DAGs of at most 24 nodes; scheduler concurrency
+is bounded at 1–4. Dependencies may bind values through
+`{"$from":"node-id","path":["property"]}`. The engine stores JSON
+snapshots with atomic rename and SHA-256 result fingerprints. A new tool call
+starts an asynchronous workflow and returns its id. `status` provides
+polling, and `trace` records bounded timings and event types only, without
+raw args. Tools are exposed only if registered and in an audited allowlist.
+
+Side effects are denied by default. Writes are limited to specific existing
+coding transaction tools and require `allowSideEffects:true`, each node's
+`effect:"write"`, and `args.dryRun:false`. Writes are serialized, and
+are never automatically retried. A cancellation prevents new nodes but does
+**not** forcibly terminate a running tool. After process termination,
+`mcp_checkpoint_restore` defaults to read-only inspection; an explicit
+`action:"resume"` continues only eligible pending read nodes. Interrupted
+nodes are not replayed, and interrupted writes require human-led transaction
+recovery. The engine cannot prove arbitrary tools are side-effect free; the
+allowlist is intentionally conservative.
+
+`mcp_result_compact` returns a bounded preview with the SHA-256 of the
+original JSON, not a substitute for the original value. Result sizes and
+persisted state are bounded to control Android resource usage.
+
+**Validation:** `node scripts/test-mcp-workflow.mjs` tests DAG cycles,
+dependencies, result references, persistence, error blocking, cancellation
+and write permissions. The MCP coding dispatch smoke additionally invokes
+the workflow tools end to end. These are source/runtime tests, **not**
+device-side verification or a guarantee that a long-running workflow keeps
+progressing after the Android process is killed.
+
 ## Resource budgets
 
 - Project index: at most 4,000 source files and 8 MiB persisted JSON; heuristically extracted symbols and imports.
