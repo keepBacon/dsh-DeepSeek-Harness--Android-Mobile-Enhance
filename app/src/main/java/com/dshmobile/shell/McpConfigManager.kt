@@ -138,7 +138,7 @@ class McpConfigManager(
       .put("deviceAbi", android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown")
       .put("permissions", permissions)
       .put("safPersistedReadGrantCount", grants)
-      .put("safContentBridgeAvailable", false)
+      .put("safContentBridgeAvailable", true)
       .put("availableMemoryBytes", memory.availMem)
       .put("lowMemory", memory.lowMemory)
       .put("batteryOptimizationExempt", try { power?.isIgnoringBatteryOptimizations(context.packageName) ?: false } catch (_: Exception) { false })
