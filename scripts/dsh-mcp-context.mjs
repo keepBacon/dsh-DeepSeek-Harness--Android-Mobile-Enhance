@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto'
-import {readdir,readFile,lstat,realpath,stat} from 'node:fs/promises'
+import {readdir,readFile,lstat,realpath,stat,access} from 'node:fs/promises'
 import {join,resolve,sep} from 'node:path'
+import {constants as fsConstants} from 'node:fs'
 
 const MAX_FILE=256*1024,MAX_READ=32*1024
 const sha=s=>createHash('sha256').update(s).digest('hex')
@@ -62,6 +63,28 @@ export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||
   }
   await walk(r)
   return {source:'workspace',entries:items,truncated:items.length>=150,maxDepth:2}
+ }
+ async function environment(){
+  const pathDirs=String(process.env.PATH||'').split(':').filter(x=>x.startsWith('/')&&x.length<260).slice(0,24)
+  const commands=['node','python3','git','clang','clang++','cmake','ninja','make','aapt2','adb']
+  const programs=[]
+  for(const name of commands){
+   let found=null
+   for(const folder of pathDirs){
+    try{
+     const candidate=join(folder,name)
+     await access(candidate,fsConstants.X_OK)
+     const info=await stat(candidate)
+     if(info.isFile()){found=candidate;break}
+    }catch{}
+   }
+   programs.push({name,available:!!found,path:found})
+  }
+  const unavailable=programs.filter(x=>!x.available).map(x=>x.name)
+  return {platform:process.platform,arch:process.arch,nodeVersion:process.version,
+    termuxPrefix:process.env.TERMUX__PREFIX||process.env.PREFIX||null,
+    programs,missing:unavailable,
+    note:'PATH and executable checks only; does not verify compilation or command success.'}
  }
  async function nativeSnapshot(){
   const fallback={source:'node-only',nativeBridge:false,root:'not-probed',shizuku:'not-probed',accessibility:'not-probed'}
@@ -209,5 +232,5 @@ export function createMcpContext({workspace=process.env.DSH_MCP_WORKSPACE_ROOT||
    outputChars:used,selectedLines:chosen.length,totalLines:lines.length,truncated:chosen.length<lines.length,
    note:'Extractive context only; no generated claims. Original evidence remains authoritative.'}
  }
- return {listResources,listResourceTemplates,readResource,listPrompts,getPrompt,contextBudget,nativeSnapshot,builds}
+ return {listResources,listResourceTemplates,readResource,listPrompts,getPrompt,contextBudget,nativeSnapshot,builds,environment}
 }
