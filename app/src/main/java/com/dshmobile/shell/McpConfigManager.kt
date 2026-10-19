@@ -124,12 +124,24 @@ class McpConfigManager(
       } catch (_: Exception) { false }
       permissions.put(name, granted)
     }
+    val power = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+    val activity = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+    val memory = android.app.ActivityManager.MemoryInfo()
+    try { activity?.getMemoryInfo(memory) } catch (_: Exception) {}
+    val grants = try {
+      context.contentResolver.persistedUriPermissions.count { it.isReadPermission }
+    } catch (_: Exception) { 0 }
     val value = JSONObject()
       .put("schema", 1)
       .put("source", "android-native")
       .put("sdkInt", android.os.Build.VERSION.SDK_INT)
       .put("deviceAbi", android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown")
       .put("permissions", permissions)
+      .put("safPersistedReadGrantCount", grants)
+      .put("safContentBridgeAvailable", false)
+      .put("availableMemoryBytes", memory.availMem)
+      .put("lowMemory", memory.lowMemory)
+      .put("batteryOptimizationExempt", try { power?.isIgnoringBatteryOptimizations(context.packageName) ?: false } catch (_: Exception) { false })
       .put("collectedAt", System.currentTimeMillis())
     val temp = File(file.parentFile, ".native-capabilities.tmp")
     temp.writeText(value.toString())
