@@ -141,6 +141,7 @@ class McpConfigManager(
       .put("safContentBridgeAvailable", true)
       .put("availableMemoryBytes", memory.availMem)
       .put("lowMemory", memory.lowMemory)
+      .put("thermalStatus", try { if (android.os.Build.VERSION.SDK_INT >= 29) power?.currentThermalStatus ?: -1 else -1 } catch (_: Exception) { -1 })
       .put("batteryOptimizationExempt", try { power?.isIgnoringBatteryOptimizations(context.packageName) ?: false } catch (_: Exception) { false })
       .put("collectedAt", System.currentTimeMillis())
     val temp = File(file.parentFile, ".native-capabilities.tmp")
