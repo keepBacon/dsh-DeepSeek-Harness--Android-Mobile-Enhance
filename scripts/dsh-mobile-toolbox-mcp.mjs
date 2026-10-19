@@ -14,6 +14,7 @@ import {databaseCall} from './dsh-database-client.mjs'
 import {createMcpGovernance} from './dsh-mcp-governance.mjs'
 import {createMcpWorkflowEngine} from './dsh-mcp-workflow.mjs'
 import {createMcpContext} from './dsh-mcp-context.mjs'
+import {createMcpLogCursor} from './dsh-mcp-log-cursor.mjs'
 import {startModernStdio} from './dsh-mcp-modern-stdio.mjs'
 import {readFileSync} from 'node:fs'
 import {codeAstEdit,codeRefactor,codeContractCheck,codePatchConflict,codeRegressionBisect,codeFailureCluster,codeFixVerify,codeCheckpoint} from './dsh-code-p1.mjs'
@@ -47,6 +48,7 @@ const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_ed
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update','agent_task_decompose','agent_scope_allocate','agent_shared_context','agent_result_review','agent_merge_guard','agent_failure_recovery'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
 const tools=[
+ {name:'mcp_android_log_delta',description:'Read bounded Android logcat delta with process-local cursor and deduplication',inputSchema:{type:'object',properties:{cursor:{type:'string'},package:{type:'string'},tag:{type:'string'},level:{type:'string'},maxLines:{type:'integer'}},additionalProperties:false}},
  {name:'mcp_context_budget',description:'Extract bounded query-relevant lines preserving source fingerprint',inputSchema:{type:'object',properties:{text:{type:'string'},query:{type:'string'},maxChars:{type:'integer'}},required:['text'],additionalProperties:false}},
  {name:'mcp_android_diagnostics',description:'Read native Android capabilities snapshot or report unavailable',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'mcp_build_artifacts',description:'Inspect configured APK build output metadata without claiming verification',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -420,6 +422,7 @@ function waitDebugStop(session,timeoutMs){for(let i=session.lines.length-1;i>=0&
 async function closeDebug(session){if(session.closed)return;try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}try{await miCommand(session,'-gdb-exit',3000)}catch{}try{session.child.kill('SIGKILL')}catch{}session.closed=true;DEBUG_SESSIONS.delete(session.id)}
 
 const mcpContext=createMcpContext()
+const mcpLogCursor=createMcpLogCursor({read:a=>call('android_logcat',a)})
 const workflow=createMcpWorkflowEngine({list:visibleTools,execute:(name,args)=>governance.execute(name,args),metrics:telemetry})
 const governance=createMcpGovernance({list:visibleTools,invoke:(name,args)=>call(name,args),source:()=>readFileSync(fileURLToPath(import.meta.url),'utf8'),telemetry})
 async function call(name,a={}){
@@ -429,6 +432,7 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'mcp_android_log_delta': return mcpLogCursor.delta(a)
   case 'mcp_context_budget': return mcpContext.contextBudget(a)
   case 'mcp_android_diagnostics': return mcpContext.nativeSnapshot()
   case 'mcp_build_artifacts': return mcpContext.builds()
