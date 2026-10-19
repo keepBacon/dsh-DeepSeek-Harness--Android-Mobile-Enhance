@@ -928,6 +928,12 @@ async function codingMcpSmoke(){
   if(!mcpCaps.capabilities?.dag)throw Error('MCP capability report dispatch failed')
   const mcpTrace=await call('mcp_trace_analyze',{id:workflow.id})
   if(mcpTrace.completed!==1)throw Error('MCP trace tool dispatch failed')
+  const compact=await call('mcp_context_budget',{text:'alpha\nbeta\ngamma',query:'beta',maxChars:256})
+  if(compact.selectedLines!==1||!compact.excerpt.includes('beta'))throw Error('MCP P2 context budget dispatch failed')
+  const native=await call('mcp_android_diagnostics',{})
+  if(!native.source||!native.root)throw Error('MCP native diagnostics dispatch failed')
+  const resources=mcpContext.listResources()
+  if(resources.resources.length<3||mcpContext.listPrompts().prompts.length<5)throw Error('MCP P2 catalogue failed')
   process.stdout.write('[DSH] MCP coding end-to-end dispatch: OK\n')
  }finally{
   if(previous===undefined)delete process.env.DSH_CODE_INDEX_HOME
