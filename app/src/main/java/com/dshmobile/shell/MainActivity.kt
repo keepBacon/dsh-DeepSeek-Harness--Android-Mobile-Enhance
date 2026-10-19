@@ -518,11 +518,32 @@ class MainActivity : ComponentActivity() {
         return true
       }
 
-      override fun onReceivedError(view: WebView, errorCode: Int, description: String, failingUrl: String) {
-        if (isEngineSource(failingUrl)) {
-          showStartingState("正在重新连接 DSH…", description)
-          startEngineFlow()
+      // Modern WebView reports failed JS/CSS/plugin fetches separately from
+      // main-document navigation. A broken plugin resource must not hide the
+      // entire chat shell and start an endless Host reload loop.
+      override fun onReceivedError(
+        view: WebView, request: WebResourceRequest,
+        error: android.webkit.WebResourceError,
+      ) {
+        val url = request.url.toString()
+        if (!request.isForMainFrame || !isEngineSource(url)) {
+          if (isEngineSource(url)) {
+            Log.w("dsh-web", "Non-main-frame resource failed (no Host restart): " +
+              url.substringBefore('?').take(240))
+          }
+          return
         }
+        showStartingState("正在重新连接 DSH…", error.description?.toString().orEmpty())
+        startEngineFlow()
+      }
+
+      @Suppress("DEPRECATION")
+      override fun onReceivedError(view: WebView, errorCode: Int, description: String, failingUrl: String) {
+        // On API 23+ the overload with isForMainFrame is authoritative.
+        if (Build.VERSION.SDK_INT >= 23) return
+        if (!isEngineSource(failingUrl)) return
+        showStartingState("正在重新连接 DSH…", description)
+        startEngineFlow()
       }
 
       override fun onReceivedHttpError(
