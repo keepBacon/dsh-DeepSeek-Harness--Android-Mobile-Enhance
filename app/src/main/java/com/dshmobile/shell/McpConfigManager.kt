@@ -283,6 +283,7 @@ class McpConfigManager(
     append("      DSH_MOBILE_CODING_ENABLED: ").append(JSONObject.quote(if (codingEnabled()) "1" else "0")).append('\n')
     append("      DSH_MOBILE_TOOL_METRICS_ENABLED: ").append(JSONObject.quote(if (toolMetricsEnabled()) "1" else "0")).append('\n')
       append("      DSH_MCP_ANDROID_CAPABILITIES_FILE: ").append(JSONObject.quote(File(context.filesDir, "mcp/native-capabilities.json").absolutePath)).append('\n')
+      append("      DSH_MCP_SAF_DIR: ").append(JSONObject.quote(File(context.filesDir, "mcp/saf").absolutePath)).append('\n')
     append("      DSH_DATABASE_ENDPOINT_FILE: ").append(JSONObject.quote(File(context.filesDir, "database-broker-endpoint.json").absolutePath)).append('\n')
     append("      LD_LIBRARY_PATH: ").append(JSONObject.quote(File(usrDir, "lib").absolutePath)).append('\n')
     append("      PATH: ").append(JSONObject.quote(File(usrDir, "libexec/dsh/wrappers").absolutePath + ":" + File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
