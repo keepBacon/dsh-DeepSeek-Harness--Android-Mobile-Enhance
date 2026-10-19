@@ -1,4 +1,4 @@
-import {mkdtemp,rm} from 'node:fs/promises'
+import {mkdtemp,rm,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {createMcpWorkflowEngine,compactMcpResult} from './dsh-mcp-workflow.mjs'
@@ -40,6 +40,22 @@ try{
  check(terminal.status==='cancelled'&&terminal.nodes.find(n=>n.id==='later').status==='cancelled','cancel did not prevent dependent task')
  const trace=await engine.trace({id:job.id})
  check(trace.completed===2&&trace.events.length>0,'trace aggregates')
+ const recoveredId='wf-111111111111111111111111'
+ const crashDoc={schema:1,id:recoveredId,status:'running',createdAt:Date.now(),updatedAt:Date.now(),
+  revision:0,cancelRequested:false,allowSideEffects:true,concurrency:2,
+  nodes:[{id:'interrupted_write',tool:'code_ast_edit',args:{dryRun:false},dependsOn:[],effect:'write',status:'running'},
+   {id:'dependent_read',tool:'protocol_decode',args:{},dependsOn:['interrupted_write'],effect:'read',status:'pending'}],events:[]}
+ await writeFile(join(dir,recoveredId+'.json'),JSON.stringify(crashDoc))
+ let replayed=0
+ const recovery=createMcpWorkflowEngine({storageDir:dir,list:()=>defs,execute:async()=>{replayed++;throw Error('unexpected replay')}})
+ const inspecting=await recovery.restore({id:recoveredId,action:'inspect'})
+ check(inspecting.writeNodesNeverReplayed&&inspecting.interruptedNodes.includes('interrupted_write'),'crash inspection')
+ const resume=await recovery.restore({id:recoveredId,action:'resume'})
+ check(resume.resumed,'recovery not queued')
+ let recovered
+ for(let k=0;k<80;k++){recovered=await recovery.status({id:recoveredId});if(['failed','interrupted'].includes(recovered.status))break;await new Promise(r=>setTimeout(r,15))}
+ check(replayed===0&&recovered.nodes[0].status==='interrupted'&&recovered.nodes[1].status==='blocked',
+  'interrupted write was replayed')
  const cancelled=await engine.cancel({id:job.id});check(cancelled.alreadyTerminal,'cancel terminal')
  console.log('[DSH] P1 MCP DAG persistent workflow self-test: OK')
 }finally{await rm(dir,{recursive:true,force:true})}
