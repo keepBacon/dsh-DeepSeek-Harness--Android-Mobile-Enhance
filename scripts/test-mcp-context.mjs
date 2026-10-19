@@ -40,7 +40,7 @@ try{
  const meta={'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{}}
  const rpc=await handleModernRequest({jsonrpc:'2.0',id:1,method:'resources/list',params:{_meta:meta}},
   {list:()=>[],execute:async()=>{},context:ctx})
- assert(rpc.result?.resources?.length===3,'modern route')
+ assert(rpc.result?.resources?.length===4,'modern route')
  const promptRpc=await handleModernRequest({jsonrpc:'2.0',id:2,method:'prompts/get',
   params:{_meta:meta,name:'safe-patch',arguments:{goal:'fix workflow'}}},
   {list:()=>[],execute:async()=>{},context:ctx})
