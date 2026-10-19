@@ -59,8 +59,13 @@ try{
  const governed=createMcpWorkflowEngine({storageDir:dir,list:()=>defs,
   execute:async n=>({value:n}),resourceBudget:async()=>({lowMemory:true,thermalStatus:5})})
  const limitedJob=await governed.execute({nodes:[{id:'limited',tool:'protocol_decode'}],concurrency:4})
- const limited=await governed.status({id:limitedJob.id})
- check(limited.effectiveConcurrency===1&&limited.resourceLimited,'Android budget did not throttle')
+ let limited
+ for(let k=0;k<80;k++){
+  limited=await governed.status({id:limitedJob.id})
+  if(['completed','failed','cancelled'].includes(limited.status))break
+  await new Promise(resolve=>setTimeout(resolve,15))
+ }
+ check(limited.status==='completed'&&limited.effectiveConcurrency===1&&limited.resourceLimited,'Android budget did not throttle')
  const cancelled=await engine.cancel({id:job.id});check(cancelled.alreadyTerminal,'cancel terminal')
  console.log('[DSH] P1 MCP DAG persistent workflow self-test: OK')
 }finally{await rm(dir,{recursive:true,force:true})}
