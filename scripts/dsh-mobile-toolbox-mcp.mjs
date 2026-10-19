@@ -48,6 +48,7 @@ const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_ed
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update','agent_task_decompose','agent_scope_allocate','agent_shared_context','agent_result_review','agent_merge_guard','agent_failure_recovery'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
 const tools=[
+ {name:'mcp_android_environment',description:'Report executable availability for Termux, Git and Android development tools',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'mcp_android_log_delta',description:'Read bounded Android logcat delta with process-local cursor and deduplication',inputSchema:{type:'object',properties:{cursor:{type:'string'},package:{type:'string'},tag:{type:'string'},level:{type:'string'},maxLines:{type:'integer'}},additionalProperties:false}},
  {name:'mcp_context_budget',description:'Extract bounded query-relevant lines preserving source fingerprint',inputSchema:{type:'object',properties:{text:{type:'string'},query:{type:'string'},maxChars:{type:'integer'}},required:['text'],additionalProperties:false}},
  {name:'mcp_android_diagnostics',description:'Read native Android capabilities snapshot or report unavailable',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -432,6 +433,7 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'mcp_android_environment': return mcpContext.environment()
   case 'mcp_android_log_delta': return mcpLogCursor.delta(a)
   case 'mcp_context_budget': return mcpContext.contextBudget(a)
   case 'mcp_android_diagnostics': return mcpContext.nativeSnapshot()
