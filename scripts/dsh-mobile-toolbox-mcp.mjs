@@ -13,6 +13,7 @@ import {codeRepairCycle} from './dsh-code-repair-cycle.mjs'
 import {databaseCall} from './dsh-database-client.mjs'
 import {createMcpGovernance} from './dsh-mcp-governance.mjs'
 import {createMcpWorkflowEngine} from './dsh-mcp-workflow.mjs'
+import {createMcpContext} from './dsh-mcp-context.mjs'
 import {startModernStdio} from './dsh-mcp-modern-stdio.mjs'
 import {readFileSync} from 'node:fs'
 import {codeAstEdit,codeRefactor,codeContractCheck,codePatchConflict,codeRegressionBisect,codeFailureCluster,codeFixVerify,codeCheckpoint} from './dsh-code-p1.mjs'
@@ -46,6 +47,9 @@ const CODING_NAMES=new Set(['codebase_map','code_symbols','code_impact','code_ed
 const COORDINATION_NAMES=new Set(['coordination_create','coordination_status','coordination_claim','coordination_update','agent_task_decompose','agent_scope_allocate','agent_shared_context','agent_result_review','agent_merge_guard','agent_failure_recovery'])
 const visibleTools=()=>tools.filter(t=>(COORDINATION_ENABLED||!COORDINATION_NAMES.has(t.name))&&(CODING_ENABLED||!CODING_NAMES.has(t.name))&&(COORDINATION_ENABLED||t.name!=='code_task_verify'))
 const tools=[
+ {name:'mcp_context_budget',description:'Extract bounded query-relevant lines preserving source fingerprint',inputSchema:{type:'object',properties:{text:{type:'string'},query:{type:'string'},maxChars:{type:'integer'}},required:['text'],additionalProperties:false}},
+ {name:'mcp_android_diagnostics',description:'Read native Android capabilities snapshot or report unavailable',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'mcp_build_artifacts',description:'Inspect configured APK build output metadata without claiming verification',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'mcp_workflow_plan',description:'Validate workflow DAG and estimate execution without running tools',inputSchema:{type:'object',properties:{nodes:{type:'array'},concurrency:{type:'integer'},allowSideEffects:{type:'boolean'}},required:["nodes"],additionalProperties:false}},
  {name:'mcp_workflow_execute',description:'Start persisted bounded workflow; returns ID without awaiting completion',inputSchema:{type:'object',properties:{nodes:{type:'array'},concurrency:{type:'integer'},allowSideEffects:{type:'boolean'}},required:["nodes"],additionalProperties:false}},
  {name:'mcp_workflow_status',description:'Read persisted workflow state',inputSchema:{type:'object',properties:{id:{type:'string'},includeResults:{type:'boolean'}},required:["id"],additionalProperties:false}},
@@ -415,6 +419,7 @@ function miCommand(session,command,timeoutMs=5000){if(session.closed)throw new E
 function waitDebugStop(session,timeoutMs){for(let i=session.lines.length-1;i>=0&&i>=session.lines.length-20;i--){if(session.lines[i].startsWith('*stopped'))return Promise.resolve(session.lines[i])}return new Promise((resolvePromise,reject)=>{const waiter={resolve:resolvePromise,reject,timer:null};waiter.timer=setTimeout(()=>{session.stopWaiters.delete(waiter);resolvePromise(null)},timeoutMs);session.stopWaiters.add(waiter)})}
 async function closeDebug(session){if(session.closed)return;try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}try{await miCommand(session,'-gdb-exit',3000)}catch{}try{session.child.kill('SIGKILL')}catch{}session.closed=true;DEBUG_SESSIONS.delete(session.id)}
 
+const mcpContext=createMcpContext()
 const workflow=createMcpWorkflowEngine({list:visibleTools,execute:(name,args)=>governance.execute(name,args),metrics:telemetry})
 const governance=createMcpGovernance({list:visibleTools,invoke:(name,args)=>call(name,args),source:()=>readFileSync(fileURLToPath(import.meta.url),'utf8'),telemetry})
 async function call(name,a={}){
@@ -424,6 +429,9 @@ async function call(name,a={}){
  if(a==null)a={}
  if(typeof a!=='object'||Array.isArray(a))throw new Error('tool arguments must be an object')
  switch(name){
+  case 'mcp_context_budget': return mcpContext.contextBudget(a)
+  case 'mcp_android_diagnostics': return mcpContext.nativeSnapshot()
+  case 'mcp_build_artifacts': return mcpContext.builds()
   case 'mcp_workflow_plan': return workflow.plan(a)
   case 'mcp_workflow_execute': return workflow.execute(a)
   case 'mcp_workflow_status': return workflow.status(a)
@@ -920,7 +928,13 @@ async function codingMcpSmoke(){
   await rm(root,{recursive:true,force:true})
  }
 }
-async function main(){if(process.env.DSH_MCP_PROTOCOL_MODE==='2026-07-28')return startModernStdio({list:visibleTools,execute:governance.execute});if(process.argv.includes('--mcp-coding-self-test'))return codingMcpSmoke();if(process.argv.includes('--feature-test')){const shown=new Set(visibleTools().map(t=>t.name));for(const id of CODING_NAMES){if(shown.has(id)!==(CODING_ENABLED&&(id!=='code_task_verify'||COORDINATION_ENABLED)))throw new Error('coding tool visibility mismatch: '+id)}for(const id of COORDINATION_NAMES){if(shown.has(id)!==COORDINATION_ENABLED)throw new Error('coordination tool visibility mismatch: '+id)}if(shown.has('code_task_verify')!==(CODING_ENABLED&&COORDINATION_ENABLED))throw new Error('coordination dependency mismatch');if(!CODING_ENABLED){try{await call('code_repair_cycle',{});throw new Error('disabled coding tool callable')}catch(e){if(!String(e.message).includes('coding extension disabled'))throw e}}process.stdout.write('[DSH] MCP extension gating: OK coding='+CODING_ENABLED+' coordination='+COORDINATION_ENABLED+'\n');return}if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{
+async function main(){if(process.env.DSH_MCP_PROTOCOL_MODE==='2026-07-28')return startModernStdio({list:visibleTools,execute:governance.execute,context:mcpContext});if(process.argv.includes('--mcp-coding-self-test'))return codingMcpSmoke();if(process.argv.includes('--feature-test')){const shown=new Set(visibleTools().map(t=>t.name));for(const id of CODING_NAMES){if(shown.has(id)!==(CODING_ENABLED&&(id!=='code_task_verify'||COORDINATION_ENABLED)))throw new Error('coding tool visibility mismatch: '+id)}for(const id of COORDINATION_NAMES){if(shown.has(id)!==COORDINATION_ENABLED)throw new Error('coordination tool visibility mismatch: '+id)}if(shown.has('code_task_verify')!==(CODING_ENABLED&&COORDINATION_ENABLED))throw new Error('coordination dependency mismatch');if(!CODING_ENABLED){try{await call('code_repair_cycle',{});throw new Error('disabled coding tool callable')}catch(e){if(!String(e.message).includes('coding extension disabled'))throw e}}process.stdout.write('[DSH] MCP extension gating: OK coding='+CODING_ENABLED+' coordination='+COORDINATION_ENABLED+'\n');return}if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{},resources:{},prompts:{}}});
+ const types=await import(pathToFileURL(requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js')).href)
+ server.setRequestHandler(types.ListResourcesRequestSchema,async()=>mcpContext.listResources())
+ server.setRequestHandler(types.ListResourceTemplatesRequestSchema,async()=>mcpContext.listResourceTemplates())
+ server.setRequestHandler(types.ReadResourceRequestSchema,async req=>mcpContext.readResource(req.params))
+ server.setRequestHandler(types.ListPromptsRequestSchema,async()=>mcpContext.listPrompts())
+ server.setRequestHandler(types.GetPromptRequestSchema,async req=>mcpContext.getPrompt(req.params))server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:visibleTools()}));server.setRequestHandler(CallToolRequestSchema,async req=>{
  try{
   const value=await governance.execute(req.params.name,req.params.arguments??{})
   return {content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value}
