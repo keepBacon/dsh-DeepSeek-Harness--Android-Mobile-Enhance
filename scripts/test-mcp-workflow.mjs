@@ -21,7 +21,11 @@ try{
  const preview=compactMcpResult({value:{a:'ABCDEFGHIJK'},maxChars:4});check(preview.truncated&&preview.sha256.length===64,'compaction')
  const probe=await engine.restore({id:job.id,action:'inspect'});check(!probe.writeNodesNeverReplayed===false||probe.writeNodesNeverReplayed,'restore introspection')
  const denied=await engine.plan({nodes:[{id:'edit',tool:'code_ast_edit',args:{dryRun:false},effect:'write'}],allowSideEffects:true})
- check(denied.writeCount===1,'approved write plan')
+ check(denied.sideEffectfulNodes===1,'approved write plan')
+ const failing=createMcpWorkflowEngine({storageDir:dir,list:()=>defs,execute:async()=>{throw Error('intentional failure')}})
+ const failureJob=await failing.execute({nodes:[{id:'first',tool:'protocol_decode'},{id:'dependent',tool:'protocol_hash',dependsOn:['first']}]})
+ let state;for(let k=0;k<80;k++){state=await failing.status({id:failureJob.id});if(state.status==='failed')break;await new Promise(r=>setTimeout(r,20))}
+ check(state.status==='failed'&&state.nodes.find(n=>n.id==='dependent').status==='blocked','failure propagation')
  const cancelled=await engine.cancel({id:job.id});check(cancelled.alreadyTerminal,'cancel terminal')
  console.log('[DSH] P1 MCP DAG persistent workflow self-test: OK')
 }finally{await rm(dir,{recursive:true,force:true})}
