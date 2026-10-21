@@ -5,7 +5,6 @@ import android.database.sqlite.SQLiteDatabase
 import com.dshmobile.shell.EngineManager
 import java.io.File
 import java.nio.file.Files
-import java.security.MessageDigest
 import java.util.ArrayDeque
 
 /**
@@ -115,10 +114,14 @@ class MobileIndexService(private val engine: EngineManager, private val store: M
     val fullKinds = mutableSetOf<String>()
     val profile = File(engine.homeDir, ".dsh/profiles/web/package.json")
     if (profile.isFile) {
-      engine.listPluginBundles().forEach { p ->
-        items += Extension("plugin", p.name, p.version, p.enabled)
+      // A broken package.json must not wipe the previous plugin inventory.
+      val manifest = runCatching { org.json.JSONObject(profile.readText()) }.getOrNull()
+      if (manifest?.optJSONObject("dependencies") != null) {
+        engine.listPluginBundles().forEach { p ->
+          items += Extension("plugin", p.name, p.version, p.enabled)
+        }
+        fullKinds += "plugin"
       }
-      fullKinds += "plugin"
     }
     val root = File(home, "skills")
     if (root.isDirectory && !Files.isSymbolicLink(root.toPath())) {

@@ -56,6 +56,11 @@ class MainActivity : ComponentActivity() {
   private lateinit var progressText: TextView
   private val engineManager by lazy { EngineManager(this, pickToken) }
   private val skillManager by lazy { SkillManager(this, engineManager) }
+  private val diagnosticWriter = java.util.concurrent.ThreadPoolExecutor(
+    1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+    java.util.concurrent.ArrayBlockingQueue<Runnable>(256),
+    java.util.concurrent.ThreadPoolExecutor.DiscardPolicy(),
+  )
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -325,6 +330,7 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    diagnosticWriter.shutdown()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
     try {
@@ -608,6 +614,14 @@ class MainActivity : ComponentActivity() {
           engineManager.runMobileToolRequest(category, command, currentWritableWorkspacePath())
         },
         onOpenLocalUrl = { url -> openLocalPreviewUrl(url) },
+        onRecordToolObservation = { session, id, name, status, code ->
+          diagnosticWriter.execute {
+            runCatching {
+              com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+                .observe(session, id, name, status, code)
+            }.onFailure { Log.w("dsh-database", "Observation failed", it) }
+          }
+        },
         pickToken = pickToken,
       ),
       "androidBridge",
@@ -3374,7 +3388,11 @@ class MainActivity : ComponentActivity() {
   private fun installPassiveToolCallMonitor(view: WebView) {
     if (!isEngineSource(view.url ?: "")) return
     val script = try {
-      assets.open("dsh-tool-call-monitor.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+      val body = assets.open("dsh-tool-call-monitor.js")
+        .bufferedReader(Charsets.UTF_8).use { it.readText() }
+      val marker = "/*__DSH_MONITOR_CAP__*/"
+      check(body.contains(marker))
+      body.replace(marker, "const MONITOR_CAP = " + jsString(bridgeCapability) + ";")
     } catch (t: Throwable) {
       Log.w("DSH", "Passive tool monitor asset unavailable", t)
       return

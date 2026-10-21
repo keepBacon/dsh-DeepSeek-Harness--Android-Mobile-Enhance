@@ -1,6 +1,7 @@
 /* Passive DSH tool-call display. Reads existing tool UI; never calls the LLM. */
 (() => {
   'use strict';
+  /*__DSH_MONITOR_CAP__*/
   if (window.__dshAndroidToolMonitor) return;
   const MAX_ROWS = 120;
   const rows = new Map();
@@ -67,7 +68,7 @@
       const code = status === 'failure'
         ? (markers.find(key => raw.toUpperCase().includes(key)) || '') : '';
       const bridge = window.androidBridge;
-      const capability = window.__dshAndroidMonitorCap;
+      const capability = MONITOR_CAP;
       if (bridge && capability && bridge.recordToolObservation) {
         bridge.recordToolObservation(capability, sessionKey(), id,
           normalizedName, status, code);

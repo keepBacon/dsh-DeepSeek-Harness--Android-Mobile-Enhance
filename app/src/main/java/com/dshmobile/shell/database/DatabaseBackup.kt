@@ -10,7 +10,7 @@ object DatabaseBackup {
   fun create(context: Context, store: MobileDatabase): File = synchronized(store) {
     check(store.quickCheck() == "ok") { "Database failed integrity check" }
     val directory = File(context.filesDir, "database-backups").apply { mkdirs() }
-    val target = File(directory, "dsh-mobile-${System.currentTimeMillis()}.db")
+    val target = File.createTempFile("dsh-mobile-", ".db", directory).apply { delete() }
     require(!target.exists())
     // SQLite 3.27+ only. Unsupported runtime fails safely with no raw-file copying.
     val quoted = target.absolutePath.replace("'", "''")
@@ -32,12 +32,19 @@ object DatabaseBackup {
           hash.update(buf, 0, n)
         }
       }
-      File(directory, target.name + ".sha256").writeText(
+      val checksum = File(directory, target.name + ".sha256")
+      checksum.writeText(
         hash.digest().joinToString("") { "%02x".format(it.toInt() and 255) } + "\n"
       )
+      // Bounded retention. Keep the newest five verified metadata snapshots.
+      directory.listFiles()?.filter { it.name.startsWith("dsh-mobile-") && it.name.endsWith(".db") }
+        ?.sortedByDescending { it.lastModified() }?.drop(5)?.forEach { old ->
+          if (old.delete()) File(directory, old.name + ".sha256").delete()
+        }
       target
     } catch (t: Exception) {
       target.delete()
+      File(directory, target.name + ".sha256").delete()
       throw t
     }
   }

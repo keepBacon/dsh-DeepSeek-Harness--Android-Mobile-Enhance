@@ -36,6 +36,7 @@ class AndroidBridge(
   },
   private val onOpenLocalUrl: (String) -> Boolean = { false },
   private val onRecordToolObservation: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
+  private val onRecordToolObservation: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
   private val pickToken: String? = null,
 ) {
 
@@ -159,6 +160,20 @@ class AndroidBridge(
       toolName.length !in 1..160 || errorCode.length > 80) return false
     return runCatching {
       onRecordToolObservation(sessionKey, callId, toolName, status, errorCode)
+      true
+    }.getOrDefault(false)
+  }
+
+  @JavascriptInterface
+  fun recordToolObservation(
+    capability: String, sessionKey: String, callId: String,
+    name: String, status: String, code: String,
+  ): Boolean {
+    if (!authorized(capability) || sessionKey.length !in 1..2048 ||
+      callId.length !in 1..160 || name.length !in 1..160 || code.length > 80 ||
+      status !in setOf("running", "success", "failure")) return false
+    return runCatching {
+      onRecordToolObservation(sessionKey, callId, name, status, code)
       true
     }.getOrDefault(false)
   }

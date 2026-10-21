@@ -45,7 +45,7 @@ class MobileDatabase private constructor(context: Context) :
     require(entries.map { it.name }.distinct().size == entries.size)
     require(entries.all {
       it.name.length in 1..160 && it.provider.length in 1..160 && it.schemaHash.length <= 128 &&
-        it.name.none(Char::isISOControl)
+        it.name.none(Char::isISOControl) && it.provider.none(Char::isISOControl)
     })
     val normalized = entries.sortedBy { it.name }
     val hash = digest(normalized.joinToString("\n") { "${it.name}\t${it.provider}\t${it.schemaHash}" })
@@ -91,6 +91,10 @@ class MobileDatabase private constructor(context: Context) :
     val db = writableDatabase
     val now = System.currentTimeMillis()
     val values = ContentValues().apply {
+      put("event_key", key)
+      put("session_hash", digest(sessionKey))
+      put("tool_name", name)
+      put("first_seen", now)
       put("status", status)
       put("category", ToolErrorClassifier.classify(status, error))
       put("error_code", ToolErrorClassifier.safeCode(error))
@@ -98,12 +102,19 @@ class MobileDatabase private constructor(context: Context) :
     }
     db.beginTransaction()
     try {
-      if (db.update("tool_observations", values, "event_key=?", arrayOf(key)) == 0) {
-        values.put("event_key", key)
-        values.put("session_hash", digest(sessionKey))
-        values.put("tool_name", name)
-        values.put("first_seen", now)
-        db.insertOrThrow("tool_observations", null, values)
+      // Terminal statuses never regress when a late DOM poll reports "running".
+      val inserted = db.insertWithOnConflict(
+        "tool_observations", null, values, SQLiteDatabase.CONFLICT_IGNORE,
+      )
+      if (inserted == -1L && status != "running") {
+        val terminal = ContentValues().apply {
+          put("status", status)
+          put("category", ToolErrorClassifier.classify(status, error))
+          put("error_code", ToolErrorClassifier.safeCode(error))
+          put("last_seen", now)
+        }
+        db.update("tool_observations", terminal,
+          "event_key=? AND status='running'", arrayOf(key))
       }
       // Amortize retention trimming: no large DELETE on every DOM observation.
       if (++observations % 128 == 0) db.execSQL(
@@ -162,6 +173,7 @@ class MobileDatabase private constructor(context: Context) :
         category TEXT NOT NULL, error_code TEXT NOT NULL DEFAULT '')""",
       "CREATE INDEX idx_tool_name_time ON tool_observations(tool_name,last_seen DESC)",
       "CREATE INDEX idx_tool_category_time ON tool_observations(category,last_seen DESC)",
+      "CREATE INDEX idx_tool_retention ON tool_observations(first_seen DESC)",
       """CREATE TABLE extension_inventory(
         kind TEXT NOT NULL, stable_id TEXT NOT NULL, version TEXT NOT NULL DEFAULT '',
         configured_enabled INTEGER NOT NULL CHECK(configured_enabled IN (0,1)),
