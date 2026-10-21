@@ -77,8 +77,27 @@
     return {visibility:blockers.length?'occluded':'visible',
       occludedBy:blockers.length?{kind:blockers[0].kind,id:blockers[0].id}:null};
   }
+  /** The nearest reticle intersection comes from *both* static OBB and
+   *  moving agents; the player body's own spheres are intentionally ignored. */
+  function raycastReticle(scene) {
+    const origin=scene.camera.position,
+      direction=T.screenRay(scene.camera,scene.reticle.normalized,scene.viewport);
+    const solids=S.castPrepared(S.shapes(scene),[],origin,direction,
+      {excludeSelf:true,maxDistance:1000});
+    let nearest=solids&&{...solids,screen:T.project(solids.point,scene.camera,scene.viewport)};
+    for(const a of scene.agents){
+      const distance=B.sphereHit(origin,direction,a.position,a.radius);
+      if(distance===null||distance>1000||nearest&&distance>=nearest.distance-1e-8)continue;
+      const point=add(origin,mul(direction,distance)),normal=unit(sub(point,a.position));
+      nearest={kind:'agent',id:a.id,distance:round(distance),
+        point:vec(point),normal:vec(normal),
+        screen:T.project(point,scene.camera,scene.viewport)};
+    }
+    return nearest;
+  }
   function observe(input){
     const s=normalize(input),base=T.observe(asV3(s));
+    base.reticle.worldHit=raycastReticle(s);
     const player=s.player,b=basis(player.yaw,0);
     const agents=s.agents.map(a=>{
       const screen=T.project(a.position,s.camera,s.viewport);
@@ -109,20 +128,57 @@
       metrics:{...base.metrics,agents:agents.length,
         agentVisible:agents.filter(x=>x.visibility==='visible').length}};
   }
-  function blockedAt(scene,obstacles,p,skipAgent=null){
-    const radius=scene.player.collision.enabled?scene.player.collision.radius:.28;
-    for(const agent of scene.agents){
-      if(agent.id===skipAgent)continue;
-      if(planar(p,agent.position)<radius+agent.radius+.02)return true;
-    }
-    for(const o of obstacles){
-      if(!(o.kind==='item'?scene.items:scene.plots).find(x=>x.id===o.id)?.solid)continue;
-      if(planar(p,o.center)>length(o.half)+radius+.02)continue;
-      for(const y of [.35,.9,1.45]){
-        if(S.distanceToBox(V(p.x,p.y+y,p.z),o)<radius+.015)return true;
-      }
+  /** Reuse prepared solid shapes and the same capsule clearance assumptions
+   *  for points, grid edges, smoothing and final path verification. */
+  function navigationGeometry(scene) {
+    const solids=S.shapes(scene).filter(o=>
+      (o.kind==='item'?scene.items:scene.plots).some(x=>x.id===o.id&&x.solid));
+    const agents=scene.agents;
+    const radius=scene.player.collision.radius+.015;
+    const combined=solids.map(o=>({...o,broad:Math.hypot(o.half.x,o.half.y,o.half.z)+radius+.015}));
+    return {solids:combined,agents,radius};
+  }
+  function nearSegmentXZ(p,a,b) {
+    const dx=b.x-a.x,dz=b.z-a.z,m=dx*dx+dz*dz;
+    const t=m<1e-16?0:Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.z-a.z)*dz)/m));
+    return Math.hypot(p.x-a.x-t*dx,p.z-a.z-t*dz);
+  }
+  function navigationPointBlocked(scene,geometry,p) {
+    const {solids,agents,radius}=geometry;
+    for(const a of agents)if(planar(p,a.position)<radius+a.radius+.015)return true;
+    for(const o of solids){
+      if(planar(p,o.center)>o.broad)continue;
+      for(const y of [.35,.9,1.45])
+        if(S.distanceToBox(V(p.x,p.y+y,p.z),o)<radius)return true;
     }
     return false;
+  }
+  function navigationEdgeClear(scene,geometry,a,b) {
+    if(navigationPointBlocked(scene,geometry,b))return false;
+    const lengthXZ=planar(a,b);
+    if(lengthXZ<1e-10)return true;
+    const delta=sub(b,a),radius=geometry.radius;
+    for(const actor of geometry.agents)
+      if(nearSegmentXZ(actor.position,a,b)<radius+actor.radius+.015)return false;
+    for(const o of geometry.solids) {
+      if(nearSegmentXZ(o.center,a,b)>o.broad)continue;
+      for(const y of [.35,.9,1.45]){
+        if(T.sweepAgainst(add(a,V(0,y,0)),delta,o,radius))return false;
+      }
+      // Sweep is conservative, and does not handle initial overlap. Sample
+      // even short edges so no unchecked interval reaches the returned path.
+      const samples=Math.max(1,Math.ceil(lengthXZ/.15));
+      for(let i=1;i<samples;i++)if(navigationPointBlocked(scene,geometry,
+        V(a.x+(b.x-a.x)*i/samples,a.y,a.z+(b.z-a.z)*i/samples)))return false;
+    }
+    return true;
+  }
+  function blockedAt(scene,obstacles,p,skipAgent=null) {
+    const solids=obstacles.filter(o=>(o.kind==='item'?scene.items:scene.plots)
+      .some(x=>x.id===o.id&&x.solid));
+    const geometry={solids:solids.map(o=>({...o,broad:Math.hypot(o.half.x,o.half.y,o.half.z)+scene.player.collision.radius+.03})),
+      agents:scene.agents.filter(x=>x.id!==skipAgent),radius:scene.player.collision.radius+.015};
+    return navigationPointBlocked(scene,geometry,p);
   }
   class MinHeap{
     constructor(){this.list=[]}
@@ -130,7 +186,7 @@
     pop(){const a=this.list,first=a[0],last=a.pop();if(a.length){let i=0;while(i*2+1<a.length){let c=i*2+1;if(c+1<a.length&&a[c+1].score<a[c].score)c++;if(a[c].score>=last.score)break;a[i]=a[c];i=c}a[i]=last}return first}
     get size(){return this.list.length}
   }
-  function planPath(input,target,options={}){
+  function* planPathWork(input,target,options={}){
     const s=normalize(input);
     if(!target||!within(target.x,-1e5,1e5)||!within(target.z,-1e5,1e5))
       throw Error('invalid navigation target');
@@ -138,25 +194,32 @@
     if(!within(cell,.4,2)||!Number.isInteger(maxNodes)||maxNodes<100||maxNodes>MAX_NODES)
       throw Error('invalid navigation budget');
     const from=s.player.position,to=V(target.x,from.y,target.z),distance=planar(from,to);
-    if(distance>48)return {status:'target_too_far',path:[],expanded:0,cell,maxNodes};
-    const obstacles=S.shapes(s);
-    if(blockedAt(s,obstacles,from))return {status:'start_blocked',path:[],expanded:0,cell,maxNodes};
-    if(blockedAt(s,obstacles,to))return {status:'target_blocked',path:[],expanded:0,cell,maxNodes};
-    if(distance<.05)return {status:'already_there',path:[vec(from)],expanded:0,cell,maxNodes};
+    const status=(name,expanded=0,path=[])=>({status:name,path,expanded,cell,maxNodes});
+    if(distance>48)return status('target_too_far');
+    const geometry=navigationGeometry(s);
+    if(navigationPointBlocked(s,geometry,from))return status('start_blocked');
+    if(navigationPointBlocked(s,geometry,to))return status('target_blocked');
+    if(distance<.05)return status('already_there',0,[vec(from)]);
     const gx=Math.round((to.x-from.x)/cell),gz=Math.round((to.z-from.z)/cell);
     const limit=Math.ceil(52/cell),limitCells=limit*limit;
     if(Math.abs(gx)>limit||Math.abs(gz)>limit||limitCells>20000)
-      return {status:'navigation_area_too_large',path:[],expanded:0,cell,maxNodes};
+      return status('navigation_area_too_large');
     const key=(x,z)=>x+','+z,loc=(x,z)=>V(from.x+x*cell,from.y,from.z+z*cell);
     const h=(x,z)=>{const dx=Math.abs(x-gx),dz=Math.abs(z-gz);
       return (Math.max(dx,dz)+(Math.SQRT2-1)*Math.min(dx,dz))*cell};
-    const blocks=new Map();
+    const blocks=new Map(),edges=new Map();
     function blocked(x,z){
       const id=key(x,z);if(blocks.has(id))return blocks.get(id);
-      const b=Math.abs(x)>limit||Math.abs(z)>limit||blockedAt(s,obstacles,loc(x,z));
-      blocks.set(id,b);return b;
+      const state=Math.abs(x)>limit||Math.abs(z)>limit||navigationPointBlocked(s,geometry,loc(x,z));
+      blocks.set(id,state);return state;
     }
-    if(blocked(gx,gz))return {status:'goal_cell_blocked',path:[],expanded:0,cell,maxNodes};
+    function edgeClear(x,z,nx,nz) {
+      const id=key(x,z)+'|'+key(nx,nz);
+      if(edges.has(id))return edges.get(id);
+      const ok=navigationEdgeClear(s,geometry,loc(x,z),loc(nx,nz));
+      edges.set(id,ok);return ok;
+    }
+    if(blocked(gx,gz))return status('goal_cell_blocked');
     const open=new MinHeap(),gScore=new Map([['0,0',0]]),parent=new Map(),closed=new Set();
     open.push({x:0,z:0,g:0,score:h(0,0)});
     let expanded=0,reached=false;
@@ -166,10 +229,12 @@
       if(closed.has(id)||p.g>gScore.get(id)+1e-8)continue;
       if(p.x===gx&&p.z===gz){reached=true;break}
       closed.add(id);expanded++;
+      if(expanded%24===0)yield {stage:'search',expanded,maxNodes};
       for(const [dx,dz] of dirs){
         const nx=p.x+dx,nz=p.z+dz,k=key(nx,nz);
         if(closed.has(k)||blocked(nx,nz))continue;
         if(dx&&dz&&(blocked(p.x+dx,p.z)||blocked(p.x,p.z+dz)))continue;
+        if(!edgeClear(p.x,p.z,nx,nz))continue;
         const next=p.g+cell*(dx&&dz?Math.SQRT2:1);
         if(next<(gScore.get(k)??Infinity)-1e-8){
           parent.set(k,id);gScore.set(k,next);
@@ -177,73 +242,184 @@
         }
       }
     }
-    if(!reached)return {status:open.size?'budget_exhausted':'no_path',path:[],expanded,cell,maxNodes};
+    if(!reached)return status(open.size?'budget_exhausted':'no_path',expanded);
     let cursor=key(gx,gz),keys=[cursor],guard=0;
     while(cursor!=='0,0'&&guard++<maxNodes+1){
       cursor=parent.get(cursor);if(!cursor)throw Error('navigation parent chain broken');keys.push(cursor);
     }
     keys.reverse();
     const raw=keys.map(k=>{const [x,z]=k.split(',').map(Number);return loc(x,z)});
-    const clear=(a,b)=>{
-      const d=planar(a,b),samples=Math.ceil(d/(cell/4));
-      for(let i=1;i<=samples;i++)if(blockedAt(s,obstacles,
-        V(a.x+(b.x-a.x)*i/samples,from.y,a.z+(b.z-a.z)*i/samples)))return false;
-      return true;
-    };
     const path=[raw[0]];let i=0;
     while(i<raw.length-1){
       let j=raw.length-1;
-      for(;j>i+1;j--)if(clear(raw[i],raw[j]))break;
+      for(;j>i;j--){
+        if(j%16===0)yield {stage:'smoothing',expanded,maxNodes};
+        if(navigationEdgeClear(s,geometry,raw[i],raw[j]))break;
+      }
+      if(j<=i)return status('path_validation_failed',expanded);
       i=j;path.push(raw[j]);
     }
-    if(!clear(path[path.length-1],to))
-      return {status:'target_connection_blocked',path:path.map(vec),expanded,cell,maxNodes};
-    path.push(to);
+    if(!navigationEdgeClear(s,geometry,path[path.length-1],to))
+      return status('target_connection_blocked',expanded);
+    if(planar(path[path.length-1],to)>1e-7)path.push(to);
+    // No success status without validating every final segment.
+    for(let j=1;j<path.length;j++){
+      if(j%16===0)yield {stage:'verifying',expanded,maxNodes};
+      if(!navigationEdgeClear(s,geometry,path[j-1],path[j]))
+        return status('path_validation_failed',expanded);
+    }
     return {status:'found',path:path.map(vec),expanded,cell,maxNodes,
       length:round(path.slice(1).reduce((sum,p,j)=>sum+planar(p,path[j]),0)),
       target:vec(to)};
   }
-  function deltaReport(previous,next,motion=null){
-    const before=normalize(previous),after=normalize(next);
-    const events=[];
-    const change=(kind,id,from,to)=>{
-      const d=dist(from,to);
-      if(d>1e-4)events.push({kind,id,distance:round(d),from:vec(from),to:vec(to)});
-    };
-    change('player_moved','player',before.player.position,after.player.position);
-    change('camera_moved','camera',before.camera.position,after.camera.position);
-    const old=new Map(before.agents.map(a=>[a.id,a]));
-    for(const a of after.agents){
-      const prior=old.get(a.id);
-      if(!prior)events.push({kind:'agent_appeared',id:a.id,position:vec(a.position)});
-      else change('agent_moved',a.id,prior.position,a.position);
+  function planPath(input,target,options={}){
+    const iterator=planPathWork(input,target,options);
+    let value=iterator.next();
+    while(!value.done)value=iterator.next();
+    return value.value;
+  }
+  /** Cooperative UI scheduling: bounded work chunks, progress and cancellation.
+   * The same generator supplies both synchronous tests and asynchronous UI. */
+  async function planPathAsync(input,target,options={},onProgress=null,token=null){
+    if(token?.cancelled)return {status:'cancelled',path:[],expanded:0};
+    const iterator=planPathWork(input,target,options);
+    let value=iterator.next();
+    while(!value.done){
+      if(token?.cancelled)return {status:'cancelled',path:[],expanded:value.value.expanded,
+        cell:options.cell??1,maxNodes:options.maxNodes??2400};
+      if(onProgress)onProgress(value.value);
+      await new Promise(resolve=>setTimeout(resolve,0));
+      value=iterator.next();
     }
-    const now=new Set(after.agents.map(a=>a.id));
-    for(const a of before.agents)if(!now.has(a.id))
-      events.push({kind:'agent_disappeared',id:a.id});
-    if(motion?.impacts?.length)for(const hit of motion.impacts)
-      events.push({kind:'collision',id:hit.id,normal:hit.normal,at:hit.at});
-    const beforeHit=T.observe(asV3(before)).reticle.worldHit,
-      afterHit=T.observe(asV3(after)).reticle.worldHit;
-    if((beforeHit?.id||null)!==(afterHit?.id||null))
-      events.push({kind:'aim_target_changed',before:beforeHit?.id||null,after:afterHit?.id||null});
+    if(token?.cancelled)return {status:'cancelled',path:[],expanded:0};
+    return value.value;
+  }
+  function deltaReport(previous,next,motion=null){
+    const before=normalize(previous),after=normalize(next),events=[];
+    const emit=(kind,data)=>events.push({kind,...data});
+    const moved=(kind,id,from,to)=>{
+      const d=dist(from,to);
+      if(d>1e-4)emit(kind,{id,distance:round(d),from:vec(from),to:vec(to)});
+    };
+    const rotationChange=(kind,id,x,y,keys)=>{
+      const values={};
+      for(const k of keys){
+        const old=x[k],current=y[k];
+        const difference=((current-old+180)%360+360)%360-180;
+        if(Math.abs(difference)>1e-4)values[k]={before:round(old),after:round(current),
+          deltaDeg:round(difference)};
+      }
+      if(Object.keys(values).length)emit(kind,{id,angles:values});
+    };
+    const changed=(kind,id,k,x,y)=>{
+      if(x!==y)emit(kind,{id,field:k,before:x,after:y});
+    };
+    moved('player_moved','player',before.player.position,after.player.position);
+    moved('camera_moved','camera',before.camera.position,after.camera.position);
+    rotationChange('player_rotated','player',before.player,after.player,['yaw','pitch']);
+    rotationChange('camera_rotated','camera',before.camera,after.camera,['yaw','pitch','roll']);
+    changed('camera_setting_changed','camera','fov',before.camera.fov,after.camera.fov);
+    changed('camera_setting_changed','camera','follow',before.camera.follow,after.camera.follow);
+    if(Math.abs(before.reticle.normalized.x-after.reticle.normalized.x)>1e-5||
+      Math.abs(before.reticle.normalized.y-after.reticle.normalized.y)>1e-5)
+      emit('reticle_moved',{id:'reticle',before:{x:before.reticle.normalized.x,
+        y:before.reticle.normalized.y},after:{x:after.reticle.normalized.x,
+        y:after.reticle.normalized.y}});
+    const beforeAgents=new Map(before.agents.map(a=>[a.id,a]));
+    for(const a of after.agents){
+      const prior=beforeAgents.get(a.id);
+      if(!prior){emit('agent_appeared',{id:a.id,position:vec(a.position)});continue}
+      moved('agent_moved',a.id,prior.position,a.position);
+      moved('agent_velocity_changed',a.id,prior.velocity,a.velocity);
+      rotationChange('agent_rotated',a.id,prior,a,['yaw']);
+      changed('agent_changed',a.id,'role',prior.role,a.role);
+      changed('agent_changed',a.id,'radius',prior.radius,a.radius);
+    }
+    const afterAgentIds=new Set(after.agents.map(a=>a.id));
+    for(const a of before.agents)
+      if(!afterAgentIds.has(a.id))emit('agent_disappeared',{id:a.id});
+    const oldObjects=new Map([...before.items,...before.plots].map(o=>[o.id,o]));
+    const nextObjects=[...after.items,...after.plots];
+    for(const obj of nextObjects){
+      const prior=oldObjects.get(obj.id);
+      if(!prior){emit('object_appeared',{id:obj.id,position:vec(obj.position||obj.center)});continue}
+      moved('object_moved',obj.id,prior.position||prior.center,obj.position||obj.center);
+      rotationChange('object_rotated',obj.id,prior.rotation,obj.rotation,['yaw','pitch','roll']);
+      moved('object_resized',obj.id,prior.half,obj.half);
+      changed('object_changed',obj.id,'solid',prior.solid,obj.solid);
+    }
+    const newIds=new Set(nextObjects.map(x=>x.id));
+    for(const obj of [...before.items,...before.plots])
+      if(!newIds.has(obj.id))emit('object_disappeared',{id:obj.id});
+    if(motion?.impacts)for(const hit of motion.impacts)
+      emit('collision',{id:hit.id,normal:hit.normal,at:hit.at});
+    if(motion?.agentImpacts)for(const impact of motion.agentImpacts){
+      const {kind:obstacleKind,...detail}=impact;
+      emit('agent_collision',{...detail,obstacleKind});
+    }
+    const beforeHit=raycastReticle(before),afterHit=raycastReticle(after);
+    if((beforeHit?.kind||null)!==(afterHit?.kind||null)||
+      (beforeHit?.id||null)!==(afterHit?.id||null))
+      emit('aim_target_changed',{before:beforeHit&&{kind:beforeHit.kind,id:beforeHit.id},
+        after:afterHit&&{kind:afterHit.kind,id:afterHit.id}});
     return {schema:'dsh-spatial-delta-v4',fromTime:round(before.clock),
-      toTime:round(after.clock),events:events.slice(0,96),
-      eventCount:events.length,truncated:events.length>96};
+      toTime:round(after.clock),events:events.slice(0,96),eventCount:events.length,
+      truncated:events.length>96};
+  }
+  /**
+   * Each moving actor is a sphere swept continuously against solid OBBs.
+   * Agent-vs-agent collision and initial interpenetration are deliberately
+   * not silently 'solved' by this static-world approximation.
+   */
+  function moveAgent(agent,seconds,solids) {
+    let pos=agent.position,remaining=mul(agent.velocity,seconds),
+      velocity=agent.velocity;
+    const impacts=[];
+    if(seconds<=0||length(remaining)<1e-9)return {position:pos,velocity,impacts};
+    for(let iteration=0;iteration<4;iteration++){
+      if(length(remaining)<1e-9)break;
+      let earliest=null;
+      for(const obstacle of solids){
+        if(S.distanceToBox(pos,obstacle)<agent.radius-1e-6){
+          impacts.push({actor:agent.id,id:obstacle.id,kind:obstacle.kind,
+            status:'initial_overlap_unresolved',at:vec(pos)});
+          return {position:pos,velocity:V(0,0,0),impacts};
+        }
+        const hit=T.sweepAgainst(pos,remaining,obstacle,agent.radius);
+        if(hit&&(!earliest||hit.fraction<earliest.fraction))earliest=hit;
+      }
+      if(!earliest){pos=add(pos,remaining);break}
+      const skin=Math.min(.002/Math.max(length(remaining),1e-8),earliest.fraction);
+      pos=add(pos,mul(remaining,Math.max(0,earliest.fraction-skin)));
+      impacts.push({actor:agent.id,id:earliest.id,kind:earliest.kind,
+        status:'static_collision',normal:vec(earliest.normal),at:vec(pos)});
+      remaining=mul(remaining,1-earliest.fraction);
+      const normalVelocity=dot(remaining,earliest.normal);
+      if(normalVelocity<0)remaining=sub(remaining,mul(earliest.normal,normalVelocity));
+      const into=dot(velocity,earliest.normal);
+      if(into<0)velocity=sub(velocity,mul(earliest.normal,into));
+    }
+    return {position:pos,velocity,impacts};
   }
   function step(input,action){
     const s=normalize(input),base=asV3(s);
     const result=T.step(base,action);
     const next=result.scene;next.schema=SCHEMA;
+    const solidShapes=S.shapes(s).filter(o=>(o.kind==='item'?s.items:s.plots)
+      .some(source=>source.id===o.id&&source.solid));
+    const agentImpacts=[];
     next.agents=s.agents.map(a=>{
-      const position=add(a.position,mul(a.velocity,action.seconds));
-      if(['x','y','z'].some(k=>Math.abs(position[k])>1e5))
+      const resolved=moveAgent(a,action.seconds,solidShapes);
+      agentImpacts.push(...resolved.impacts);
+      if(['x','y','z'].some(k=>Math.abs(resolved.position[k])>1e5))
         throw Error('agent left supported world bounds');
-      return {...a,position};
+      return {...a,position:resolved.position,velocity:resolved.velocity};
     });
     validate(next);
-    const delta=deltaReport(s,next,result.motion);
-    return {scene:next,observation:observe(next),motion:result.motion,delta};
+    const motion={...result.motion,agentImpacts,
+      agentCollisionModel:'static OBB swept sphere; agent-to-agent collision not solved'};
+    const delta=deltaReport(s,next,motion);
+    return {scene:next,observation:observe(next),motion,delta};
   }
   function replay(input,actions){
     let s=normalize(input);
@@ -282,6 +458,6 @@
         'navigation status budget_exhausted does not prove no path',
         'predicted agent motion assumes constant velocity']};
   }
-  return {VERSION:4,defaultScene,normalize,validate,observe,traceAgent,
-    blockedAt,planPath,deltaReport,step,replay,modelPacket};
+  return {VERSION:4,defaultScene,normalize,validate,observe,traceAgent,raycastReticle,
+    blockedAt,planPath,planPathAsync,deltaReport,step,replay,modelPacket};
 });

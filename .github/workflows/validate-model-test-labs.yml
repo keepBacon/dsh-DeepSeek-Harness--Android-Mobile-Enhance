@@ -28,6 +28,8 @@ jobs:
       - run: node --check app/src/main/assets/labs/spatial-v4.js
       - run: node --check scripts/test-spatial-v4.cjs
       - run: node scripts/test-spatial-v4.cjs
+      - run: node --check scripts/test-spatial-audit.cjs
+      - run: node scripts/test-spatial-audit.cjs
       - name: Reject remote scripts from the offline lab
         run: |
-          if grep -Ein 'https?://|<script[^>]+src="https?' app/src/main/assets/labs/spatial-lab.html; then exit 1; fi
+          if grep -Ein 'https?://|<script[^>]+src="https?' app/src/main/assets/labs/*.html; then exit 1; fi

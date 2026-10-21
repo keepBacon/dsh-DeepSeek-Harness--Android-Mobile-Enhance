@@ -658,7 +658,15 @@ class MainActivity : ComponentActivity() {
   private fun showSpatialTestLab() {
     val lab = WebView(this).apply {
       settings.javaScriptEnabled = true
+      // Local assets only. Do not allow this sandbox-less WebView to load
+      // network resources, content-provider URIs or other file origins.
       settings.allowFileAccess = true
+      settings.allowContentAccess = false
+      settings.allowFileAccessFromFileURLs = false
+      settings.allowUniversalAccessFromFileURLs = false
+      settings.blockNetworkLoads = true
+      settings.javaScriptCanOpenWindowsAutomatically = false
+      settings.setSupportMultipleWindows(false)
       settings.domStorageEnabled = false
       settings.setSupportZoom(true)
       webViewClient = object : WebViewClient() {
