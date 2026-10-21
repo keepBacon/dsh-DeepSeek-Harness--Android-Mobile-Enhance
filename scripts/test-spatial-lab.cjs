@@ -1,0 +1,35 @@
+'use strict';
+const assert=require('node:assert/strict'),s=require('../app/src/main/assets/labs/spatial-core.js');
+const close=(a,b,e=1e-6)=>assert.ok(Math.abs(a-b)<e, String(a)+' != '+String(b));
+close(s.dist(s.V(0,0,0),s.V(3,4,0)),5);
+close(s.forward(0,0).z,1);close(s.forward(90,0).x,1);
+close(s.forward(0,45).y,Math.SQRT1_2);
+const scene=s.defaultScene();
+assert.equal(s.validate(scene),scene);
+const hit=s.aabbHit(s.V(0,0,0),s.V(0,0,1),s.V(0,0,6),s.V(1,1,1));close(hit,5);
+close(s.sphereHit(s.V(0,0,0),s.V(0,0,1),s.V(0,0,6),1),5);
+assert.equal(s.aabbHit(s.V(0,0,0),s.V(0,0,-1),s.V(0,0,6),s.V(1,1,1)),null);
+const centered=s.projection(s.V(0,1.65,8),{position:s.V(0,1.65,0),yaw:0,pitch:0,fov:70},800,600);
+close(centered.x,400);close(centered.y,300);
+assert.equal(s.projection(s.V(0,0,-4),{position:s.V(0,0,0),yaw:0,pitch:0,fov:70},800,600),null);
+const ray=s.rayForScreen({position:s.V(0,0,0),yaw:0,pitch:0,fov:70},400,300,800,600);
+close(ray.z,1);close(ray.x,0);
+assert.equal(s.worldParts(scene).length,6);
+const before=s.observe(scene);
+assert.equal(before.bodyParts.length,6);
+assert.equal(before.objects.length,4);
+const report=s.move(scene,{forward:1,seconds:1,yawDelta:90});
+close(scene.player.position.z,3.5);close(scene.camera.position.x,-3.5);
+close(report.player.forward.x,1);
+assert.throws(()=>s.move(scene,{seconds:NaN}),/invalid/);
+assert.throws(()=>s.move(scene,{seconds:11}),/invalid/);
+assert.throws(()=>s.validate({...s.defaultScene(),camera:{...s.defaultScene().camera,fov:0}}),/FOV/);
+let p=s.defaultScene();p.reticle.normalized.x=2;assert.throws(()=>s.validate(p),/reticle/);
+p=s.defaultScene();p.items[0].half.x=-1;assert.throws(()=>s.validate(p),/size/);
+for(let n=0;n<1000;n++){
+ let sample=s.defaultScene();
+ sample.player.yaw=n%360;sample.camera.yaw=n%360;
+ const obs=s.observe(sample);
+ assert.ok(Number.isFinite(obs.reticle.rayDirection.x));
+}
+console.log('Spatial Lab: geometry, projection, raycast, movement, schema and 1000-scene smoke OK');

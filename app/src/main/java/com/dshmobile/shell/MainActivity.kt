@@ -651,6 +651,64 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  /**
+   * Run offline assets in an isolated WebView with no Android JavascriptInterface.
+   * The main DSH WebView keeps its strict no-file-access policy unchanged.
+   */
+  private fun showSpatialTestLab() {
+    val lab = WebView(this).apply {
+      settings.javaScriptEnabled = true
+      settings.allowFileAccess = true
+      settings.domStorageEnabled = false
+      settings.setSupportZoom(true)
+      webViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+          request.url.toString() != "file:///android_asset/labs/spatial-lab.html"
+      }
+      loadUrl("file:///android_asset/labs/spatial-lab.html")
+    }
+    val dialog = android.app.AlertDialog.Builder(this)
+      .setTitle("DSH 3D 测试")
+      .setView(lab)
+      .setPositiveButton("关闭", null)
+      .create()
+    dialog.setOnDismissListener {
+      lab.stopLoading()
+      lab.destroy()
+    }
+    dialog.show()
+    dialog.window?.setLayout(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      (resources.displayMetrics.heightPixels * 0.85f).toInt(),
+    )
+  }
+
+  private fun showLuauTestLab() {
+    val input = android.widget.EditText(this).apply {
+      setText("""
+        local value = 1
+        print("Luau test ready:", value)
+      """.trimIndent())
+      minLines = 8
+      setHorizontallyScrolling(false)
+      inputType = android.text.InputType.TYPE_CLASS_TEXT or
+        android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+    }
+    val dialog = android.app.AlertDialog.Builder(this)
+      .setTitle("Luau 实际解释器测试")
+      .setMessage("在独立的 Luau CLI 中执行；不存在解释器时明确报错。非 Roblox Studio，不能调用游戏服务。")
+      .setView(input)
+      .setNegativeButton("取消", null)
+      .setPositiveButton("执行") { _, _ ->
+        val source = input.text.toString()
+        Thread {
+          val result = LuauTestRunner.run(applicationContext, source)
+          runOnUiThread { if (!isFinishing) showSimpleMessage("Luau 测试结果", result) }
+        }.start()
+      }.create()
+    dialog.show()
+  }
+
   /** App-only settings opened from the gear icon in the top navigation bar. */
   private fun showAppSettings() {
     val density = resources.displayMetrics.density
@@ -730,6 +788,20 @@ class MainActivity : ComponentActivity() {
       text = "内置 mobile_tools 现在采用无 Root / 无 Shizuku 优先路径：可直接分析自身/同 UID 进程、FD/socket、运行时快照与子进程 strace；用户开启 Android 无线调试并主动配对后，可通过内置 ADB client 获取 package/process/logcat/JDWP/APK 信息。Frida/GDB/其它进程内存接口作为权限允许时的增强能力，不再作为默认路径。IDA / Ghidra / Binary Ninja 继续通过远程 MCP 连接。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
+    })
+
+    wrap.addView(TextView(this).apply {
+      text = "模型测试实验室"
+      textSize = 16f
+      setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
+    })
+    wrap.addView(Button(this).apply {
+      text = "3D 空间模拟实验室（离线）"
+      setOnClickListener { showSpatialTestLab() }
+    })
+    wrap.addView(Button(this).apply {
+      text = "Luau 代码测试（真实 CLI）"
+      setOnClickListener { showLuauTestLab() }
     })
 
     wrap.addView(TextView(this).apply {

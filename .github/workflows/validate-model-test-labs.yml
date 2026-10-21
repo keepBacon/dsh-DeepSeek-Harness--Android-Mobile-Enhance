@@ -1,0 +1,24 @@
+name: Validate model test labs
+on:
+  push:
+    branches: ["feature/model-test-labs"]
+  pull_request:
+    paths:
+      - "app/src/main/assets/labs/**"
+      - "app/src/main/java/com/dshmobile/shell/LuauTestRunner.kt"
+      - "scripts/test-spatial-lab.cjs"
+      - ".github/workflows/validate-model-test-labs.yml"
+jobs:
+  spatial-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check app/src/main/assets/labs/spatial-core.js
+      - run: node --check scripts/test-spatial-lab.cjs
+      - run: node scripts/test-spatial-lab.cjs
+      - name: Reject remote scripts from the offline lab
+        run: |
+          if grep -Ein 'https?://|<script[^>]+src="https?' app/src/main/assets/labs/spatial-lab.html; then exit 1; fi
