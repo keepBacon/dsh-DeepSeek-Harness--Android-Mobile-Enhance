@@ -56,6 +56,11 @@ class MainActivity : ComponentActivity() {
   private lateinit var progressText: TextView
   private val engineManager by lazy { EngineManager(this, pickToken) }
   private val skillManager by lazy { SkillManager(this, engineManager) }
+  private val diagnosticWriter = java.util.concurrent.ThreadPoolExecutor(
+    1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+    java.util.concurrent.ArrayBlockingQueue<Runnable>(256),
+    java.util.concurrent.ThreadPoolExecutor.DiscardPolicy(),
+  )
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -325,6 +330,7 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    diagnosticWriter.shutdown()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
     try {
@@ -608,6 +614,14 @@ class MainActivity : ComponentActivity() {
           engineManager.runMobileToolRequest(category, command, currentWritableWorkspacePath())
         },
         onOpenLocalUrl = { url -> openLocalPreviewUrl(url) },
+        onRecordToolObservation = { session, id, name, status, code ->
+          diagnosticWriter.execute {
+            runCatching {
+              com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+                .observe(session, id, name, status, code)
+            }.onFailure { Log.w("dsh-database", "Observation failed", it) }
+          }
+        },
         pickToken = pickToken,
       ),
       "androidBridge",
@@ -730,6 +744,43 @@ class MainActivity : ComponentActivity() {
       text = "内置 mobile_tools 现在采用无 Root / 无 Shizuku 优先路径：可直接分析自身/同 UID 进程、FD/socket、运行时快照与子进程 strace；用户开启 Android 无线调试并主动配对后，可通过内置 ADB client 获取 package/process/logcat/JDWP/APK 信息。Frida/GDB/其它进程内存接口作为权限允许时的增强能力，不再作为默认路径。IDA / Ghidra / Binary Ninja 继续通过远程 MCP 连接。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
+    })
+
+    wrap.addView(TextView(this).apply {
+      text = "数据库与诊断"
+      textSize = 16f
+      setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
+    })
+    wrap.addView(Button(this).apply {
+      text = "检查数据库 / 更新索引"
+      setOnClickListener {
+        Thread {
+          val report = runCatching {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val status = db.quickCheck()
+            val synced = com.dshmobile.shell.database.MobileIndexService(engineManager, db).refresh()
+            "完整性：$status\\n会话索引：${synced.indexedSessions}\\n扩展索引：${synced.indexedExtensions}\\n内置 MCP 声明：${synced.bundledTools}\\n会话扫描完整：${synced.sessionScanComplete}"
+          }.getOrElse { "检查失败：${it.javaClass.simpleName}" }
+          runOnUiThread { showSimpleMessage("数据库检查", report.replace("\\\\n", "\n")) }
+        }.start()
+      }
+    })
+    wrap.addView(Button(this).apply {
+      text = "创建本地数据库备份"
+      setOnClickListener {
+        Thread {
+          val message = runCatching {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val file = com.dshmobile.shell.database.DatabaseBackup.create(applicationContext, db)
+            "备份已创建（应用私有目录）：${file.name}"
+          }.getOrElse { "备份失败：${it.message ?: it.javaClass.simpleName}" }
+          runOnUiThread { showSimpleMessage("数据库备份", message) }
+        }.start()
+      }
+    })
+    wrap.addView(TextView(this).apply {
+      text = "数据库仅保存诊断与索引元数据；备份默认保存在应用私有目录，不含 DSH 原始会话与插件文件。"
+      textSize = 12f
     })
 
     wrap.addView(TextView(this).apply {
@@ -3337,7 +3388,11 @@ class MainActivity : ComponentActivity() {
   private fun installPassiveToolCallMonitor(view: WebView) {
     if (!isEngineSource(view.url ?: "")) return
     val script = try {
-      assets.open("dsh-tool-call-monitor.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+      val body = assets.open("dsh-tool-call-monitor.js")
+        .bufferedReader(Charsets.UTF_8).use { it.readText() }
+      val marker = "/*__DSH_MONITOR_CAP__*/"
+      check(body.contains(marker))
+      body.replace(marker, "const MONITOR_CAP = " + jsString(bridgeCapability) + ";")
     } catch (t: Throwable) {
       Log.w("DSH", "Passive tool monitor asset unavailable", t)
       return

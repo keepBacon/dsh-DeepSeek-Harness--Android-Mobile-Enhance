@@ -1,6 +1,7 @@
 /* Passive DSH tool-call display. Reads existing tool UI; never calls the LLM. */
 (() => {
   'use strict';
+  /*__DSH_MONITOR_CAP__*/
   if (window.__dshAndroidToolMonitor) return;
   const MAX_ROWS = 120;
   const rows = new Map();
@@ -57,6 +58,22 @@
       endedAt: status === 'running' ? null : (old?.endedAt || Date.now())
     });
     if (rows.size > MAX_ROWS) rows.delete(rows.keys().next().value);
+    // Only an allowlisted error marker is sent to Android. Inputs, outputs,
+    // session identifiers and model text are never written to the database.
+    try {
+      const markers = ['MCP_SCHEMA_REQUIRED','INVALID_ARGUMENT','INVALID_PARAMS',
+        'UNSUPPORTED_SCHEMA','SCHEMA_ERROR','UNAUTHORIZED','FORBIDDEN','TIMEOUT',
+        'ECONNREFUSED','TRANSPORT','SAFE_MODE','MODULE_NOT_FOUND','LOAD_FAILURE'];
+      const raw = String(normalizedResult || '');
+      const code = status === 'failure'
+        ? (markers.find(key => raw.toUpperCase().includes(key)) || '') : '';
+      const bridge = window.androidBridge;
+      const capability = MONITOR_CAP;
+      if (bridge && capability && bridge.recordToolObservation) {
+        bridge.recordToolObservation(capability, sessionKey(), id,
+          normalizedName, status, code);
+      }
+    } catch (_) { /* Monitoring must never interfere with DSH. */ }
     draw();
   }
   function observeDom() {
