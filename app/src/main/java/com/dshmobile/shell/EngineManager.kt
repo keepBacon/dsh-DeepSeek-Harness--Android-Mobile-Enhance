@@ -1444,7 +1444,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode)
       val args = if (safeProfile != null) arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
-        "--profile", safeProfile.first,
+        "web", "--profile", safeProfile.first,
         "--patch", mcpPatch.absolutePath,
         "--patch", safeProfile.second.absolutePath,
         "--port", port.toString(), "--no-open",
