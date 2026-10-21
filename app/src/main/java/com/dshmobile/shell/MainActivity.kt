@@ -663,9 +663,9 @@ class MainActivity : ComponentActivity() {
       settings.setSupportZoom(true)
       webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-          request.url.toString() != "file:///android_asset/labs/spatial-lab.html"
+          request.url.toString() != "file:///android_asset/labs/spatial-lab-v2.html"
       }
-      loadUrl("file:///android_asset/labs/spatial-lab.html")
+      loadUrl("file:///android_asset/labs/spatial-lab-v2.html")
     }
     val dialog = android.app.AlertDialog.Builder(this)
       .setTitle("DSH 3D 测试")
