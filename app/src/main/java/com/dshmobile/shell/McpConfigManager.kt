@@ -81,11 +81,14 @@ class McpConfigManager(
     return result
   }
 
-  @Synchronized fun ensureRuntimePatch(): File {
+  @Synchronized fun ensureRuntimePatch(safeMode: Boolean = false): File {
     val rows = mutableListOf<String>()
-    if (toolboxEnabled() && toolboxFile.isFile) rows += toolboxRow()
-    if (toolboxEnabled() && basicToolboxFile.isFile) rows += basicToolboxRow()
-    listServers().filter { it.enabled }.forEach { rows += serverRow(it) }
+    // Keep all persisted MCP enable states. Safe mode only changes the launch patch.
+    if (!safeMode) {
+      if (toolboxEnabled() && toolboxFile.isFile) rows += toolboxRow()
+      if (toolboxEnabled() && basicToolboxFile.isFile) rows += basicToolboxRow()
+      listServers().filter { it.enabled }.forEach { rows += serverRow(it) }
+    }
     val text = if (rows.isEmpty()) {
       "[]\n"
     } else {

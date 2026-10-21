@@ -232,6 +232,19 @@ Android 壳现在把 **当前 DSH Session 的 `cwd` / Workspace 路径**作为 W
 - 返回给 WebView 的文件使用私有 `FileProvider` content URI；Provider 不导出，只有已经通过 Workspace 边界检查的文件才会被构造 URI。
 - 应用设置中的“从手机复制到工作区（维护）”仍保留，它只是把外部手机文件复制进 Workspace 的显式维护入口，不属于对话/模型的文件浏览域。
 
+## 应用安全模式
+
+应用设置 → **安全模式** 可切换安全启动。启用后 Android 宿主重启 DSH，使用独立的
+`android-safe-web` 基础 Web profile，只加载内置 `dsh-base` 和
+`dsh-web-app` 两个基础 bundle；Skills 注册和模型侧 Skill 工具由运行时守卫暂停，
+Android 内置及用户添加的 MCP 启动配置被屏蔽。**原 `web` profile、已安装依赖、
+Skills 文件与 MCP 配置都不改动。** Android 插件管理器、Skill 导入和卸载在安全模式下
+仍可使用，它们操作的仍是原始安装目录。关闭开关后 DSH 会重启并恢复原配置。
+
+安全模式是应用扩展加载的临时恢复功能，并非隔离 Android 系统权限、终端命令或
+工作区执行的安全沙箱。共享 `$DSH_HOME/cordis.patch.yml` 中自定义的扩展插入条目
+也会被启动覆盖层停用；建议通过 Android 原生管理入口安装和卸载插件。
+
 ## 内置 basic_tools MCP
 
 Android Runtime 现在除 `mobile_tools` 外，额外内置独立的 `basic_tools` MCP。两者使用不同命名空间：`mobile_tools` 保持逆向/动态分析能力，`basic_tools` 专注通用开发与工作区操作。
