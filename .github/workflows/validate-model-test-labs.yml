@@ -6,7 +6,8 @@ on:
     paths:
       - "app/src/main/assets/labs/**"
       - "app/src/main/java/com/dshmobile/shell/LuauTestRunner.kt"
-      - "scripts/test-spatial-lab.cjs"
+      - "scripts/test-spatial*.cjs"
+      - "app/src/main/java/com/dshmobile/shell/MainActivity.kt"
       - ".github/workflows/validate-model-test-labs.yml"
 jobs:
   spatial-js:
@@ -30,6 +31,10 @@ jobs:
       - run: node scripts/test-spatial-v4.cjs
       - run: node --check scripts/test-spatial-audit.cjs
       - run: node scripts/test-spatial-audit.cjs
+      - run: node --check scripts/test-spatial-pages.cjs
+      - run: node scripts/test-spatial-pages.cjs
+      - run: node --check scripts/test-spatial-paths.cjs
+      - run: node scripts/test-spatial-paths.cjs
       - name: Reject remote scripts from the offline lab
         run: |
           if grep -Ein 'https?://|<script[^>]+src="https?' app/src/main/assets/labs/*.html; then exit 1; fi
