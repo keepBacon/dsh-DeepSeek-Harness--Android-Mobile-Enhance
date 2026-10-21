@@ -53,3 +53,15 @@ V2 入口取代 V1 页面，V1 核心 `spatial-core.js` 继续保留供旧项目
 - 新增独立 V3 HTML 场景面板、碰撞/遮挡预设、自由相机 Roll 和运动操作、场景导入以及 JSON 导出。应用设置使用 V3 页面，V2 保留作为兼容参考。
 - 回归测试：`node scripts/test-spatial-v3.cjs`，覆盖 V1/V2 迁移、Roll 逆投影、墙体阻挡、滑动、遮挡、历史上限、1500 个确定性随机场景。
 - 本实验室不连接真实游戏，也不访问数据库 PR #28。
+
+## 3D V4：动态场景、空间变化与导航
+
+- V4 Scene: `dsh-spatial-v4`；Observation: `dsh-spatial-observation-v4`；继承 V1–V3 场景并迁移，V1/V2/V3 核心文件保留。
+- `agents` 动态实体清单：ID、角色（ally / neutral / opponent / target）、位置、速度、Yaw、碰撞半径。常速度步进属于模拟预测，**非 NPC AI 或真实游戏数据**。
+- `deltaReport`：对比动作前后玩家、相机和动态实体位置变化及准心目标变化，并保留碰撞事件摘要。单次最多输出 96 条事件。
+- `replay`：用户输入动作数组的确定性回放，单次最多 64 步；`modelPacket`：按距离排序、限量的模型摘要，包含空间关系、视野证据、来源和限制。
+- `planPath`：限定 48 米目标范围、5000 扩展节点上限的 XZ 网格 A*。考虑静态旋转包围盒和模拟实体占位，拒绝斜向穿角，对路径进行采样平滑。状态包括 `found`、`already_there`、`target_blocked`、`goal_cell_blocked`、`budget_exhausted`、`no_path`。预算不足和找不到路径不等价。
+- 交互：V4 页面包含玩家移动、目标坐标寻路、模型简报、5 步回放、场景编辑与观察导出。
+- 验证：`node scripts/test-spatial-v4.cjs` 覆盖导航、动态实体、回放、边界、历史、600 个确定性场景。
+- 限制：仍为离线几何模拟；寻路没有坡度、重力、真实移动控制、物理导航网格与在线世界感知。原始数据库项目继续暂停。
+
