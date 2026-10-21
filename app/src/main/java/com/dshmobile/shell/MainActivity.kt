@@ -733,6 +733,43 @@ class MainActivity : ComponentActivity() {
     })
 
     wrap.addView(TextView(this).apply {
+      text = "数据库与诊断"
+      textSize = 16f
+      setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
+    })
+    wrap.addView(Button(this).apply {
+      text = "检查数据库 / 更新索引"
+      setOnClickListener {
+        Thread {
+          val report = runCatching {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val status = db.quickCheck()
+            val synced = com.dshmobile.shell.database.MobileIndexService(engineManager, db).refresh()
+            "完整性：$status\\n会话索引：${synced.indexedSessions}\\n扩展索引：${synced.indexedExtensions}\\n内置 MCP 声明：${synced.bundledTools}\\n会话扫描完整：${synced.sessionScanComplete}"
+          }.getOrElse { "检查失败：${it.javaClass.simpleName}" }
+          runOnUiThread { showSimpleMessage("数据库检查", report.replace("\\\\n", "\n")) }
+        }.start()
+      }
+    })
+    wrap.addView(Button(this).apply {
+      text = "创建本地数据库备份"
+      setOnClickListener {
+        Thread {
+          val message = runCatching {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val file = com.dshmobile.shell.database.DatabaseBackup.create(applicationContext, db)
+            "备份已创建（应用私有目录）：${file.name}"
+          }.getOrElse { "备份失败：${it.message ?: it.javaClass.simpleName}" }
+          runOnUiThread { showSimpleMessage("数据库备份", message) }
+        }.start()
+      }
+    })
+    wrap.addView(TextView(this).apply {
+      text = "数据库仅保存诊断与索引元数据；备份默认保存在应用私有目录，不含 DSH 原始会话与插件文件。"
+      textSize = 12f
+    })
+
+    wrap.addView(TextView(this).apply {
       text = "关于"
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
