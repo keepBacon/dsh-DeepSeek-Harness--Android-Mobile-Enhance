@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DSH 空间测试实验室 V3</title>
+<style>
+:root{color-scheme:dark;background:#0d1727;color:#eaf2fd;font:13px/1.5 system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;padding:12px;max-width:1600px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 8px}h2{font-size:15px;margin:4px 0 10px}
+.small{font-size:12px;opacity:.77;margin:5px 0 12px}
+.layout{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(320px,1fr);gap:12px}
+.panel{min-width:0;border-radius:12px;border:1px solid #35465d;padding:12px;background:#162438}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/10;border:1px solid #435b75;background:#101a29;border-radius:9px;touch-action:manipulation}
+.controls,.row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:8px 0}
+button,select,input{border:1px solid #547392;border-radius:7px;padding:8px;background:#284360;color:#f2f6ff;font:inherit}
+button{cursor:pointer}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #7cceff}
+input[type=number]{width:75px}input[type=checkbox]{width:17px;height:17px;vertical-align:middle}
+label{display:inline-flex;gap:5px;align-items:center}label>span{opacity:.85}
+textarea,pre{box-sizing:border-box;width:100%;border:1px solid #445972;background:#0c192c;color:#bfe5ff;border-radius:8px;padding:11px;font:12px/1.5 ui-monospace,monospace}
+textarea{height:300px;resize:vertical}pre{max-height:360px;min-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+#status{padding:10px;border-radius:7px;background:#1c324a;min-height:38px}
+#summary{padding:8px 0;white-space:pre-wrap;font:12px/1.55 ui-monospace,monospace}
+#evidence{max-height:160px;overflow:auto}
+@media(max-width:900px){.layout{grid-template-columns:1fr}h1{font-size:18px}}
+</style>
+</head>
+<body>
+<h1>DSH · 3D 空间测试实验室 V3</h1>
+<p class="small">离线几何模拟 · +X 向右 / +Y 向上 / +Z 向前 · Yaw +90° 朝 +X · Pitch 正向上 · 单位米。鼠标或触摸画布可移动准心。</p>
+<div class="layout">
+  <section class="panel">
+    <canvas id="world" width="960" height="600" aria-label="三维透视模拟视图"></canvas>
+    <div class="controls">
+      <button id="reset">重置</button>
+      <button id="forward">前进</button><button id="backward">后退</button>
+      <button id="strafeL">左移</button><button id="strafeR">右移</button>
+      <button id="turnL">玩家左转</button><button id="turnR">玩家右转</button>
+    </div>
+    <div class="controls">
+      <label><span>步长(秒)</span><input id="delta" type="number" min=".01" max="2" step=".05" value=".25"></label>
+      <label><span>摄像机</span><select id="cameraMode"><option value="follow">跟随</option><option value="free">自由</option></select></label>
+      <button id="camLeft">镜头左转</button><button id="camRight">镜头右转</button>
+      <button id="camUp">镜头抬头</button><button id="camDown">镜头低头</button>
+      <button id="camForward">镜头前进</button>
+    </div>
+    <div class="controls">
+      <button id="rollL">Roll −15°</button><button id="rollR">Roll +15°</button>
+      <label><input id="solid" type="checkbox" checked>玩家碰撞</label>
+      <label><span>预设</span><select id="preset"><option value="default">基本场景</option><option value="wall">碰撞墙</option><option value="occlusion">遮挡测试</option></select></label>
+      <button id="loadPreset">加载预设</button>
+    </div>
+    <div class="controls">
+      <label><span>目标</span><select id="target"></select></label>
+      <button id="aim">对准目标</button>
+      <button id="clearHistory">清除轨迹</button>
+    </div>
+    <p id="status" role="status"></p>
+    <div id="summary"></div>
+    <h2>观察证据（仅显示最近结果）</h2><pre id="evidence"></pre>
+    <p class="small">图形：蓝=身体；黄=物品；绿=地块；粉=准心、轨迹。物体包围盒是近似几何；碰撞采用保守的连续胶囊球采样和滑动，不实现重力或完整游戏物理。</p>
+  </section>
+  <section class="panel">
+    <h2>场景 JSON（支持 V1 / V2 / V3 导入）</h2>
+    <textarea id="editor" spellcheck="false" aria-label="场景 JSON 编辑器"></textarea>
+    <div class="row">
+      <button id="apply">验证并应用</button>
+      <button id="saveScene">保存场景</button>
+      <button id="saveObservation">导出模型观察</button>
+    </div>
+    <h2>模型观察 JSON</h2>
+    <pre id="observation" aria-label="模型可读取空间观察数据"></pre>
+  </section>
+</div>
+<script src="spatial-core.js"></script>
+<script src="spatial-v2.js"></script>
+<script src="spatial-v3.js"></script>
+<script>
+(()=>{
+  'use strict';
+  const S=window.DshSpatialV3,B=window.DshSpatial;
+  const $=id=>document.getElementById(id);
+  const canvas=$('world'),ctx=canvas.getContext('2d');
+  let scene=S.defaultScene(),seen=null,track=[];
+  function screen(point){return S.project(point,scene.camera,scene.viewport)}
+  function line(a,b,color='#384e67'){
+    const p=screen(a),q=screen(b);
+    if(!p||!q)return;
+    ctx.strokeStyle=color;
+    ctx.beginPath();ctx.moveTo(p.pixels.x,p.pixels.y);ctx.lineTo(q.pixels.x,q.pixels.y);ctx.stroke();
+  }
+  function draw(){
+    ctx.fillStyle='#0a1627';ctx.fillRect(0,0,canvas.width,canvas.height);
+    for(let i=-20;i<=20;i+=2){
+      line(B.V(i,0,-20),B.V(i,0,40));
+      line(B.V(-20,0,i+10),B.V(20,0,i+10));
+    }
+    // Local OBB corner order: x major, y middle, z minor.
+    for(const o of seen.objects){
+      const col=o.kind==='item'?'#d9ad59':'#448c70';
+      if(o.visibility==='behind_camera')continue;
+      for(let i=0;i<8;i++)for(const bit of [1,2,4])if(i<(i^bit))
+        line(o.corners[i],o.corners[i^bit],col);
+    }
+    for(let i=1;i<track.length;i++)line(track[i-1],track[i],'#ef72bb');
+    for(const entry of [...seen.bodyParts.map(x=>({...x,kind:'body'})),...seen.objects]){
+      const p=entry.screen;if(!p?.inViewport)continue;
+      const color=entry.kind==='body'?'#69bfff':entry.kind==='item'?'#ffcf69':'#77dfac';
+      ctx.fillStyle=color;
+      ctx.beginPath();ctx.arc(p.pixels.x,p.pixels.y,Math.max(3,Math.min(13,75/p.depth)),0,Math.PI*2);ctx.fill();
+      ctx.font='12px system-ui';
+      ctx.fillText(entry.id+(entry.visibility==='occluded'?' (遮挡)':''),p.pixels.x+9,p.pixels.y-5);
+    }
+    const p=seen.reticle.pixels;
+    ctx.strokeStyle='#ffa1dd';ctx.lineWidth=2;ctx.beginPath();
+    ctx.moveTo(p.x-12,p.y);ctx.lineTo(p.x+12,p.y);
+    ctx.moveTo(p.x,p.y-12);ctx.lineTo(p.x,p.y+12);ctx.stroke();ctx.lineWidth=1;
+    if(seen.reticle.worldHit){
+      const x=screen(seen.reticle.worldHit.point);
+      if(x){ctx.fillStyle='#ff8ecf';ctx.font='14px system-ui';
+        ctx.fillText('命中 '+seen.reticle.worldHit.id,x.pixels.x+12,x.pixels.y+18)}
+    }
+  }
+  function render(){
+    scene=S.normalize(scene);seen=S.observe(scene);
+    $('editor').value=JSON.stringify(scene,null,2);
+    $('observation').textContent=JSON.stringify(seen,null,2);
+    $('cameraMode').value=scene.camera.follow?'follow':'free';
+    $('solid').checked=scene.player.collision.enabled;
+    const select=$('target'),previous=select.value;
+    select.replaceChildren();
+    for(const x of [...seen.bodyParts.map(p=>({kind:'body',id:p.id})),...seen.objects]){
+      const option=document.createElement('option');option.value=x.kind+':'+x.id;
+      option.textContent=x.kind+' / '+x.id;select.append(option);
+    }
+    if([...select.options].some(x=>x.value===previous))select.value=previous;
+    const hit=seen.reticle.worldHit;
+    $('status').textContent='时刻 '+seen.clock+'s · 玩家 '+JSON.stringify(seen.player.position)+
+      ' · 准心命中 '+(hit?hit.kind+' / '+hit.id+' / '+hit.distance+'m':'无');
+    $('summary').textContent=
+      '摄像机 '+JSON.stringify(seen.camera.position)+' | yaw='+seen.camera.yaw+
+      ' pitch='+seen.camera.pitch+' roll='+seen.camera.roll+'\n'+
+      '可见 '+seen.metrics.visible+' · 部分可见 '+seen.metrics.partiallyVisible+
+      ' · 遮挡 '+seen.metrics.occluded+' · 未检查 '+seen.metrics.notTested+
+      ' · 运动历史 '+seen.metrics.historyLength+'/60';
+    $('evidence').textContent=JSON.stringify({
+      reticle:seen.reticle,latestMotion:seen.motion.last,
+      selected:seen.objects.find(x=>x.kind+':'+x.id===select.value)||null
+    },null,2);
+    draw();
+  }
+  function execute(fn){
+    const saved=JSON.stringify(scene);
+    try{fn();scene=S.normalize(scene);render()}
+    catch(e){scene=JSON.parse(saved);$('status').textContent='操作失败：'+String(e.message).slice(0,300)}
+  }
+  const act=(id,fn)=>$(id).addEventListener('click',()=>execute(fn));
+  function move(action){
+    const seconds=Number($('delta').value);
+    const result=S.step(scene,{...action,seconds:action.seconds??seconds});
+    scene=result.scene;track.push(...result.motion.path);
+    if(track.length>80)track=track.slice(-80);
+  }
+  act('reset',()=>{scene=S.defaultScene();track=[]});
+  for(const [id,cmd] of Object.entries({
+    forward:{forward:1},backward:{forward:-1},
+    strafeL:{strafe:-1},strafeR:{strafe:1}
+  }))act(id,()=>move(cmd));
+  act('turnL',()=>move({seconds:0,yawDelta:-15}));
+  act('turnR',()=>move({seconds:0,yawDelta:15}));
+  for(const [id,cmd] of Object.entries({
+    camLeft:{cameraYawDelta:-15,seconds:0},camRight:{cameraYawDelta:15,seconds:0},
+    camUp:{cameraPitchDelta:10,seconds:0},camDown:{cameraPitchDelta:-10,seconds:0},
+    camForward:{cameraForward:1}
+  }))act(id,()=>{scene.camera.follow=false;move(cmd)});
+  act('rollL',()=>{scene.camera.follow=false;move({seconds:0,cameraRollDelta:-15})});
+  act('rollR',()=>{scene.camera.follow=false;move({seconds:0,cameraRollDelta:15})});
+  $('cameraMode').addEventListener('change',e=>execute(()=>{
+    const follow=e.target.value==='follow';
+    scene.camera.follow=follow;
+    if(follow){
+      scene.camera.position=B.add(scene.player.position,B.rotateY(scene.camera.offset,scene.player.yaw));
+      scene.camera.yaw=scene.player.yaw;scene.camera.pitch=scene.player.pitch;
+    }
+  }));
+  $('solid').addEventListener('change',e=>execute(()=>{scene.player.collision.enabled=e.target.checked}));
+  act('aim',()=>{
+    const [kind,...id]=$('target').value.split(':');
+    scene=S.aimAt(scene,kind,id.join(':'));
+  });
+  act('clearHistory',()=>{scene.history=[];track=[]});
+  act('loadPreset',()=>{
+    const which=$('preset').value;scene=S.defaultScene();track=[];
+    if(which==='wall'){
+      scene.items=[{id:'solid_wall',position:B.V(0,1,3.5),
+        half:B.V(5,1,.15),rotation:{yaw:0,pitch:0,roll:0},solid:true}];
+      scene.plots=[];
+    }else if(which==='occlusion'){
+      scene.camera.follow=false;scene.camera.position=B.V(0,1.5,0);
+      scene.camera.yaw=0;scene.camera.pitch=0;
+      scene.items=[
+        {id:'near',position:B.V(0,1.5,5),half:B.V(1,1,1),
+          rotation:{yaw:0,pitch:0,roll:0},solid:true},
+        {id:'far',position:B.V(0,1.5,9),half:B.V(1,1,1),
+          rotation:{yaw:0,pitch:0,roll:0},solid:true},
+      ];scene.plots=[];
+    }
+  });
+  act('apply',()=>{
+    if($('editor').value.length>180000)throw Error('场景 JSON 大于 180 KB');
+    scene=S.normalize(JSON.parse($('editor').value));track=[];
+  });
+  function download(name,value){
+    const blob=new Blob([JSON.stringify(value,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=name;a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  act('saveScene',()=>download('dsh-spatial-v3-scene.json',scene));
+  act('saveObservation',()=>download('dsh-spatial-v3-observation.json',seen));
+  canvas.addEventListener('click',e=>execute(()=>{
+    const box=canvas.getBoundingClientRect();
+    scene.reticle.normalized.x=Math.max(-1,Math.min(1,2*(e.clientX-box.left)/box.width-1));
+    scene.reticle.normalized.y=Math.max(-1,Math.min(1,1-2*(e.clientY-box.top)/box.height));
+  }));
+  render();
+})();
+</script>
+</body>
+</html>

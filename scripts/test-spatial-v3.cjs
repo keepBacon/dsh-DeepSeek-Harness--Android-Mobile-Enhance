@@ -1,0 +1,25 @@
+'use strict';
+const a=require('node:assert/strict'),B=require('../app/src/main/assets/labs/spatial-core.js'),S=require('../app/src/main/assets/labs/spatial-v3.js'),V=B.V;
+const near=(x,y,e=2e-3)=>a.ok(Math.abs(x-y)<e,x+' != '+y);
+const s=S.defaultScene(),o=S.observe(s);
+a.equal(o.schema,'dsh-spatial-observation-v3');
+a.equal(S.normalize(B.defaultScene()).schema,'dsh-spatial-v3');
+a.equal(S.normalize(require('../app/src/main/assets/labs/spatial-v2.js').defaultScene()).schema,'dsh-spatial-v3');
+const roll=S.defaultScene();roll.camera.follow=false;roll.camera.yaw=0;roll.camera.pitch=0;roll.camera.roll=90;roll.camera.position=V(0,0,0);
+const projected=S.project(V(0,1,10),roll.camera,roll.viewport),ray=S.screenRay(roll.camera,projected.normalized,roll.viewport);
+near(ray.x/ray.z,0);near(ray.y/ray.z,.1);
+let wall=S.defaultScene();wall.items=[{id:'wall',position:V(0,1,3),half:V(5,1,.1),rotation:{yaw:0,pitch:0,roll:0},solid:true}];wall.plots=[];
+const stop=S.step(wall,{forward:1,seconds:2});
+a.ok(stop.scene.player.position.z<2.65);a.ok(stop.motion.collisionResolved);a.equal(stop.motion.impacts[0].id,'wall');
+const slide=S.step(wall,{forward:1,strafe:1,seconds:2});a.ok(slide.scene.player.position.x>4);a.ok(slide.scene.player.position.z<2.7);
+const free=S.normalize(wall);free.player.collision.enabled=false;
+a.ok(S.step(free,{forward:1,seconds:2}).scene.player.position.z>6);
+const oc=S.defaultScene();oc.camera.follow=false;oc.camera.position=V(0,1.5,0);oc.camera.pitch=0;
+oc.items=[{id:'near',position:V(0,1.5,5),half:V(1,1,1),rotation:{yaw:0,pitch:0,roll:0},solid:true},{id:'far',position:V(0,1.5,9),half:V(1,1,1),rotation:{yaw:0,pitch:0,roll:0},solid:true}];oc.plots=[];
+const obs=S.observe(oc);a.equal(obs.reticle.worldHit.id,'near');a.equal(obs.objects.find(x=>x.id==='far').visibility,'occluded');
+const history=S.defaultScene();history.items=[];history.plots=[];let h=history;for(let i=0;i<65;i++)h=S.step(h,{forward:1,seconds:.1}).scene;a.equal(h.history.length,60);
+a.throws(()=>S.step(s,{seconds:7}),/timestep/);
+a.throws(()=>S.normalize({...s,history:Array(61).fill({time:0,position:V(0,0,0),collisions:[]})}),/history/);
+let seed=12;const rand=()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/4294967296);
+for(let i=0;i<1500;i++){const z=S.defaultScene();z.camera.yaw=rand()*360;z.camera.pitch=rand()*170-85;z.camera.roll=rand()*360-180;const b=S.observe(z);a.ok(Number.isFinite(b.reticle.rayDirection.x))}
+console.log('Spatial V3: projection, camera roll, collision slide, occlusion, history, migrations, 1500 fuzz OK');
