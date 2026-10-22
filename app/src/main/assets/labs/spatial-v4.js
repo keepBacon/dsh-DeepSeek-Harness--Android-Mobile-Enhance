@@ -482,9 +482,8 @@
           id:initial[j].id,kind:'agent',status:contact.initialOverlap?
             'initial_overlap_unresolved':'moving_sphere_contact'})}
         if(contact.fraction<1-1e-8){
-          const cap=Math.max(0,contact.fraction-.0002);
           for(const index of [i,j]) {
-            const shortened=limit[index]*cap;
+            const shortened=Math.max(0,limit[index]*contact.fraction-.0002);
             if(shortened<limit[index]-1e-8){limit[index]=shortened;changed=true}
           }
         }
