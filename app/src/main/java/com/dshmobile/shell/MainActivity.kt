@@ -725,32 +725,6 @@ class MainActivity : ComponentActivity() {
       setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), 0)
     }
     wrap.addView(TextView(this).apply {
-      text = "界面设置"
-      textSize = 16f
-      setPadding(0, 0, 0, (8 * density).toInt())
-    })
-    val group = android.widget.RadioGroup(this).apply {
-      orientation = android.widget.RadioGroup.VERTICAL
-    }
-    val mobileId = View.generateViewId()
-    val nativeId = View.generateViewId()
-    group.addView(android.widget.RadioButton(this).apply {
-      id = mobileId
-      text = "移动端"
-      textSize = 15f
-      setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
-    })
-    group.addView(android.widget.RadioButton(this).apply {
-      id = nativeId
-      text = "原生（DSH 原布局）"
-      textSize = 15f
-      setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
-    })
-    val current = ShellState.interfaceMode(this)
-    group.check(if (current == ShellState.UI_MODE_NATIVE) nativeId else mobileId)
-    wrap.addView(group)
-
-    wrap.addView(TextView(this).apply {
       text = "安全模式"
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
@@ -782,6 +756,32 @@ class MainActivity : ComponentActivity() {
       text = "查看与卸载已安装 Skill"
       setOnClickListener { showNativeSkillManager() }
     })
+
+    wrap.addView(TextView(this).apply {
+      text = "界面设置"
+      textSize = 16f
+      setPadding(0, 0, 0, (8 * density).toInt())
+    })
+    val group = android.widget.RadioGroup(this).apply {
+      orientation = android.widget.RadioGroup.VERTICAL
+    }
+    val mobileId = View.generateViewId()
+    val nativeId = View.generateViewId()
+    group.addView(android.widget.RadioButton(this).apply {
+      id = mobileId
+      text = "移动端"
+      textSize = 15f
+      setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
+    })
+    group.addView(android.widget.RadioButton(this).apply {
+      id = nativeId
+      text = "原生（DSH 原布局）"
+      textSize = 15f
+      setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
+    })
+    val current = ShellState.interfaceMode(this)
+    group.check(if (current == ShellState.UI_MODE_NATIVE) nativeId else mobileId)
+    wrap.addView(group)
 
     wrap.addView(TextView(this).apply {
       text = "从手机导入到当前工作区"
@@ -851,7 +851,7 @@ class MainActivity : ComponentActivity() {
       setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
     })
     wrap.addView(TextView(this).apply {
-      text = "版本  V0.1.1"
+      text = "版本  V0.1.2 · 安全模式 / 3D 修复版"
       textSize = 14f
       setPadding(0, (4 * density).toInt(), 0, (8 * density).toInt())
     })
