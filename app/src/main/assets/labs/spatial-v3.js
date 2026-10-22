@@ -161,6 +161,13 @@
       if(length(remaining)<1e-8)break;
       let hit=null;
       for(const o of solids)for(const h of CAPSULE_HEIGHTS){
+        // Swept-ray slab tests cannot resolve a start point already inside
+        // the expanded OBB. Stop and report it rather than silently allowing
+        // the player to tunnel farther through the obstacle.
+        if(S.distanceToBox(add(at,V(0,h,0)),o)<radius-1e-6){
+          impacts.push({kind:o.kind,id:o.id,at:vec(at),status:'initial_overlap_unresolved'});
+          return {end:at,impacts,path};
+        }
         const trial=sweepAgainst(add(at,V(0,h,0)),remaining,o,radius);
         if(trial&&(!hit||trial.fraction<hit.fraction))hit=trial;
       }
