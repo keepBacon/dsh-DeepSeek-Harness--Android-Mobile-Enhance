@@ -88,7 +88,10 @@
     for(const a of scene.agents){
       const distance=B.sphereHit(origin,direction,a.position,a.radius);
       if(distance===null||distance>1000||nearest&&distance>=nearest.distance-1e-8)continue;
-      const point=add(origin,mul(direction,distance)),normal=unit(sub(point,a.position));
+      const point=add(origin,mul(direction,distance)),surface=sub(point,a.position);
+      // A camera exactly at an agent centre yields a zero hit normal. Use
+      // the inverse ray as a stable fallback instead of aborting observation.
+      const normal=length(surface)>1e-10?unit(surface):mul(direction,-1);
       nearest={kind:'agent',id:a.id,distance:round(distance),
         point:vec(point),normal:vec(normal),
         screen:T.project(point,scene.camera,scene.viewport)};
