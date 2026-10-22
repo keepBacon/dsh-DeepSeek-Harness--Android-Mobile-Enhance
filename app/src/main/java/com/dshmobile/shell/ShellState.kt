@@ -9,6 +9,7 @@ object ShellState {
   private const val PICK_TOKEN = "pick-token"
   private const val LAST_WORKSPACE_PATH = "last-workspace-path"
   private const val INTERFACE_MODE = "interface-mode"
+  private const val SAFE_MODE = "safe-mode"
 
   const val UI_MODE_MOBILE = "mobile"
   const val UI_MODE_NATIVE = "native"
@@ -44,6 +45,15 @@ object ShellState {
       .putString(INTERFACE_MODE, normalized)
       .apply()
   }
+
+  /** Safe mode is a persisted Host launch choice, never a plugin manifest mutation. */
+  fun safeModeEnabled(context: Context): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SAFE_MODE, false)
+
+  /** Synchronous commit: the foreground service may relaunch the Host immediately. */
+  fun setSafeModeEnabled(context: Context, enabled: Boolean): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit().putBoolean(SAFE_MODE, enabled).commit()
 
   /**
    * Stable private token used by the Android directory-picker bridge and the

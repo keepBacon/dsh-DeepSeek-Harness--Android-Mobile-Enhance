@@ -206,6 +206,8 @@ const wanted = new Set([
   '@deepseek-ai/dsh-sandbox-local',
   '@deepseek-ai/dsh-subprocess-local',
   '@deepseek-ai/dsh-terminal-bash',
+  '@deepseek-ai/dsh-skill-filesystem',
+  '@deepseek-ai/dsh-tool-skill',
 ])
 const dirs = packageDirsByName(wanted)
 const byName = new Map()
@@ -578,6 +580,28 @@ if (process.env.DSH_COMPAT_PREFLIGHT_ONLY === '1') {
   console.log('[DSH] Cordis loader compatibility preflight: OK (' + loaders.length + ' installation(s))')
   process.exit(0)
 }
+
+// Scoped safe-mode guard: do not rewrite user Skills on disk. Web presets
+// mount their own skill providers, so disabling a host-level YAML row alone
+// cannot suppress Skills in agents. Abort registration inside each provider
+// and its model-facing tool while keeping the Android-native installer alive.
+function patchSafeModeSkillRegistration(file) {
+  let txt = read(file)
+  const marker = 'DSH Android safe mode: suppress Skill activation'
+  if (txt.includes(marker)) return 'already'
+  const pattern = /\bfunction apply\s*\([^)]*\)\s*\{/
+  const matches = txt.match(new RegExp(pattern.source, 'g')) ?? []
+  if (matches.length !== 1) {
+    warn(`Skill registration anchor changed (${matches.length}): ${file}`)
+    return 'upstream-unknown'
+  }
+  txt = txt.replace(pattern, `eachPackage('@deepseek-ai/cordis-plugin-loader', 'lib/index.js', (file) => {\n  if (process.env.DSH_ANDROID_SAFE_MODE === "1") return; /* ${marker} */`)
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}
+eachPackage('@deepseek-ai/dsh-skill-filesystem', 'lib/index.js', patchSafeModeSkillRegistration, { requiredIfPresent: true })
+eachPackage('@deepseek-ai/dsh-tool-skill', 'lib/index.js', patchSafeModeSkillRegistration, { requiredIfPresent: true })
 
 eachPackage('@deepseek-ai/cordis-plugin-loader', 'lib/index.js', (file) => {
   const txt = read(file)

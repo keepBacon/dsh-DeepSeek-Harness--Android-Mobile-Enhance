@@ -751,6 +751,25 @@ class MainActivity : ComponentActivity() {
     wrap.addView(group)
 
     wrap.addView(TextView(this).apply {
+      text = "安全模式"
+      textSize = 16f
+      setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
+    })
+    val safeModeInitially = ShellState.safeModeEnabled(this)
+    val safeModeSwitch = android.widget.Switch(this).apply {
+      text = "启用安全模式"
+      isChecked = safeModeInitially
+      textSize = 15f
+      contentDescription = "安全模式：暂停插件、Skills 和 MCP，保留安装和卸载功能"
+    }
+    wrap.addView(safeModeSwitch)
+    wrap.addView(TextView(this).apply {
+      text = "启用后重启 DSH，仅启动内置基础功能，暂时不加载额外插件、Skills 或 MCP。仍可管理插件和 Skill 安装包；安装状态和原始启用配置不会被修改。关闭后重启 DSH 恢复。"
+      textSize = 12f
+      setPadding(0, (4 * density).toInt(), 0, (8 * density).toInt())
+    })
+
+    wrap.addView(TextView(this).apply {
       text = "从手机导入到当前工作区"
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
@@ -852,8 +871,20 @@ class MainActivity : ComponentActivity() {
         if (selected != current) {
           ShellState.setInterfaceMode(this, selected)
           applyInterfaceModeSettings()
-          // A navigation creates a clean document, removing the previous mode's
-          // injected CSS/DOM before the bridge mounts the selected layout.
+        }
+        if (safeModeSwitch.isChecked != safeModeInitially) {
+          val enabled = safeModeSwitch.isChecked
+          runProfileMutation(if (enabled) "正在进入安全模式…" else "正在关闭安全模式并重启 DSH…") {
+            if (!ShellState.setSafeModeEnabled(this@MainActivity, enabled)) {
+              PluginCommandResult(false, -3, "无法保存安全模式设置")
+            } else {
+              PluginCommandResult(true, 0, if (enabled)
+                "安全模式已启用。用户安装的插件、Skills 和 MCP 配置均已保留。"
+                else "安全模式已关闭，DSH 已恢复正常配置。")
+            }
+          }
+        } else if (selected != current) {
+          // A new navigation clears the old injected mobile/native layout.
           showStartingState("正在应用界面设置…")
           startEngineFlow()
         }
@@ -5527,14 +5558,21 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { startEngineFlow() }
     }
     val safeMode = Button(this).apply {
-      text = "禁用第三方插件并重启"
+      text = if (ShellState.safeModeEnabled(this@MainActivity)) "关闭安全模式并重启" else "进入安全模式并重启"
       setOnClickListener {
+        val enabled = !ShellState.safeModeEnabled(this@MainActivity)
         android.app.AlertDialog.Builder(this@MainActivity)
-          .setTitle("安全模式恢复")
-          .setMessage("保留已安装文件，但停用 web profile 中全部第三方 bundle，然后重启 DSH。")
+          .setTitle(if (enabled) "进入安全模式" else "退出安全模式")
+          .setMessage(if (enabled)
+            "将重启 DSH 并暂时禁用额外插件、Skills 和 MCP；保留所有安装包和原始配置。"
+            else "将重启 DSH，恢复之前安装和启用的插件、Skills 与 MCP。")
           .setNegativeButton("取消", null)
           .setPositiveButton("继续") { _, _ ->
-            runProfileMutation("正在禁用第三方插件…") { engineManager.disableThirdPartyBundles() }
+            runProfileMutation(if (enabled) "正在进入安全模式…" else "正在退出安全模式…") {
+              if (ShellState.setSafeModeEnabled(this@MainActivity, enabled))
+                PluginCommandResult(true, 0, if (enabled) "已进入安全模式" else "已退出安全模式")
+              else PluginCommandResult(false, -3, "无法保存安全模式设置")
+            }
           }
           .show()
       }
