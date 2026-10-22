@@ -401,10 +401,60 @@
     }
     return {position:pos,velocity,impacts};
   }
+  // Sweep the player's sampled capsule against dynamic-agent spheres before
+  // delegating to V3's static-world solver. This is a conservative 3D
+  // approximation: agent positions are frozen during the current player step.
+  function playerAgentContact(scene,start,delta) {
+    if (!scene.player.collision.enabled || length(delta)<1e-9) return null;
+    let nearest=null;
+    for(const agent of scene.agents)for(const height of [.35,.9,1.45]){
+      const center=add(start,V(0,height,0)),relative=sub(center,agent.position);
+      const effective=scene.player.collision.radius+agent.radius;
+      const a=dot(delta,delta),b=dot(relative,delta);
+      const c=dot(relative,relative)-effective*effective;
+      if(c<=0)continue; // Existing interpenetration remains an explicit limitation.
+      const d=b*b-a*c;
+      if(d<0)continue;
+      const t=(-b-Math.sqrt(d))/a;
+      if(t<0||t>1||nearest&&t>=nearest.fraction)continue;
+      const normal=unit(add(relative,mul(delta,t)));
+      nearest={fraction:t,normal,id:agent.id,kind:'agent'};
+    }
+    return nearest;
+  }
+  function sceneHasPlayerMotion(action) {
+    return action&&Number.isFinite(action.seconds)&&action.seconds>0&&
+      ['forward','strafe','vertical'].some(k=>!!action[k]);
+  }
   function step(input,action){
     const s=normalize(input),base=asV3(s);
-    const result=T.step(base,action);
+    // Player movement must honor the dynamic entities also used by A*.
+    // V3 continues to resolve static OBB collisions; here we conservatively
+    // shorten the requested movement at the earliest agent-sphere contact.
+    let playerAgentImpact=null;
+    let appliedAction=action;
+    if(sceneHasPlayerMotion(action) && s.player.collision.enabled && s.agents.length){
+      const direction=basis(s.player.yaw,0),raw=add(
+        add(mul(direction.forward,action.forward||0),mul(direction.right,action.strafe||0)),
+        V(0,action.vertical||0,0));
+      const delta=mul(raw,length(raw)>1?1/length(raw):1);
+      const intended=mul(delta,s.player.speed*action.seconds);
+      const contact=playerAgentContact(s,s.player.position,intended);
+      if(contact){
+        const scale=Math.max(0,contact.fraction-Math.min(.002/Math.max(length(intended),1e-8),contact.fraction));
+        appliedAction={...action,forward:(action.forward||0)*scale,
+          strafe:(action.strafe||0)*scale,vertical:(action.vertical||0)*scale};
+        playerAgentImpact={kind:'agent',id:contact.id,normal:vec(contact.normal),
+          at:vec(add(s.player.position,mul(intended,scale)))};
+      }
+    }
+    const result=T.step(base,appliedAction);
     const next=result.scene;next.schema=SCHEMA;
+    if(playerAgentImpact){
+      result.motion.impacts.push(playerAgentImpact);
+      result.motion.collisionResolved=true;
+      result.motion.collisions.push(playerAgentImpact.id);
+    }
     const solidShapes=S.shapes(s).filter(o=>(o.kind==='item'?s.items:s.plots)
       .some(source=>source.id===o.id&&source.solid));
     const agentImpacts=[];
