@@ -189,7 +189,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   fun setMcpToolboxEnabled(enabled: Boolean): PluginCommandResult = try {
     mcpConfigManager.setToolboxEnabled(enabled)
-    mcpConfigManager.ensureRuntimePatch()
+    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, if (enabled) "已启用内置 mobile_tools + basic_tools MCP。" else "已关闭内置 MCP 工具箱。")
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
@@ -199,7 +199,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     if (!bearerToken.isNullOrBlank()) SecureCredentialStore.saveMcpBearerToken(context, server.id, bearerToken)
     mcpConfigManager.upsert(server)
     if (!server.bearerAuth) SecureCredentialStore.clearMcpBearerToken(context, server.id)
-    mcpConfigManager.ensureRuntimePatch()
+    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, "已保存 MCP：" + server.serverName)
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
@@ -207,7 +207,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   fun setMcpServerEnabled(id: String, enabled: Boolean): PluginCommandResult = try {
     mcpConfigManager.setServerEnabled(id, enabled)
-    mcpConfigManager.ensureRuntimePatch()
+    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, if (enabled) "MCP 已启用" else "MCP 已停用")
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
@@ -216,7 +216,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   fun removeMcpServer(id: String): PluginCommandResult = try {
     mcpConfigManager.remove(id)
     SecureCredentialStore.clearMcpBearerToken(context, id)
-    mcpConfigManager.ensureRuntimePatch()
+    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, "MCP 已删除")
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
@@ -1332,6 +1332,79 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
+  /**
+   * Safe mode runs a dedicated, Android-owned profile. The user's web profile,
+   * dependencies, bundle enablement, sessions and credentials remain untouched.
+   * The base + web-app bundles are necessary for settings and plugin management.
+   */
+  private fun prepareSafeModeProfile(): Pair<String, File> {
+    val name = "android-safe-web"
+    val dir = File(homeDir, ".dsh/profiles/$name")
+    if (!dir.isDirectory && !dir.mkdirs()) throw java.io.IOException("无法创建安全模式 profile")
+    val bundles = JSONArray().put("@deepseek-ai/dsh-base").put("@deepseek-ai/dsh-web-app")
+    val manifest = JSONObject()
+      .put("name", "dsh-profile-android-safe-web")
+      .put("private", true)
+      .put("dependencies", JSONObject())
+      .put("dsh", JSONObject().put("profile", JSONObject().put("bundles", bundles)))
+    // This is our own temporary profile, never profiles/web/package.json.
+    val manifestFile = File(dir, "package.json")
+    val contents = manifest.toString(2) + "\n"
+    if (!manifestFile.isFile || manifestFile.readText() != contents) {
+      writeTextAtomic(manifestFile, contents)
+    }
+    val profilePatch = File(dir, "cordis.patch.yml")
+    if (!profilePatch.isFile || profilePatch.readText() != "[]\n") {
+      writeTextAtomic(profilePatch, "[]\n")
+    }
+
+    // The DSH_HOME-level patch is shared between profiles. Mask extra plugin
+    // rows from that layer without touching user files. The profile-level user
+    // patch is already excluded by launching the isolated safe profile.
+    val homePatch = File(homeDir, ".dsh/cordis.patch.yml")
+    val disabledIds = linkedSetOf<String>()
+    if (homePatch.isFile) {
+      val lines = homePatch.readLines()
+      val rowId = Regex("""^\s*-\s+id:\s*['"]?([A-Za-z0-9_.:-]+)['"]?(?:\s+#.*)?\s*$""")
+      val rowName = Regex("""^\s*name:\s*['"]?([^\s'"#]+)""")
+      val insert = Regex("""^(\s*)-\s+insert:\s*$""")
+      var insertIndent = -1
+      for (i in lines.indices) {
+        val line = lines[i]
+        val indent = line.takeWhile { it == ' ' }.length
+        val begin = insert.matchEntire(line)
+        if (begin != null) {
+          insertIndent = begin.groupValues[1].length
+          continue
+        }
+        val match = rowId.matchEntire(line) ?: continue
+        val insideInsert = insertIndent >= 0 && indent > insertIndent
+        if (indent <= insertIndent) insertIndent = -1
+        val name = lines.drop(i + 1).take(8).takeWhile {
+          !rowId.matches(it) && !insert.matches(it)
+        }.firstNotNullOfOrNull { rowName.find(it)?.groupValues?.get(1) }
+        // Direct overrides of built-in rows remain intact unless they mount an
+        // MCP or a non-core module; inserted rows are user extensions.
+        if (insideInsert || name?.contains("dsh-mcp-client") == true ||
+          (name != null && !name.startsWith("@deepseek-ai/"))) {
+          disabledIds.add(match.groupValues[1])
+        }
+      }
+    }
+    val overlay = File(context.filesDir, "mcp/android-safe-mode.patch.yml")
+    overlay.parentFile?.mkdirs()
+    val text = buildString {
+      // Also suppress host-plane Skills (preset Skills are gated at their
+      // runtime module entrypoints by DSH_ANDROID_SAFE_MODE).
+      append("- id: skill-filesystem\n  disabled: true\n")
+      append("- id: tool-skill\n  disabled: true\n")
+      disabledIds.filterNot { it == "skill-filesystem" || it == "tool-skill" }
+        .forEach { id -> append("- id: ").append(JSONObject.quote(id)).append("\n  disabled: true\n") }
+    }
+    writeTextAtomic(overlay, text)
+    return name to overlay
+  }
+
   /** Start the dsh web engine from the embedded snapshot. */
   fun startEngine(port: Int = 3080, runtimeAlreadyChecked: Boolean = false): Boolean {
     if (!runtimeAlreadyChecked) {
@@ -1366,14 +1439,23 @@ class EngineManager(private val context: Context, private val pickToken: String?
       applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
       applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
       applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
-      val mcpPatch = mcpConfigManager.ensureRuntimePatch()
-      val args = arrayOf(
+      val safeMode = ShellState.safeModeEnabled(context)
+      val safeProfile = if (safeMode) prepareSafeModeProfile() else null
+      val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode)
+      val args = if (safeProfile != null) arrayOf(
+        nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
+        "web", "--profile", safeProfile.first,
+        "--patch", mcpPatch.absolutePath,
+        "--patch", safeProfile.second.absolutePath,
+        "--port", port.toString(), "--no-open",
+      ) else arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
         "web", "--patch", mcpPatch.absolutePath, "--port", port.toString(), "--no-open",
       )
       engineLogFile.parentFile?.mkdirs()
       engineLogFile.writeText("")
-      val env = engineEnv(preload)
+      val env = engineEnv(preload).toMutableMap()
+      if (safeMode) env["DSH_ANDROID_SAFE_MODE"] = "1"
       engineProcess = startWithArgs(args, env)
       ACTIVE_PROCESS.set(engineProcess)
 
@@ -1529,7 +1611,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       env["GIT_SSH_VARIANT"] = "ssh"
       env["GIT_SSH_COMMAND"] = sshCommand(batchMode = true)
     }
-    env.putAll(mcpConfigManager.secretEnvironment())
+    if (!ShellState.safeModeEnabled(context)) env.putAll(mcpConfigManager.secretEnvironment())
     return env
   }
 
@@ -2566,7 +2648,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
     return try {
       profileCheckLogFile.writeText("")
-      val mcpPatch = mcpConfigManager.ensureRuntimePatch()
+      val mcpPatch = mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
       val args = arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
         "--profile", profile, "--patch", mcpPatch.absolutePath, "--dump-config",
