@@ -604,7 +604,17 @@ jobs:
           prefix="$runtime/usr"
           lib="$prefix/lib"
           modules="$lib/node_modules"
+          node scripts/test-safe-mode-skill-patch.mjs
           DSH_TARGET_VERSION=0.1.5-rc.2 node scripts/android-runtime-patch.mjs "$prefix"
+          # Safe-mode Skill providers must be guarded, parse as valid JS,
+          # and not be rewritten after a repeated Android patch pass.
+          for package in dsh-skill-filesystem dsh-tool-skill; do
+            source="$modules/@deepseek-ai/$package/lib/index.js"
+            test -s "$source"
+            grep -Fq 'DSH Android safe mode: suppress Skill activation' "$source"
+            node --check "$source"
+          done
+          DSH_TARGET_VERSION=0.1.5-rc.2 node scripts/android-runtime-patch.mjs "$prefix" > /dev/null
 
           while IFS= read -r file; do
             node --check "$file"

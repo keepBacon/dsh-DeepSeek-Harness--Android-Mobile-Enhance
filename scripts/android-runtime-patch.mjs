@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { stripTypeScriptTypes } from 'node:module'
+import { guardSkillApply } from './safe-mode-skill-patch.mjs'
 
 const STRIP_WRAP = { prefix: 'async function __dsh_program__() {\n', suffix: '\n}' }
 
@@ -586,20 +587,19 @@ if (process.env.DSH_COMPAT_PREFLIGHT_ONLY === '1') {
 // cannot suppress Skills in agents. Abort registration inside each provider
 // and its model-facing tool while keeping the Android-native installer alive.
 function patchSafeModeSkillRegistration(file) {
-  let txt = read(file)
-  const marker = 'DSH Android safe mode: suppress Skill activation'
-  if (txt.includes(marker)) return 'already'
-  const pattern = /\bfunction apply\s*\([^)]*\)\s*\{/
-  const matches = txt.match(new RegExp(pattern.source, 'g')) ?? []
-  if (matches.length !== 1) {
-    warn(`Skill registration anchor changed (${matches.length}): ${file}`)
-    return 'upstream-unknown'
+  const original = read(file)
+  const { status, content } = guardSkillApply(original)
+  if (status === 'already') { checkPatchedJavaScript(file); return status }
+  write(file, content)
+  try {
+    checkPatchedJavaScript(file)
+  } catch (error) {
+    write(file, original)
+    throw error
   }
-  txt = txt.replace(pattern, `eachPackage('@deepseek-ai/cordis-plugin-loader', 'lib/index.js', (file) => {\n  if (process.env.DSH_ANDROID_SAFE_MODE === "1") return; /* ${marker} */`)
-  write(file, txt)
-  checkPatchedJavaScript(file)
-  return 'patched'
+  return status
 }
+
 eachPackage('@deepseek-ai/dsh-skill-filesystem', 'lib/index.js', patchSafeModeSkillRegistration, { requiredIfPresent: true })
 eachPackage('@deepseek-ai/dsh-tool-skill', 'lib/index.js', patchSafeModeSkillRegistration, { requiredIfPresent: true })
 

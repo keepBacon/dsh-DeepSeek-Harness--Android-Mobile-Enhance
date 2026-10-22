@@ -189,7 +189,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   fun setMcpToolboxEnabled(enabled: Boolean): PluginCommandResult = try {
     mcpConfigManager.setToolboxEnabled(enabled)
-    mcpConfigManager.ensureRuntimePatch()
+    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, if (enabled) "已启用内置 mobile_tools + basic_tools MCP。" else "已关闭内置 MCP 工具箱。")
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
@@ -199,7 +199,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     if (!bearerToken.isNullOrBlank()) SecureCredentialStore.saveMcpBearerToken(context, server.id, bearerToken)
     mcpConfigManager.upsert(server)
     if (!server.bearerAuth) SecureCredentialStore.clearMcpBearerToken(context, server.id)
-    mcpConfigManager.ensureRuntimePatch()
+    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, "已保存 MCP：" + server.serverName)
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
@@ -207,7 +207,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   fun setMcpServerEnabled(id: String, enabled: Boolean): PluginCommandResult = try {
     mcpConfigManager.setServerEnabled(id, enabled)
-    mcpConfigManager.ensureRuntimePatch()
+    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, if (enabled) "MCP 已启用" else "MCP 已停用")
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
@@ -216,7 +216,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   fun removeMcpServer(id: String): PluginCommandResult = try {
     mcpConfigManager.remove(id)
     SecureCredentialStore.clearMcpBearerToken(context, id)
-    mcpConfigManager.ensureRuntimePatch()
+    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, "MCP 已删除")
   } catch (t: Throwable) {
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
@@ -2648,7 +2648,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
     return try {
       profileCheckLogFile.writeText("")
-      val mcpPatch = mcpConfigManager.ensureRuntimePatch()
+      val mcpPatch = mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
       val args = arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
         "--profile", profile, "--patch", mcpPatch.absolutePath, "--dump-config",
