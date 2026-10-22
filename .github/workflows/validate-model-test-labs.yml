@@ -32,6 +32,8 @@ jobs:
       - run: node --check scripts/test-spatial-audit.cjs
       - run: node scripts/test-spatial-audit.cjs
       - run: node scripts/test-spatial-player-agent.cjs
+      - run: node --check scripts/test-spatial-agent-agent.cjs
+      - run: node scripts/test-spatial-agent-agent.cjs
       - run: node --check scripts/test-spatial-pages.cjs
       - run: node scripts/test-spatial-pages.cjs
       - run: node --check scripts/test-spatial-paths.cjs

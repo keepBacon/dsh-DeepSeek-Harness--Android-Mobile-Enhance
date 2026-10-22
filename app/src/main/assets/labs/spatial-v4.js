@@ -426,6 +426,79 @@
     return action&&Number.isFinite(action.seconds)&&action.seconds>0&&
       ['forward','strafe','vertical'].some(k=>!!action[k]);
   }
+  /** Earliest continuous collision fraction for two moving spheres.
+   * Conservative capsules are represented by three spheres for the player.
+   * Initial penetration is reported, not silently treated as solved. */
+  function sphereMotionContact(a,da,ar,b,db,br) {
+    const origin=sub(a,b),relative=sub(da,db),r=ar+br,c=dot(origin,origin)-r*r;
+    const speed=dot(relative,relative);
+    if(c < -1e-8)return {fraction:0,initialOverlap:true,normal:V(0,0,0)};
+    if(speed<1e-12)return null;
+    const halfB=dot(origin,relative);
+    if(c<=1e-8&&halfB>=0)return null;
+    const d=halfB*halfB-speed*c;
+    if(d<0)return null;
+    const fraction=(-halfB-Math.sqrt(Math.max(0,d)))/speed;
+    if(fraction < -1e-8||fraction>1+1e-8)return null;
+    const t=Math.max(0,Math.min(1,fraction));
+    const hitNormal=sub(add(a,mul(da,t)),add(b,mul(db,t)));
+    return {fraction:t,initialOverlap:false,
+      normal:length(hitNormal)>1e-9?unit(hitNormal):V(0,0,0)};
+  }
+  function resolveAgentInteractions(scene,next,provisional,impacts) {
+    const initial=scene.agents,positions=provisional.map(x=>x.position);
+    const deltas=positions.map((p,i)=>sub(p,initial[i].position));
+    const playerBefore=scene.player.position,
+      playerDelta=sub(next.player.position,playerBefore);
+    const limit=Array(initial.length).fill(1);
+    const contacts=[],seen=new Set();
+    // Recompute after shortening a trajectory; limits monotonically decrease.
+    for(let pass=0;pass<6;pass++){
+      let changed=false;
+      for(let i=0;i<initial.length;i++){
+        for(let h of [.35,.9,1.45]){
+          const contact=sphereMotionContact(initial[i].position,mul(deltas[i],limit[i]),
+            initial[i].radius,add(playerBefore,V(0,h,0)),playerDelta,
+            scene.player.collision.enabled?scene.player.collision.radius:0);
+          // When collision is disabled, agents should not collide with player.
+          if(!scene.player.collision.enabled||!contact)continue;
+          const key='player|'+initial[i].id;
+          if(!seen.has(key)){seen.add(key);contacts.push({actor:initial[i].id,
+            id:'player',kind:'player',status:contact.initialOverlap?
+              'initial_overlap_unresolved':'moving_sphere_contact'})}
+          if(contact.fraction<1-1e-8){
+            const cap=Math.max(0,limit[i]*contact.fraction-.0002);
+            if(cap<limit[i]-1e-8){limit[i]=cap;changed=true}
+          }
+        }
+      }
+      for(let i=0;i<initial.length;i++)for(let j=i+1;j<initial.length;j++){
+        const contact=sphereMotionContact(initial[i].position,mul(deltas[i],limit[i]),
+          initial[i].radius,initial[j].position,mul(deltas[j],limit[j]),
+          initial[j].radius);
+        if(!contact)continue;
+        const key=initial[i].id+'|'+initial[j].id;
+        if(!seen.has(key)){seen.add(key);contacts.push({actor:initial[i].id,
+          id:initial[j].id,kind:'agent',status:contact.initialOverlap?
+            'initial_overlap_unresolved':'moving_sphere_contact'})}
+        if(contact.fraction<1-1e-8){
+          const cap=Math.max(0,contact.fraction-.0002);
+          for(const index of [i,j]) {
+            const shortened=limit[index]*cap;
+            if(shortened<limit[index]-1e-8){limit[index]=shortened;changed=true}
+          }
+        }
+      }
+      if(!changed)break;
+    }
+    const output=provisional.map((p,i)=>({
+      position:add(initial[i].position,mul(deltas[i],limit[i])),
+      velocity:limit[i]<1-1e-8?V(0,0,0):p.velocity,
+    }));
+    impacts.push(...contacts.map(x=>({...x,
+      at:vec(output[initial.findIndex(a=>a.id===x.actor)].position)})));
+    return output;
+  }
   function step(input,action){
     const s=normalize(input),base=asV3(s);
     // Player movement must honor the dynamic entities also used by A*.
@@ -458,16 +531,20 @@
     const solidShapes=S.shapes(s).filter(o=>(o.kind==='item'?s.items:s.plots)
       .some(source=>source.id===o.id&&source.solid));
     const agentImpacts=[];
-    next.agents=s.agents.map(a=>{
-      const resolved=moveAgent(a,action.seconds,solidShapes);
-      agentImpacts.push(...resolved.impacts);
+    const provisional=s.agents.map(a=>moveAgent(a,action.seconds,solidShapes));
+    for(const r of provisional)agentImpacts.push(...r.impacts);
+    // Moving-agent interaction is approximated with simultaneous relative
+    // sweep and conservative stop. This is not a rigid-body physics solver.
+    const dynamic=resolveAgentInteractions(s,next,provisional,agentImpacts);
+    next.agents=s.agents.map((a,i)=>{
+      const resolved=dynamic[i];
       if(['x','y','z'].some(k=>Math.abs(resolved.position[k])>1e5))
         throw Error('agent left supported world bounds');
       return {...a,position:resolved.position,velocity:resolved.velocity};
     });
     validate(next);
     const motion={...result.motion,agentImpacts,
-      agentCollisionModel:'static OBB swept sphere; agent-to-agent collision not solved'};
+      agentCollisionModel:'static OBB sweep + pairwise moving-sphere sweep; initial overlaps reported; no full rigid-body dynamics'};
     const delta=deltaReport(s,next,motion);
     return {scene:next,observation:observe(next),motion,delta};
   }
