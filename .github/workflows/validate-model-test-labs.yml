@@ -1,7 +1,7 @@
 name: Validate model test labs
 on:
   push:
-    branches: ["feature/model-test-labs"]
+    branches: ["main", "feature/model-test-labs", "fix/spatial-v4-audit-followup"]
   pull_request:
     paths:
       - "app/src/main/assets/labs/**"
@@ -31,6 +31,9 @@ jobs:
       - run: node scripts/test-spatial-v4.cjs
       - run: node --check scripts/test-spatial-audit.cjs
       - run: node scripts/test-spatial-audit.cjs
+      - run: node scripts/test-spatial-player-agent.cjs
+      - run: node --check scripts/test-spatial-agent-agent.cjs
+      - run: node scripts/test-spatial-agent-agent.cjs
       - run: node --check scripts/test-spatial-pages.cjs
       - run: node scripts/test-spatial-pages.cjs
       - run: node --check scripts/test-spatial-paths.cjs
