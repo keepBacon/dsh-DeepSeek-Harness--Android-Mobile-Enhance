@@ -1850,6 +1850,12 @@ refresh_dsh_runtime() {
   copy_native_module_deps "$stage"
   install_mobile_mcp_toolbox "$stage"
   install_basic_mcp_toolbox "$stage"
+  echo '[DSH] Validating MCP stdio protocol and real tool writes…'
+  env LD_LIBRARY_PATH="$stage/usr/lib" PATH="$stage/usr/bin:$PATH" \
+    "$stage/usr/bin/node" "$ROOT/scripts/test-android-mcp-wire.mjs" "$stage/usr" || {
+      echo '[DSH] MCP wire integration failed.' >&2
+      exit 8
+    }
   validate_android_typescript_code_runtime "$stage"
   validate_agent_preset_tool_parity "$stage"
   validate_dsh_core_plugin_tree "$stage"
