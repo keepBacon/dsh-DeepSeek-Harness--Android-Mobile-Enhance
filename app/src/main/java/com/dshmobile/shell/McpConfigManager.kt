@@ -111,12 +111,20 @@ class McpConfigManager(
   }
 
   fun runtimeSummary(): String {
-    val servers = listServers()
-    val builtIn = if (toolboxEnabled() && toolboxFile.isFile) "已启用" else if (toolboxFile.isFile) "已关闭" else "未内置"
-    val basic = if (toolboxEnabled() && basicToolboxFile.isFile) " · Basic tools" else ""
+    // Read once: settings rendering must not parse the same JSON repeatedly.
+    val root = readRootSafe()
+    val servers = readServersForRuntime(root)
+    val enabled = root.optBoolean("toolboxEnabled", true)
+    val mobilePresent = toolboxFile.isFile
+    val basicPresent = basicToolboxFile.isFile
+    val builtIn = when {
+      !enabled -> "已关闭"
+      mobilePresent && basicPresent -> "已配置（2/2 入口）"
+      else -> "入口缺失（mobile=" + mobilePresent + ", basic=" + basicPresent + "）"
+    }
     val binary = if (File(usrDir, "libexec/dsh/wrappers/readelf").exists() && File(usrDir, "libexec/dsh/wrappers/objdump").exists()) " · Binutils" else ""
     val diagnostic = if (configurationIssue() == null) "" else " · MCP 配置异常（查看诊断）"
-    return "内置 MCP " + builtIn + basic + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary + diagnostic
+    return "内置 MCP " + builtIn + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary + diagnostic
   }
 
   private fun newRoot(): JSONObject = JSONObject().put("schema", 1).put("toolboxEnabled", true).put("servers", JSONArray())
@@ -144,6 +152,7 @@ class McpConfigManager(
     val array = root.optJSONArray("servers") ?: return emptyList()
     val result = mutableListOf<McpServerConfig>()
     val names = mutableSetOf<String>()
+    val ids = mutableSetOf<String>()
     for (i in 0 until minOf(array.length(), 32)) {
       try {
         val obj = array.optJSONObject(i) ?: throw IllegalArgumentException("entry is not an object")
@@ -161,7 +170,10 @@ class McpConfigManager(
           preset = obj.optString("preset", "generic"),
         )
         validate(server)
-        if (!names.add(server.serverName)) throw IllegalArgumentException("duplicate serverName")
+        if (server.serverName in names || server.id in ids)
+          throw IllegalArgumentException("duplicate MCP server name or id")
+        names.add(server.serverName)
+        ids.add(server.id)
         result += server
       } catch (t: Exception) {
         Log.w(tag, "Skipping invalid MCP server entry #${i + 1}: ${t.message}")
@@ -195,6 +207,7 @@ class McpConfigManager(
       result += server
     }
     require(result.map { it.serverName }.distinct().size == result.size) { "MCP 工具命名空间重复" }
+    require(result.map { it.id }.distinct().size == result.size) { "MCP 服务器 ID 重复" }
     return result
   }
 
