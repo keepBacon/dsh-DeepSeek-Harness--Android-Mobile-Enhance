@@ -1,0 +1,45 @@
+#!/usr/bin/env node
+// DSH Android database integration regression (source contract only).
+// A successful result does not replace Android SQLite / WebView device tests.
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
+const db=read('app/src/main/java/com/dshmobile/shell/database/MobileDatabase.kt');
+const index=read('app/src/main/java/com/dshmobile/shell/database/MobileIndexService.kt');
+const backup=read('app/src/main/java/com/dshmobile/shell/database/DatabaseBackup.kt');
+const bridge=read('app/src/main/java/com/dshmobile/shell/AndroidBridge.kt');
+const activity=read('app/src/main/java/com/dshmobile/shell/MainActivity.kt');
+const monitor=read('app/src/main/assets/dsh-tool-call-monitor.js');
+const classifier=read('app/src/main/java/com/dshmobile/shell/database/ToolErrorClassifier.kt');
+execFileSync(process.execPath,['--check',new URL('../app/src/main/assets/dsh-tool-call-monitor.js',import.meta.url).pathname]);
+for(const table of ['registry_snapshots','registry_entries','tool_observations','extension_inventory','session_index','audit_events']){
+ assert.ok(db.includes('CREATE TABLE '+table),'missing database table '+table);
+}
+assert.match(db,/setWriteAheadLoggingEnabled\(true\)/);
+assert.match(db,/setForeignKeyConstraintsEnabled\(true\)/);
+assert.match(db,/if \(existingId >= 0\) return existingId/);
+assert.match(db,/ORDER BY first_seen DESC/);
+assert.match(db,/OFFSET 10000/);
+assert.match(db,/event_key=\? AND status='running'/);
+assert.match(db,/digest\(sessionKey/);
+assert.match(backup,/VACUUM INTO/);
+assert.match(backup,/PRAGMA integrity_check/);
+assert.match(index,/if \(sessions\.second\) db\.delete/);
+assert.match(index,/complete = false\s+continue/);
+assert.equal((bridge.match(/fun recordToolObservation\(/g)||[]).length,1,'duplicate Android bridge method');
+assert.equal((bridge.match(/private val onRecordToolObservation:/g)||[]).length,1,'duplicate callback');
+assert.match(activity,/onRecordToolObservation =/);
+assert.match(activity,/databaseWriter\.execute/);
+assert.match(activity,/databaseWriter\.shutdown\(\)/);
+assert.match(activity,/DatabaseBackup\.create/);
+assert.match(activity,/MobileIndexService\(engineManager, db\)\.refresh/);
+assert.match(activity,/script\.replace\(marker, "const MONITOR_CAP = "/);
+assert.match(monitor,/\/\*__DSH_MONITOR_CAP__\*\//);
+assert.match(monitor,/bridge\.recordToolObservation\(/);
+assert.match(monitor,/old\.status !== status/);
+assert.match(classifier,/MCP_SCHEMA_REQUIRED/);
+for(const forbidden of [/fetch\(/,/XMLHttpRequest/,/sendBeacon/,/localStorage/,/sessionStorage/]){
+ assert.ok(!forbidden.test(monitor),'monitor unexpectedly uses a network/storage API: '+forbidden);
+}
+console.log('[DSH] Database integration source-contract regression: OK');

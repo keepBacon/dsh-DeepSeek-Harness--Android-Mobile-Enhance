@@ -59,7 +59,7 @@ class MobileDatabase private constructor(context: Context) :
     ).use { cursor ->
       if (cursor.moveToFirst() && cursor.getString(1) == hash &&
         cursor.getString(2) == runtime.take(80) &&
-        cursor.getInt(3) == if (complete) 1 else 0) existingId = cursor.getLong(0)
+        cursor.getInt(3) == (if (complete) 1 else 0)) existingId = cursor.getLong(0)
     }
     if (existingId >= 0) return existingId
     db.beginTransaction()
