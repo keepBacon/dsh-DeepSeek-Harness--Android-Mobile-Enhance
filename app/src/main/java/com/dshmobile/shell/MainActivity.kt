@@ -56,6 +56,13 @@ class MainActivity : ComponentActivity() {
   private lateinit var progressText: TextView
   private val engineManager by lazy { EngineManager(this, pickToken) }
   private val skillManager by lazy { SkillManager(this, engineManager) }
+  // Metadata writes never block WebView's JavascriptInterface thread.
+  // Prefer the newest states when the bounded queue fills during long sessions.
+  private val databaseWriter = java.util.concurrent.ThreadPoolExecutor(
+    1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+    java.util.concurrent.ArrayBlockingQueue<Runnable>(256),
+    java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy(),
+  )
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -325,6 +332,7 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    databaseWriter.shutdown()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
     try {
@@ -608,6 +616,18 @@ class MainActivity : ComponentActivity() {
           engineManager.runMobileToolRequest(category, command, currentWritableWorkspacePath())
         },
         onOpenLocalUrl = { url -> openLocalPreviewUrl(url) },
+        onRecordToolObservation = { session, call, tool, status, code ->
+          try {
+            databaseWriter.execute {
+              runCatching {
+                com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+                  .observe(session, call, tool, status, code)
+              }.onFailure { Log.w("DSH-Database", "Tool metadata write failed", it) }
+            }
+          } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // Activity destroyed during an asynchronous WebView callback.
+          }
+        },
         pickToken = pickToken,
       ),
       "androidBridge",
@@ -827,6 +847,45 @@ class MainActivity : ComponentActivity() {
     })
     wrap.addView(TextView(this).apply {
       text = "内置 mobile_tools 现在采用无 Root / 无 Shizuku 优先路径：可直接分析自身/同 UID 进程、FD/socket、运行时快照与子进程 strace；用户开启 Android 无线调试并主动配对后，可通过内置 ADB client 获取 package/process/logcat/JDWP/APK 信息。Frida/GDB/其它进程内存接口作为权限允许时的增强能力，不再作为默认路径。IDA / Ghidra / Binary Ninja 继续通过远程 MCP 连接。"
+      textSize = 12f
+      setPadding(0, (6 * density).toInt(), 0, 0)
+    })
+
+    wrap.addView(TextView(this).apply {
+      text = "数据库与诊断"
+      textSize = 16f
+      setPadding(0, (16 * density).toInt(), 0, (8 * density).toInt())
+    })
+    wrap.addView(Button(this).apply {
+      text = "数据库检查 / 更新元数据索引"
+      setOnClickListener {
+        Thread {
+          val report = runCatching {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val integrity = db.quickCheck()
+            val result = com.dshmobile.shell.database.MobileIndexService(engineManager, db).refresh()
+            val counts = db.counts()
+            "完整性：$integrity\n会话索引：${result.indexedSessions}\n扩展索引：${result.indexedExtensions}\n内置工具声明：${result.bundledTools}\n会话扫描完整：${result.sessionScanComplete}\n工具调用记录：${counts["observations"] ?: 0}"
+          }.getOrElse { "数据库检查失败：${it.message ?: it.javaClass.simpleName}" }
+          runOnUiThread { if (!isFinishing && !isDestroyed) showSimpleMessage("数据库检查", report) }
+        }.start()
+      }
+    })
+    wrap.addView(Button(this).apply {
+      text = "创建一致性数据库备份"
+      setOnClickListener {
+        Thread {
+          val report = runCatching {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val saved = com.dshmobile.shell.database.DatabaseBackup.create(applicationContext, db)
+            "元数据备份已创建：${saved.absolutePath}"
+          }.getOrElse { "数据库备份失败：${it.message ?: it.javaClass.simpleName}" }
+          runOnUiThread { if (!isFinishing && !isDestroyed) showSimpleMessage("数据库备份", report) }
+        }.start()
+      }
+    })
+    wrap.addView(TextView(this).apply {
+      text = "只保存工具状态和可重建索引元数据；不接管或修改 DSH 的会话、插件及 Skill 文件。备份仅包含应用私有元数据。"
       textSize = 12f
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
@@ -3470,7 +3529,13 @@ class MainActivity : ComponentActivity() {
       Log.w("DSH", "Passive tool monitor asset unavailable", t)
       return
     }
-    try { view.evaluateJavascript(script, null) } catch (t: Throwable) {
+    val marker = "/*__DSH_MONITOR_CAP__*/"
+    if (!script.contains(marker)) {
+      Log.w("DSH", "Passive tool monitor capability marker missing")
+      return
+    }
+    val prepared = script.replace(marker, "const MONITOR_CAP = " + jsString(bridgeCapability) + ";")
+    try { view.evaluateJavascript(prepared, null) } catch (t: Throwable) {
       Log.w("DSH", "Passive tool monitor injection failed", t)
     }
   }

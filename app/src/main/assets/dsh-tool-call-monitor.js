@@ -1,8 +1,15 @@
 /* Passive DSH tool-call display. Reads existing tool UI; never calls the LLM. */
 (() => {
   'use strict';
+  /*__DSH_MONITOR_CAP__*/
   if (window.__dshAndroidToolMonitor) return;
   const MAX_ROWS = 120;
+  const ERROR_MARKERS = Object.freeze([
+    'MCP_SCHEMA_REQUIRED', 'INVALID_ARGUMENT', 'INVALID_PARAMS',
+    'UNSUPPORTED_SCHEMA', 'SCHEMA_ERROR', 'UNAUTHORIZED', 'FORBIDDEN',
+    'TIMEOUT', 'ECONNREFUSED', 'TRANSPORT', 'SAFE_MODE',
+    'MODULE_NOT_FOUND', 'LOAD_FAILURE'
+  ]);
   const rows = new Map();
   let enabled = true, opened = false, chosen = null, queued = false, tabParent = null, currentSession = null;
 
@@ -57,6 +64,19 @@
       endedAt: status === 'running' ? null : (old?.endedAt || Date.now())
     });
     if (rows.size > MAX_ROWS) rows.delete(rows.keys().next().value);
+    // Only state transitions are sent; DOM result streaming can change on
+    // every frame. No prompts, tool arguments or outputs cross the bridge.
+    if (!old || old.status !== status) {
+      try {
+        const raw = status === 'failure' ? String(normalizedResult).toUpperCase() : '';
+        const marker = ERROR_MARKERS.find(key => raw.includes(key)) || '';
+        const bridge = window.androidBridge;
+        if (bridge && bridge.recordToolObservation) {
+          bridge.recordToolObservation(MONITOR_CAP, sessionKey(), id,
+            normalizedName, status, marker);
+        }
+      } catch (_) { /* Observation is never required for a real tool call. */ }
+    }
     draw();
   }
   function observeDom() {
