@@ -1,6 +1,7 @@
 package com.dshmobile.shell
 
 import android.content.Context
+import android.util.Log
 import java.io.File
 import java.net.URI
 import java.util.UUID
@@ -27,12 +28,13 @@ class McpConfigManager(
   private val homeDir: File,
 ) {
   private val configFile = File(dataDir, "mobile/mcp-servers.json")
+  private val tag = "McpConfigManager"
   private val patchFile = File(context.filesDir, "mcp/android-mcp.patch.yml")
   private val toolboxFile = File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs")
   private val basicToolboxFile = File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs")
 
   fun toolboxEnabled(): Boolean = readRootSafe().optBoolean("toolboxEnabled", true)
-  fun listServers(): List<McpServerConfig> = try { readServers(readRootSafe()) } catch (_: Exception) { emptyList() }
+  fun listServers(): List<McpServerConfig> = readServersForRuntime(readRootSafe())
 
   fun configurationIssue(): String? {
     if (!configFile.isFile) return null
@@ -92,8 +94,7 @@ class McpConfigManager(
         rows += toolboxRow()
         rows += basicToolboxRow()
       }
-      val servers = try { readServers(root) } catch (_: Exception) { emptyList() }
-      servers.filter { it.enabled }.forEach { rows += serverRow(it) }
+      readServersForRuntime(root).filter { it.enabled }.forEach { rows += serverRow(it) }
     }
     val text = if (rows.isEmpty()) {
       "[]\n"
@@ -128,6 +129,45 @@ class McpConfigManager(
   private fun readRootStrictForMutation(): JSONObject {
     if (!configFile.isFile) return newRoot()
     return JSONObject(configFile.readText())
+  }
+
+  /**
+   * Runtime registration is resilient per server: one malformed external entry
+   * must not suppress unrelated working MCP servers. The settings diagnostic
+   * still uses strict readServers() and reports the configuration problem.
+   */
+  private fun readServersForRuntime(root: JSONObject): List<McpServerConfig> {
+    if (root.optInt("schema", 1) != 1) {
+      Log.w(tag, "Unsupported MCP config schema; external servers not loaded")
+      return emptyList()
+    }
+    val array = root.optJSONArray("servers") ?: return emptyList()
+    val result = mutableListOf<McpServerConfig>()
+    val names = mutableSetOf<String>()
+    for (i in 0 until minOf(array.length(), 32)) {
+      try {
+        val obj = array.optJSONObject(i) ?: throw IllegalArgumentException("entry is not an object")
+        val rawArgs = obj.optJSONArray("args") ?: JSONArray()
+        val server = McpServerConfig(
+          id = obj.getString("id"),
+          serverName = obj.getString("serverName"),
+          transport = obj.getString("transport"),
+          command = obj.optString("command", ""),
+          args = MutableList(rawArgs.length()) { index -> rawArgs.getString(index) },
+          cwd = obj.optString("cwd", ""),
+          url = obj.optString("url", ""),
+          bearerAuth = obj.optBoolean("bearerAuth", false),
+          enabled = obj.optBoolean("enabled", true),
+          preset = obj.optString("preset", "generic"),
+        )
+        validate(server)
+        if (!names.add(server.serverName)) throw IllegalArgumentException("duplicate serverName")
+        result += server
+      } catch (t: Exception) {
+        Log.w(tag, "Skipping invalid MCP server entry #${i + 1}: ${t.message}")
+      }
+    }
+    return result
   }
 
   private fun readServers(root: JSONObject): List<McpServerConfig> {
