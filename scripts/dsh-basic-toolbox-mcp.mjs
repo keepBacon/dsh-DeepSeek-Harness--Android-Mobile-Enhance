@@ -141,7 +141,32 @@ async function call(name,a={}){
  }
 }
 
+async function dispatchToolCall(params){
+ const name=params?.name
+ if(typeof name!=='string'||!name.trim())return{content:[{type:'text',text:'Invalid MCP tool name'}],isError:true,structuredContent:{error:'Invalid MCP tool name'}}
+ const args=params?.arguments===undefined?{}:params.arguments
+ if(!args||typeof args!=='object'||Array.isArray(args))return{content:[{type:'text',text:'MCP tool arguments must be a JSON object'}],isError:true,structuredContent:{error:'MCP tool arguments must be a JSON object'}}
+ try{
+  const value=await call(name,args)
+  const serialized=JSON.stringify(value,null,2)
+  return{content:[{type:'text',text:serialized===undefined?'null':serialized}],structuredContent:value===undefined?null:value}
+ }catch(error){
+  const message=error instanceof Error?error.message:String(error)
+  return{content:[{type:'text',text:message}],isError:true,structuredContent:{error:message}}
+ }
+}
+
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const[{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
-async function selfTest(){await sdk();process.stdout.write('[DSH] Basic MCP toolbox self-test: OK ('+tools.length+' tools)\n')}
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-basic-toolbox',version:'1.0.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments||{});return{content:[{type:'text',text:JSON.stringify(value,null,2)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
+async function selfTest(){
+ await sdk()
+ const payload='{"nested":[1,true,null],"quote":"plain"}'
+ const success=await dispatchToolCall({name:'base_convert',arguments:{data:payload,from:'utf8',to:'base64'}})
+ if(success.isError||success.structuredContent?.value!==Buffer.from(payload).toString('base64'))throw new Error('MCP dispatch argument round-trip self-test failed')
+ const missing=await dispatchToolCall({name:'__dsh_missing_tool_self_test__',arguments:{}})
+ if(missing.isError!==true||!missing.content?.[0]?.text.includes('unknown tool'))throw new Error('MCP dispatch error-result self-test failed')
+ const malformed=await dispatchToolCall({name:'base_convert',arguments:'not-an-object'})
+ if(malformed.isError!==true)throw new Error('MCP dispatch argument validation self-test failed')
+ process.stdout.write('[DSH] Basic MCP toolbox self-test: OK ('+tools.length+' tools)\n')
+}
+async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-basic-toolbox',version:'1.0.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>dispatchToolCall(req.params));await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-basic-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})

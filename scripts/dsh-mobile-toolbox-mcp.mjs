@@ -626,6 +626,21 @@ async function call(name,a={}){
  }
 }
 
+async function dispatchToolCall(params){
+ const name=params?.name
+ if(typeof name!=='string'||!name.trim())return{content:[{type:'text',text:'Invalid MCP tool name'}],isError:true,structuredContent:{error:'Invalid MCP tool name'}}
+ const args=params?.arguments===undefined?{}:params.arguments
+ if(!args||typeof args!=='object'||Array.isArray(args))return{content:[{type:'text',text:'MCP tool arguments must be a JSON object'}],isError:true,structuredContent:{error:'MCP tool arguments must be a JSON object'}}
+ try{
+  const value=await call(name,args)
+  const serialized=JSON.stringify(value,null,2)
+  return{content:[{type:'text',text:serialized===undefined?'null':serialized}],structuredContent:value===undefined?null:value}
+ }catch(error){
+  const message=error instanceof Error?error.message:String(error)
+  return{content:[{type:'text',text:message}],isError:true,structuredContent:{error:message}}
+ }
+}
+
 async function sdk(){const server=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/index.js'),stdio=requireFromDsh.resolve('@modelcontextprotocol/sdk/server/stdio.js'),types=requireFromDsh.resolve('@modelcontextprotocol/sdk/types.js');const [{Server},{StdioServerTransport},t]=await Promise.all([import(pathToFileURL(server).href),import(pathToFileURL(stdio).href),import(pathToFileURL(types).href)]);return{Server,StdioServerTransport,ListToolsRequestSchema:t.ListToolsRequestSchema,CallToolRequestSchema:t.CallToolRequestSchema}}
 async function selfTest(){
  await sdk()
@@ -648,14 +663,21 @@ async function selfTest(){
  const root=await mkdtemp(resolve(process.env.TMPDIR||process.cwd(),'.dsh-mobile-tools-'))
  try{
   const sample=resolve(root,'sample.txt')
-  await call('fs_write',{path:sample,content:'alpha\nbeta\n',overwrite:false})
-  const read=await call('fs_read',{path:sample});if(!read.content.includes('beta'))throw new Error('fs_read self-test failed')
-  await call('fs_patch',{path:sample,oldText:'beta',newText:'gamma'})
+   const payload='alpha\nbeta\n{"nested":[1,true,null],"quote":"plain"}\n'
+   const writeResult=await dispatchToolCall({name:'fs_write',arguments:{path:sample,content:payload,overwrite:false}})
+   if(writeResult.isError)throw new Error('MCP dispatch fs_write self-test failed: '+writeResult.content[0].text)
+   const readResult=await dispatchToolCall({name:'fs_read',arguments:{path:sample}})
+   if(readResult.isError||readResult.structuredContent?.content!==payload)throw new Error('MCP dispatch argument round-trip self-test failed')
+   const missingResult=await dispatchToolCall({name:'__dsh_missing_tool_self_test__',arguments:{}})
+   if(missingResult.isError!==true||!missingResult.content?.[0]?.text.includes('unknown tool'))throw new Error('MCP dispatch error-result self-test failed')
+   const malformedResult=await dispatchToolCall({name:'fs_read',arguments:[]})
+   if(malformedResult.isError!==true)throw new Error('MCP dispatch argument validation self-test failed')
+   await call('fs_patch',{path:sample,oldText:'beta',newText:'gamma'})
   const search=await call('fs_search',{path:root,query:'gamma'});if(search.matches.length!==1)throw new Error('fs_search self-test failed')
   const list=await call('fs_list',{path:root});if(!list.entries.some(x=>x.name==='sample.txt'))throw new Error('fs_list self-test failed')
   const cmd=await call('command_run',{command:'node',args:['--version']});if(cmd.exitCode!==0)throw new Error('command_run self-test failed')
  }finally{await rm(root,{recursive:true,force:true})}
  process.stdout.write('[DSH] Mobile MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
-async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>{const value=await call(req.params.name,req.params.arguments||{});return{content:[{type:'text',text:JSON.stringify(value,null,2)}],structuredContent:value}});await server.connect(new StdioServerTransport())}
+async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-mobile-toolbox',version:'3.2.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>dispatchToolCall(req.params));await server.connect(new StdioServerTransport())}
 main().catch(e=>{process.stderr.write('[dsh-mobile-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
