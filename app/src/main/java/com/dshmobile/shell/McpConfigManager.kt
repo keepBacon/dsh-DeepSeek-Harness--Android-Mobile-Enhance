@@ -32,7 +32,7 @@ class McpConfigManager(
   private val basicToolboxFile = File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs")
 
   fun toolboxEnabled(): Boolean = readRootSafe().optBoolean("toolboxEnabled", true)
-  fun listServers(): List<McpServerConfig> = readServers(readRootSafe())
+  fun listServers(): List<McpServerConfig> = try { readServers(readRootSafe()) } catch (_: Exception) { emptyList() }
 
   fun configurationIssue(): String? {
     if (!configFile.isFile) return null
@@ -83,11 +83,17 @@ class McpConfigManager(
 
   @Synchronized fun ensureRuntimePatch(safeMode: Boolean = false): File {
     val rows = mutableListOf<String>()
-    // Keep all persisted MCP enable states. Safe mode only changes the launch patch.
+    // Read one consistent configuration generation for all MCP services.
+    val root = readRootSafe()
     if (!safeMode) {
-      if (toolboxEnabled() && toolboxFile.isFile) rows += toolboxRow()
-      if (toolboxEnabled() && basicToolboxFile.isFile) rows += basicToolboxRow()
-      listServers().filter { it.enabled }.forEach { rows += serverRow(it) }
+      if (root.optBoolean("toolboxEnabled", true)) {
+        if (!toolboxFile.isFile || !basicToolboxFile.isFile)
+          throw java.io.IOException("内置 MCP 工具箱文件缺失；需要修复 DSH 运行时")
+        rows += toolboxRow()
+        rows += basicToolboxRow()
+      }
+      val servers = try { readServers(root) } catch (_: Exception) { emptyList() }
+      servers.filter { it.enabled }.forEach { rows += serverRow(it) }
     }
     val text = if (rows.isEmpty()) {
       "[]\n"
@@ -99,8 +105,7 @@ class McpConfigManager(
         }
       }
     }
-    patchFile.parentFile?.mkdirs()
-    patchFile.writeText(text)
+    writeFileAtomically(patchFile, text)
     return patchFile
   }
 
@@ -109,7 +114,8 @@ class McpConfigManager(
     val builtIn = if (toolboxEnabled() && toolboxFile.isFile) "已启用" else if (toolboxFile.isFile) "已关闭" else "未内置"
     val basic = if (toolboxEnabled() && basicToolboxFile.isFile) " · Basic tools" else ""
     val binary = if (File(usrDir, "libexec/dsh/wrappers/readelf").exists() && File(usrDir, "libexec/dsh/wrappers/objdump").exists()) " · Binutils" else ""
-    return "内置 MCP " + builtIn + basic + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary
+    val diagnostic = if (configurationIssue() == null) "" else " · MCP 配置异常（查看诊断）"
+    return "内置 MCP " + builtIn + basic + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary + diagnostic
   }
 
   private fun newRoot(): JSONObject = JSONObject().put("schema", 1).put("toolboxEnabled", true).put("servers", JSONArray())
@@ -172,11 +178,27 @@ class McpConfigManager(
   }
 
   private fun writeRoot(root: JSONObject) {
-    configFile.parentFile?.mkdirs()
-    val temp = File(configFile.parentFile, ".mcp-servers.tmp")
-    temp.writeText(root.toString(2) + "\n")
-    if (configFile.exists() && !configFile.delete()) throw java.io.IOException("无法替换 MCP 配置")
-    if (!temp.renameTo(configFile)) throw java.io.IOException("无法提交 MCP 配置")
+    writeFileAtomically(configFile, root.toString(2) + "\n")
+  }
+
+  /** Switch complete generations without a missing-file window. */
+  private fun writeFileAtomically(target: File, content: String) {
+    target.parentFile?.mkdirs()
+    if (target.isFile && target.readText() == content) return
+    val temp = File(target.parentFile, ".${target.name}.tmp-${UUID.randomUUID()}")
+    try {
+      temp.writeText(content)
+      try {
+        java.nio.file.Files.move(temp.toPath(), target.toPath(),
+          java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+          java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+      } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+        java.nio.file.Files.move(temp.toPath(), target.toPath(),
+          java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+      }
+    } finally {
+      if (temp.exists()) temp.delete()
+    }
   }
 
   private fun validate(server: McpServerConfig) {

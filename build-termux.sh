@@ -301,7 +301,9 @@ snapshot_valid() {
       $0 == "usr/bin/node" { node = 1 }
       $0 == "usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" { dsh = 1 }
       $0 == "usr/lib/libtermux-exec-ld-preload.so" { preload = 1 }
-      END { exit !(node && dsh && preload) }
+      $0 == "usr/libexec/dsh-mobile/toolbox-mcp.mjs" { mobile = 1 }
+      $0 == "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs" { basic = 1 }
+      END { exit !(node && dsh && preload && mobile && basic) }
     '
 }
 
