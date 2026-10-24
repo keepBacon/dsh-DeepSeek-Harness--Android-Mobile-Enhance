@@ -13,7 +13,7 @@ import java.security.MessageDigest
  * No prompts, tool arguments/results, API tokens or secrets are persisted.
  */
 class MobileDatabase private constructor(context: Context) :
-  SQLiteOpenHelper(context.applicationContext, "dsh-mobile.db", null, 1) {
+  SQLiteOpenHelper(context.applicationContext, FILE_NAME, null, 1) {
 
   data class ToolEntry(val name: String, val provider: String, val schemaHash: String = "")
 
@@ -158,14 +158,23 @@ class MobileDatabase private constructor(context: Context) :
     }
 
   companion object {
+    const val FILE_NAME = "dsh-mobile.db"
+    private val HEX = "0123456789abcdef".toCharArray()
     @Volatile private var instance: MobileDatabase? = null
     fun get(context: Context): MobileDatabase = instance ?: synchronized(this) {
       instance ?: MobileDatabase(context).also { instance = it }
     }
 
-    fun digest(text: String): String = MessageDigest.getInstance("SHA-256")
-      .digest(text.toByteArray(Charsets.UTF_8))
-      .joinToString("") { "%02x".format(it.toInt() and 255) }
+    fun digest(text: String): String {
+      val bytes = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
+      val chars = CharArray(bytes.size * 2)
+      for (i in bytes.indices) {
+        val b = bytes[i].toInt() and 255
+        chars[i * 2] = HEX[b ushr 4]
+        chars[i * 2 + 1] = HEX[b and 15]
+      }
+      return String(chars)
+    }
 
     private val DDL = listOf(
       """CREATE TABLE registry_snapshots(

@@ -28,16 +28,36 @@ class MobileIndexService(private val engine: EngineManager, private val store: M
       val db = store.writableDatabase
       db.beginTransaction()
       try {
-        for (file in sessions.first) {
+        // Read the previous index in one cursor pass. Unchanged files must
+        // cause ZERO database writes; this matters for 10k+ session folders.
+        val staleSessions = HashMap<String, Pair<Long, Long>>()
+        db.rawQuery("SELECT relative_path, modified_at, byte_size FROM session_index", null).use { c ->
+          while (c.moveToNext()) staleSessions[c.getString(0)] = c.getLong(1) to c.getLong(2)
+        }
+        for ((path, file) in sessions.first) {
+          val modified = file.lastModified()
+          val bytes = file.length()
+          val previous = staleSessions.remove(path)
+          if (previous?.first == modified && previous.second == bytes) continue
           val v = ContentValues().apply {
-            put("relative_path", file.first)
-            put("modified_at", file.second.lastModified())
-            put("byte_size", file.second.length())
+            put("relative_path", path)
+            put("modified_at", modified)
+            put("byte_size", bytes)
             put("observed_at", now)
           }
           db.insertWithOnConflict("session_index", null, v, SQLiteDatabase.CONFLICT_REPLACE)
         }
-        if (sessions.second) db.delete("session_index", "observed_at != ?", arrayOf(now.toString()))
+        if (sessions.second && staleSessions.isNotEmpty()) {
+          // SQLite host-variable limits differ across Android versions.
+          // Delete stale entries in bounded batches instead of one giant IN.
+          val keys = staleSessions.keys.iterator()
+          while (keys.hasNext()) {
+            val batch = ArrayList<String>(400)
+            while (keys.hasNext() && batch.size < 400) batch += keys.next()
+            val slots = List(batch.size) { "?" }.joinToString(",")
+            db.delete("session_index", "relative_path IN ($slots)", batch.toTypedArray())
+          }
+        }
         for (entry in extensions.first) {
           db.insertWithOnConflict("extension_inventory", null, ContentValues().apply {
             put("kind", entry.kind)
