@@ -52,6 +52,7 @@ jobs:
           node scripts/test-code-engine-v3.mjs
           node scripts/test-code-engine-v4.mjs
           node scripts/test-code-engine-ast.mjs
+          node scripts/test-code-engine-workflow.mjs
           node --check app/src/main/assets/codex-relay-tdz-compat.mjs
           node app/src/main/assets/codex-relay-tdz-compat.mjs --self-test
           node --check app/src/main/assets/codex-subagent-compat.mjs

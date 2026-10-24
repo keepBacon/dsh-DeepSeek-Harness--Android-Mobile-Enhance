@@ -4,6 +4,7 @@ import { codeTools, codeCall } from './dsh-code-engine.mjs'
 import { codeV3Tools, codeV3Call } from './dsh-code-engine-v3.mjs'
 import { codeV4Tools, codeV4Call } from './dsh-code-engine-v4.mjs'
 import { codeAstTools, codeAstCall } from './dsh-code-engine-ast.mjs'
+import { codeWorkflowTools, codeWorkflowCall } from './dsh-code-engine-workflow.mjs'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
@@ -24,7 +25,7 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
-const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,
+const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -287,6 +288,7 @@ async function call(name,a={}){
  if(codeV3Tools.some(x=>x.name===name))return codeV3Call(name,a)
  if(codeV4Tools.some(x=>x.name===name))return codeV4Call(name,a)
  if(codeAstTools.some(x=>x.name===name))return codeAstCall(name,a)
+ if(codeWorkflowTools.some(x=>x.name===name))return codeWorkflowCall(name,a)
 
  switch(name){
   case 'android_shell_health': {
