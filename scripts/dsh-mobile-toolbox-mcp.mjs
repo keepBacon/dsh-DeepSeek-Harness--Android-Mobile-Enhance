@@ -679,7 +679,7 @@ async function selfTest(){
    if(writeResult.isError)throw new Error('MCP dispatch fs_write self-test failed: '+writeResult.content[0].text)
    const readResult=await dispatchToolCall({name:'fs_read',arguments:{path:sample}})
    if(readResult.isError||readResult.structuredContent?.content!==payload)throw new Error('MCP dispatch argument round-trip self-test failed')
-   for(const requiredName of ['code_context','code_search','code_patch','code_multi_edit','code_symbols','code_references','code_apply_patch','code_diff','code_rename_identifier','code_check','code_test']){
+   for(const requiredName of ['code_context','code_search','code_patch','code_multi_edit','code_symbols','code_references','code_apply_patch','code_diff','code_rename_identifier','code_check','code_test','code_ast_symbols','code_ast_references','code_ast_rename','code_ast_prepare_rename','code_ast_diagnostics','code_ast_project_symbols','code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact']){
     if(!tools.some(tool=>tool.name===requiredName))throw new Error('Code Engine tool missing from registry: '+requiredName)
    }
    const codeContext=await dispatchToolCall({name:'code_context',arguments:{path:sample}})
