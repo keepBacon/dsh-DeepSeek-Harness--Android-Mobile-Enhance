@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { codeTools, codeCall } from './dsh-code-engine.mjs'
 
-assert.equal(codeTools.length,4)
+assert.equal(codeTools.length,8)
 assert.equal(new Set(codeTools.map(x=>x.name)).size,4)
 const root=await mkdtemp(join(tmpdir(),'dsh-code2-'))
 const one=join(root,'one.js'),two=join(root,'two.js')
@@ -19,6 +19,10 @@ try{
  assert.match(ctx.content,/1 \| const one = 1/)
  const sr=await codeCall('code_search',{path:root,query:'const one'})
  assert.ok(sr.matches.some(x=>x.path.endsWith('one.js')))
+ const decl=await codeCall('code_symbols',{path:root})
+ assert.ok(decl.symbols.some(x=>x.name==='one'))
+ const refs=await codeCall('code_references',{path:root,symbol:'one'})
+ assert.ok(refs.matches.some(x=>x.path.endsWith('one.js')))
  const dry=await codeCall('code_patch',{path:one,oldText:'one = 1',newText:'one = 3',dryRun:true})
  assert.equal(dry.dryRun,true)
  assert.equal(await readFile(one,'utf8'),'const one = 1;\n')
@@ -42,5 +46,17 @@ try{
    {path:two,oldText:'two = 5',newText:'two = 6',expectedSha256:'f'.repeat(64)},
  ]}),/stale source hash/)
  assert.equal(await readFile(one,'utf8'),'const one = 5;\n')
+ // A generated unified diff must round-trip through the same engine.
+ const proposal='const one = 7;\n'
+ const unified=await codeCall('code_diff',{path:one,after:proposal})
+ assert.equal(unified.changed,true)
+ assert.ok(unified.patch.includes('@@ -1,'))
+ const simulate=await codeCall('code_apply_patch',{root,patch:unified.patch,dryRun:true})
+ assert.equal(simulate.dryRun,true)
+ assert.equal(await readFile(one,'utf8'),'const one = 5;\n')
+ await codeCall('code_apply_patch',{root,patch:unified.patch})
+ assert.equal(await readFile(one,'utf8'),proposal)
+ await assert.rejects(codeCall('code_apply_patch',{root,patch:unified.patch}),/hunk context mismatch/)
+ await assert.rejects(codeCall('code_apply_patch',{root,patch:unified.patch.replaceAll('one.js','../escape.js')}),/invalid patch path/)
  console.log('[DSH] Code Engine 2.0 editing contract: OK')
 }finally{await rm(root,{recursive:true,force:true})}
