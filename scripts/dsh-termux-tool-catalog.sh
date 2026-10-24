@@ -10,7 +10,7 @@ DSH_TERMUX_ROOT_TOOL_PACKAGES_DEFAULT="frida frida-python btop tcpdump"
 DSH_TERMUX_RUNTIME_PACKAGES_DEFAULT="openjdk-21 perl"
 DSH_TERMUX_RUNTIME_ENTRYPOINTS=("java" "jar" "jarsigner" "keytool" "javac" "perl")
 DSH_TERMUX_JAVA_TOOL_COMMANDS=("apksigner" "apktool" "jadx")
-DSH_NPM_DEV_TOOL_PACKAGES_DEFAULT="prettier@3.9.9 eslint@10.10.0"
+DSH_NPM_DEV_TOOL_PACKAGES_DEFAULT="prettier@3.9.9 eslint@10.10.0 typescript@5.9.3"
 DSH_PYTHON_DEV_TOOL_PACKAGES_DEFAULT="cmakelang==0.6.13"
 
 DSH_TERMUX_REQUIRED_TOOL_SPECS=(

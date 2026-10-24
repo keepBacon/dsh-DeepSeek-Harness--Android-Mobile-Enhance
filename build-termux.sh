@@ -1570,10 +1570,13 @@ install_mobile_mcp_toolbox() {
   cp "$ROOT/scripts/dsh-code-engine.mjs" "$(dirname "$dest")/dsh-code-engine.mjs"
   cp "$ROOT/scripts/dsh-code-engine-v3.mjs" "$(dirname "$dest")/dsh-code-engine-v3.mjs"
   cp "$ROOT/scripts/dsh-code-engine-v4.mjs" "$(dirname "$dest")/dsh-code-engine-v4.mjs"
+  cp "$ROOT/scripts/dsh-code-engine-ast.mjs" "$(dirname "$dest")/dsh-code-engine-ast.mjs"
   chmod 0755 "$dest"
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-engine.mjs" >/dev/null
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-engine-v3.mjs" >/dev/null
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-engine-v4.mjs" >/dev/null
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-engine-ast.mjs" >/dev/null
+  [ -f "$stage/usr/lib/dsh-dev-tools/node_modules/typescript/lib/typescript.js" ] || { echo "[DSH] TypeScript AST compiler missing in bundled developer tools" >&2; exit 8; }
   "$stage/usr/bin/node" --check "$dest" >/dev/null
   env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Mobile MCP toolbox self-test failed.'; exit 8; }
   echo '[DSH] Mobile MCP toolbox: OK'
@@ -1607,6 +1610,7 @@ validate_dsh_core_plugin_tree() {
   [ -f "$stage/usr/libexec/dsh-mobile/dsh-code-engine.mjs" ] || { echo "[DSH] Missing Code Engine 2.0 module"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/dsh-code-engine-v3.mjs" ] || { echo "[DSH] Missing Code Engine V3 module"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/dsh-code-engine-v4.mjs" ] || { echo "[DSH] Missing Code Engine V4 module"; exit 8; }
+  [ -f "$stage/usr/libexec/dsh-mobile/dsh-code-engine-ast.mjs" ] || { echo "[DSH] Missing Code Engine AST module"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs" ] || { echo "[DSH] Missing basic MCP toolbox"; exit 8; }
 
   rm -rf "$smoke_home"
