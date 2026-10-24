@@ -5,7 +5,7 @@ import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {codeAstTools,codeAstCall} from './dsh-code-engine-ast.mjs'
 
-assert.deepEqual(codeAstTools.map(x=>x.name),['code_ast_symbols','code_ast_references','code_ast_rename'])
+assert.deepEqual(codeAstTools.map(x=>x.name),['code_ast_symbols','code_ast_references','code_ast_rename','code_ast_prepare_rename','code_ast_diagnostics','code_ast_project_symbols'])
 const root=await mkdtemp(join(tmpdir(),'dsh-code-ast-'))
 try{
  await mkdir(join(root,'lib'))
