@@ -61,7 +61,7 @@ function verificationArgs(args,changed){
 function compactVerification(value){return {ok:value.ok,failedPhase:value.failedPhase,results:value.results,nextAction:value.nextAction}}
 async function recoverBeforeEdit(paths){
  const recovered=await recoverTransactions({maxTransactions:100})
- const targets=new Set(paths.map(resolve))
+ const targets=new Set(paths.map(path=>resolve(path)))
  const unresolved=recovered.results.filter(item=>
   ['conflict','active-skipped'].includes(item.status)&&item.files?.some(file=>targets.has(resolve(file))))
  if(unresolved.length)throw Object.assign(Error('unresolved edit transaction overlaps target files: '+unresolved.map(x=>x.id).join(', ')),{code:'DSH_RECOVERY_CONFLICT',transactions:unresolved})
