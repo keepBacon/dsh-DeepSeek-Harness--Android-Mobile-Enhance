@@ -165,14 +165,14 @@ must "$MA" 'appSettings.innerHTML = upstreamSettingsIcon();'
 forbid "$BG" 'snapshot-x86_64.tar.xz'
 must "$BG" 'snapshot-arm64.tar.xz'
 
-# V0.1.1 identity and settings repository entry.
-must "$BG" 'versionCode = 36'
-must "$BG" 'versionName = "0.1.1"'
-must "$MA" 'DSH-Android/0.1.1'
-must "$BT" '"app": "0.1.1"'
-must "$BT" "printf 'app=0.1.1\\ndsh=%s\\nsha256=%s\\n'"
+# V0.1.2 identity and settings repository entry.
+must "$BG" 'versionCode = 37'
+must "$BG" 'versionName = "0.1.2"'
+must "$MA" 'DSH-Android/0.1.2'
+must "$BT" '"app": "0.1.2"'
+must "$BT" "printf 'app=0.1.2\\ndsh=%s\\nsha256=%s\\n'"
 must "$MA" 'GITHUB_REPOSITORY_URL = "https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobile-Enhance"'
-must "$MA" 'text = "版本  V0.1.1"'
+must "$MA" 'text = "版本  V0.1.2 · 安全模式 / 3D 修复版"'
 must "$MA" 'text = "GitHub 仓库\n$GITHUB_REPOSITORY_URL"'
 must "$MA" 'setOnClickListener { openExternalUrl(GITHUB_REPOSITORY_URL) }'
 SKM="$ROOT/app/src/main/java/com/dshmobile/shell/SkillManager.kt"
