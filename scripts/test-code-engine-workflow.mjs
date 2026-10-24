@@ -9,6 +9,8 @@ assert.deepEqual(codeWorkflowTools.map(x=>x.name),[
  'code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact'
 ])
 const root=await mkdtemp(join(tmpdir(),'dsh-code-workflow-'))
+const journal=join(root,'journal');process.env.DSH_CODE_ENGINE_STATE_DIR=journal
+await mkdir(journal,{recursive:true})
 const js=join(root,'main.js'),ts=join(root,'module.ts'),extra=join(root,'extra.js')
 const replace=(path,oldText,newText)=>({path,oldText,newText})
 const read=path=>readFile(path,'utf8')
