@@ -2,7 +2,7 @@
 // Uses the pinned TypeScript compiler shipped with DSH developer tools.
 // No network calls or separate MCP plugin; edits reuse the host transaction.
 import { createRequire } from 'node:module'
-import { join, resolve, dirname, relative, sep } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
 import { readFile, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { TextDecoder } from 'node:util'
@@ -17,10 +17,17 @@ export const codeAstTools = [
  {name:'code_ast_symbols',description:'AST declaration outline for JS/TS using TypeScript parser. Returns name, kind, line, column and symbol start offsets.',inputSchema:obj({file:field,maxResults:{type:'integer',minimum:1,maximum:500},includeNested:{type:'boolean'}},['file'])},
  {name:'code_ast_references',description:'Find same-symbol references using TypeScript language service, not text matches. Supply projectFiles for cross-file analysis.',inputSchema:obj({...location,projectFiles:projects,maxResults:{type:'integer',minimum:1,maximum:500}},['file','line','column'])},
  {name:'code_ast_rename',description:'Scope-aware JS/TS rename via TypeScript Language Service. Uses Code Engine multi-file transactional edits with dry run and stale hash detection.',inputSchema:obj({...location,newName:field,projectFiles:projects,dryRun:{type:'boolean'},maxFiles:{type:'integer',minimum:1,maximum:128}},['file','line','column','newName'])},
+ {name:'code_ast_prepare_rename',description:'Check whether a selected JS/TS symbol can be renamed and report its actual semantic reference locations without editing.',inputSchema:obj({...location,projectFiles:projects,maxResults:{type:'integer',minimum:1,maximum:500}},['file','line','column'])},
+ {name:'code_ast_diagnostics',description:'Collect TypeScript parser and semantic diagnostics for a selected JS/TS source using a project language service.',inputSchema:obj({file:field,projectFiles:projects,semantic:{type:'boolean'},maxResults:{type:'integer',minimum:1,maximum:200}},['file'])},
+ {name:'code_ast_project_symbols',description:'Indexed AST declaration search across specified projectFiles (JS/TS), with locations and name filtering.',inputSchema:obj({file:field,projectFiles:projects,query:field,maxResults:{type:'integer',minimum:1,maximum:500}},['file'])},
 ]
 const sha = x => createHash('sha256').update(x).digest('hex')
 const KEYWORDS=new Set('await break case catch class const continue debugger default delete do else enum export extends false finally for function if import in instanceof let new null return super switch this throw true try typeof var void while with yield implements interface package private protected public static'.split(' '))
-let compiler
+let compiler, documentRegistry
+const CACHE_FILE_LIMIT=32
+const CACHE_BYTES_LIMIT=24*1024*1024
+const sourceCache=new Map()
+let cacheBytes=0
 function typescript(){
  if(compiler)return compiler
  const prefix=process.env.TERMUX__PREFIX||process.env.PREFIX||''
@@ -42,10 +49,25 @@ async function readSource(path){
  if(!isCode(file))throw Error('AST supports JS/TS source files only: '+file)
  const meta=await stat(file)
  if(!meta.isFile()||meta.size>16*1024*1024)throw Error('source is missing or larger than 16 MiB: '+file)
+ const cached=sourceCache.get(file)
+ if(cached && cached.size===meta.size && cached.mtimeMs===meta.mtimeMs && cached.ctimeMs===meta.ctimeMs && cached.ino===meta.ino){
+  sourceCache.delete(file)
+  sourceCache.set(file,cached)
+  return cached
+ }
  const bytes=await readFile(file)
  const content=new TextDecoder('utf-8',{fatal:true}).decode(bytes)
  if(content.includes('\u0000'))throw Error('binary source is unsupported: '+file)
- return {file,content,hash:sha(content)}
+ const result={file,content,hash:sha(content),size:meta.size,mtimeMs:meta.mtimeMs,ctimeMs:meta.ctimeMs,ino:meta.ino}
+ if(cached){sourceCache.delete(file);cacheBytes-=cached.size}
+ if(result.size<=CACHE_BYTES_LIMIT/2){
+  sourceCache.set(file,result);cacheBytes+=result.size
+  while(sourceCache.size>CACHE_FILE_LIMIT || cacheBytes>CACHE_BYTES_LIMIT){
+   const oldest=sourceCache.keys().next().value
+   const removed=sourceCache.get(oldest);sourceCache.delete(oldest);cacheBytes-=removed.size
+  }
+ }
+ return result
 }
 function sourceKind(ts,file){
  if(/\.tsx$/i.test(file))return ts.ScriptKind.TSX
@@ -106,7 +128,9 @@ async function languageService(args){
   getScriptFileNames:()=>[...sources.keys()],
   getScriptVersion:file=>sources.get(resolve(file))?.hash||'0',
   getScriptSnapshot:file=>{
-   const source=sources.get(resolve(file))?.content??ts.sys.readFile(file)
+   const item=sources.get(resolve(file))
+   if(item)return item.snapshot ||= ts.ScriptSnapshot.fromString(item.content)
+   const source=ts.sys.readFile(file)
    return source===undefined?undefined:ts.ScriptSnapshot.fromString(source)
   },
   getCurrentDirectory:()=>dirname(resolve(args.file)),
@@ -120,7 +144,8 @@ async function languageService(args){
   useCaseSensitiveFileNames:()=>ts.sys.useCaseSensitiveFileNames,
   getNewLine:()=>ts.sys.newLine,
  }
- const service=ts.createLanguageService(host,ts.createDocumentRegistry())
+ documentRegistry ||= ts.createDocumentRegistry()
+ const service=ts.createLanguageService(host,documentRegistry)
  const file=resolve(args.file),source=sources.get(file)
  const parsed=ts.createSourceFile(file,source.content,ts.ScriptTarget.Latest,true,sourceKind(ts,file))
  const position=offsetFromLocation(parsed,args.line,args.column)
@@ -147,6 +172,61 @@ async function references(args){
   const limit=Math.min(500,Math.max(1,args.maxResults||200))
   return {strategy:'typescript-language-service',path:ls.file,locations:summarizeReferences(ls,places,limit),total:places.length,truncated:places.length>limit}
  }finally{ls.service.dispose()}
+}
+async function prepareRename(args){
+ const ls=await languageService(args)
+ try{
+  const info=ls.service.getRenameInfo(ls.file,ls.position,{allowRenameOfImportPath:false})
+  if(!info.canRename)return {canRename:false,reason:info.localizedErrorMessage||'Rename is unavailable',file:ls.file}
+  const locations=ls.service.findRenameLocations(ls.file,ls.position,false,false,true)||[]
+  const max=Math.min(500,Math.max(1,args.maxResults||100))
+  return {canRename:true,name:info.displayName,kind:info.kind,file:ls.file,referenceCount:locations.length,
+   references:summarizeReferences(ls,locations,max),truncated:locations.length>max,strategy:'typescript-language-service'}
+ }finally{ls.service.dispose()}
+}
+async function diagnostics(args){
+ const ls=await languageService({...args,line:1,column:1})
+ try{
+  const ts=ls.ts,limit=Math.min(200,Math.max(1,args.maxResults||100))
+  const raw=ls.service.getSyntacticDiagnostics(ls.file)
+  if(args.semantic!==false)raw.push(...ls.service.getSemanticDiagnostics(ls.file))
+  const items=raw.slice(0,limit).map(x=>{
+   const file=x.file,position=file?.getLineAndCharacterOfPosition(x.start||0)
+   return {code:x.code,category:ts.DiagnosticCategory[x.category]||String(x.category),
+    line:position?.line===undefined?null:position.line+1,
+    column:position?.character===undefined?null:position.character+1,
+    length:x.length||0,message:ts.flattenDiagnosticMessageText(x.messageText,'\n')}
+  })
+  return {file:ls.file,strategy:'typescript-language-service',ok:!raw.some(x=>x.category===ts.DiagnosticCategory.Error),
+   diagnostics:items,total:raw.length,truncated:raw.length>limit}
+ }finally{ls.service.dispose()}
+}
+async function projectSymbols(args){
+ const ts=typescript(),selected=[resolve(args.file),...(args.projectFiles||[]).map(file=>resolve(file))]
+ if(selected.length>129)throw Error('projectFiles exceeds 128')
+ const query=args.query==null?'':String(args.query).toLowerCase(),limit=Math.min(500,Math.max(1,args.maxResults||200))
+ const result=[]
+ for(const file of new Set(selected)){
+  const input=await readSource(file)
+  const tree=ts.createSourceFile(file,input.content,ts.ScriptTarget.Latest,true,sourceKind(ts,file))
+  function visit(node){
+   if(result.length>=limit)return
+   const declaration=ts.isFunctionDeclaration(node)||ts.isClassDeclaration(node)||ts.isInterfaceDeclaration(node)||
+    ts.isTypeAliasDeclaration(node)||ts.isEnumDeclaration(node)||ts.isVariableDeclaration(node)||
+    ts.isMethodDeclaration(node)||ts.isPropertyDeclaration(node)
+   if(declaration && node.name){
+    const name=node.name.getText(tree)
+    if(!query||name.toLowerCase().includes(query)){
+     const location=spanLocation(ts,tree,node.name)
+     result.push({file,name,kind:ts.SyntaxKind[node.kind],...location})
+    }
+   }
+   ts.forEachChild(node,visit)
+  }
+  ts.forEachChild(tree,visit)
+  if(result.length>=limit)break
+ }
+ return {strategy:'typescript-ast',symbols:result,truncated:result.length>=limit,filesScanned:selected.length}
 }
 async function rename(args){
  if(KEYWORDS.has(args.newName)||!/^[A-Za-z_$][\w$]*$/.test(args.newName) || !typescript().isIdentifierText(args.newName,typescript().ScriptTarget.Latest))throw Error('newName must be a valid non-keyword JS/TS identifier')
@@ -191,6 +271,9 @@ export async function codeAstCall(name,args={}){
   case 'code_ast_symbols':return symbols(args)
   case 'code_ast_references':return references(args)
   case 'code_ast_rename':return rename(args)
+  case 'code_ast_prepare_rename':return prepareRename(args)
+  case 'code_ast_diagnostics':return diagnostics(args)
+  case 'code_ast_project_symbols':return projectSymbols(args)
   default:throw Error('unknown AST code tool: '+name)
  }
 }
