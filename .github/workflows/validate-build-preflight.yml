@@ -25,6 +25,11 @@ jobs:
             bash -n "$file"
           done < <(find . -maxdepth 2 -type f -name '*.sh' -print0)
 
+      - name: Install Code Engine test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep
+
       - name: JavaScript syntax
         shell: bash
         run: |
