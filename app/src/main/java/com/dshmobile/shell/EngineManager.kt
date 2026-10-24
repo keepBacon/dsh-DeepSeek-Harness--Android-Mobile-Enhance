@@ -413,6 +413,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       }
     }
     declaredTools("toolbox-mcp.mjs", "mobile_tools", false)
+    // Code Engine definitions live in a sibling runtime module.
+    declaredTools("dsh-code-engine.mjs", "mobile_tools", false)
     declaredTools("basic-toolbox-mcp.mjs", "basic_tools", true)
 
     // Reuse the native runtime inventory (wrappers + actual binaries). The
@@ -1123,6 +1125,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "bin/bash") to "usr/bin/bash",
       File(rootUsr, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(rootUsr, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",
       File(rootUsr, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
       File(rootUsr, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
       File(rootUsr, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
@@ -2898,6 +2901,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "bin/bash") to "usr/bin/bash",
       File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",
       File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
       File(usrDir, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
       File(usrDir, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",

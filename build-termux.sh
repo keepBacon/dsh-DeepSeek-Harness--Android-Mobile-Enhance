@@ -1567,7 +1567,9 @@ install_mobile_mcp_toolbox() {
   [ -f "$MOBILE_MCP_TOOLBOX" ] || { echo "[DSH] Missing mobile MCP toolbox source"; exit 8; }
   mkdir -p "$(dirname "$dest")"
   cp "$MOBILE_MCP_TOOLBOX" "$dest"
+  cp "$ROOT/scripts/dsh-code-engine.mjs" "$(dirname "$dest")/dsh-code-engine.mjs"
   chmod 0755 "$dest"
+  "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-engine.mjs" >/dev/null
   "$stage/usr/bin/node" --check "$dest" >/dev/null
   env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Mobile MCP toolbox self-test failed.'; exit 8; }
   echo '[DSH] Mobile MCP toolbox: OK'
@@ -1598,6 +1600,7 @@ validate_dsh_core_plugin_tree() {
   [ -f "$smoke_validator" ] || { echo "[DSH] Missing Web runtime smoke validator: $smoke_validator"; exit 8; }
   [ -f "$desktop_parity_validator" ] || { echo "[DSH] Missing Desktop Web parity validator: $desktop_parity_validator"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/toolbox-mcp.mjs" ] || { echo "[DSH] Missing mobile MCP toolbox"; exit 8; }
+  [ -f "$stage/usr/libexec/dsh-mobile/dsh-code-engine.mjs" ] || { echo "[DSH] Missing Code Engine 2.0 module"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs" ] || { echo "[DSH] Missing basic MCP toolbox"; exit 8; }
 
   rm -rf "$smoke_home"
