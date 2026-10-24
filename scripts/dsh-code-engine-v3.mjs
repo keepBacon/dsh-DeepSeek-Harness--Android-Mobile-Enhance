@@ -40,7 +40,7 @@ function lexicalRename(text,from,to){
 }
 async function rename(a){
  if(!Array.isArray(a.paths)||a.paths.length<1||a.paths.length>32)throw Error('paths must contain 1..32 source files')
- if(!ID.test(a.from)||!ID.test(a.to)||reserved.has(a.to)||a.from===a.to)throw Error('invalid identifier rename')
+ if(!ID.test(a.from)||!ID.test(a.to)||reserved.has(a.from)||reserved.has(a.to)||a.from===a.to)throw Error('invalid identifier rename')
  const edits=[],files=[]
  for(const path of new Set(a.paths.map(p=>resolve(p)))){
   if(!/\.(js|jsx|mjs|cjs|ts|tsx)$/i.test(path))throw Error('only JS/TS sources supported: '+path)
@@ -75,7 +75,7 @@ export async function codeV3Call(name,a={}){
   for(const source of a.paths){
    const path=resolve(source),ts=/\.tsx?$/i.test(path),js=/\.(js|mjs|cjs)$/i.test(path)
    if(!ts&&!js){results.push({path,ok:false,error:'unsupported source extension'});continue}
-   results.push({path,...await run(ts?(a.typescriptCommand||'tsc'):process.execPath,ts?['--pretty','false','--noEmit',path]:['--check',path],undefined,a.timeoutMs||15000,65536)})
+   results.push({path,...await run(ts?(a.typescriptCommand||'tsc'):process.execPath,ts?['--pretty','false','--noEmit',path]:['--check',path],undefined,Math.min(120000,Math.max(100,a.timeoutMs||15000)),65536)})
   }
   return {ok:results.every(x=>x.ok),results}
  }
