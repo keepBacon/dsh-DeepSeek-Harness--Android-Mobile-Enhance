@@ -658,7 +658,7 @@ class MainActivity : ComponentActivity() {
       "Mozilla/5.0 (Linux; Android ${Build.VERSION.RELEASE}; Mobile) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/$chromeVersion Mobile Safari/537.36"
     }
-    return "$base DSH-Android/0.1.1"
+    return "$base DSH-Android/0.1.2"
   }
 
   /** Apply persisted WebView viewport/UA policy before the next navigation. */
