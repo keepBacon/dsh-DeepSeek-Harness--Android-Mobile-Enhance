@@ -92,7 +92,7 @@ async function symbols(args){
  return {engine:'DSH Code Engine 2.0',strategy:'typescript-ast',file:file.file,sha256:file.hash,symbols:result,truncated:result.length>=limit,parseDiagnostics:source.parseDiagnostics.map(d=>({start:d.start,message:ts.flattenDiagnosticMessageText(d.messageText,'\n')})).slice(0,25)}
 }
 async function languageService(args){
- const ts=typescript(),selected=[resolve(args.file),...(args.projectFiles||[]).map(resolve)]
+ const ts=typescript(),selected=[resolve(args.file),...(args.projectFiles||[]).map(file=>resolve(file))]
  if(selected.length>129)throw Error('projectFiles exceeds 128')
  const sources=new Map()
  for(const file of new Set(selected)){const source=await readSource(file);sources.set(file,source)}
