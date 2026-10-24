@@ -404,7 +404,7 @@ async function call(name,a={}){
    const d=await checkedDir(a.path||'.'),show=bool(a.showHidden,false),limit=int(a.maxEntries,500,1,2000),raw=await readdir(d.path,{withFileTypes:true});const filtered=raw.filter(e=>show||!e.name.startsWith('.')).sort((x,y)=>Number(y.isDirectory())-Number(x.isDirectory())||x.name.localeCompare(y.name));const slice=filtered.slice(0,limit);return{path:d.path,entries:slice.map(e=>({name:e.name,path:resolve(d.path,e.name),type:e.isDirectory()?'directory':e.isFile()?'file':e.isSymbolicLink()?'symlink':'other'})),truncated:filtered.length>slice.length,totalEntries:filtered.length}
   }
   case 'fs_search': {
-   const query=text(a.query,'query'),d=await checkedDir(a.path||'.'),limit=int(a.maxResults,80,1,200),context=int(a.contextLines,2,0,5),args=['--json','--line-number','--column','--color','never','--max-columns','1000','--max-filesize','16M'];if(!bool(a.regex,false))args.push('--fixed-strings');if(!bool(a.caseSensitive,true))args.push('--ignore-case');if(bool(a.showHidden,false))args.push('--hidden');if(a.glob!=null)args.push('--glob',text(a.glob,'glob',4096));args.push('--',query,d.path);const r=await runProcess('rg',args,{timeoutMs:15000,maxOutputBytes:MAX_SEARCH_OUTPUT});if(r.exitCode!==0&&r.exitCode!==1&&!r.truncated)throw new Error('rg failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));const matches=[],cache=new Map();for(const line of r.stdout.split(/\r?\n/)){if(!line)continue;let event;try{event=JSON.parse(line)}catch{continue}if(event.type!=='match')continue;const data=event.data,path=data.path?.text;if(!path)continue;const sub=data.submatches?.[0];const item={path,line:data.line_number,column:(sub?.start??0)+1,text:(data.lines?.text||'').replace(/\r?\n$/,'')};const c=await contextFor(path,item.line,context,cache);if(c)item.context=c;matches.push(item);if(matches.length>=limit)break}return{query,path:d.path,matches,truncated:r.truncated||matches.length>=limit,stderr:r.stderr.trim()||undefined}
+   const query=text(a.query,'query'),d=await checkedDir(a.path||'.'),limit=int(a.maxResults,80,1,200),context=int(a.contextLines,2,0,5),args=['--json','--line-number','--column','--color','never','--max-columns','1000','--max-filesize','16M'];if(!bool(a.regex,false))args.push('--fixed-strings');if(!bool(a.caseSensitive,true))args.push('--ignore-case');if(bool(a.showHidden,false))args.push('--hidden');if(a.glob!=null)args.push('--glob',text(a.glob,'glob',4096));args.push(query,d.path);const r=await runProcess('rg',args,{timeoutMs:15000,maxOutputBytes:MAX_SEARCH_OUTPUT});if(r.exitCode!==0&&r.exitCode!==1&&!r.truncated)throw new Error('rg failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT));const matches=[],cache=new Map();for(const line of r.stdout.split(/\r?\n/)){if(!line)continue;let event;try{event=JSON.parse(line)}catch{continue}if(event.type!=='match')continue;const data=event.data,path=data.path?.text;if(!path)continue;const sub=data.submatches?.[0];const item={path,line:data.line_number,column:(sub?.start??0)+1,text:(data.lines?.text||'').replace(/\r?\n$/,'')};const c=await contextFor(path,item.line,context,cache);if(c)item.context=c;matches.push(item);if(matches.length>=limit)break}return{query,path:d.path,matches,truncated:r.truncated||matches.length>=limit,stderr:r.stderr.trim()||undefined}
   }
   case 'fs_write': {const content=text(a.content,'content');return await atomicWrite(a.path,content,{overwrite:bool(a.overwrite,false),createParents:bool(a.createParents,false)})}
   case 'code_search': {
@@ -420,8 +420,8 @@ async function call(name,a={}){
   }
   case 'code_symbols': {
    const d=await checkedDir(a.path||'.'),glob=a.glob?text(a.glob,'glob',4096):'**/*.{js,jsx,mjs,cjs,ts,tsx,java,kt,py,rs,go,c,h,cpp,hpp,cs,swift,php,rb}'
-   const args=['--json','--line-number','--color','never','--max-columns','1000','--max-filesize','4M','--glob',glob,'--glob','!node_modules/**','--glob','!.git/**']
-   if(a.query!=null)args.push('--ignore-case','--',text(a.query,'query',4096),d.path)
+   const args=['--json','--line-number','--color','never','--max-columns','1000','--max-filesize','4M','--glob',glob,'--glob','!node_modules/**','--glob','!.git/**','--regexp']
+   if(a.query!=null)args.push('--ignore-case',text(a.query,'query',4096),d.path)
    else {args.push('--','\\b(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(?:function|class|interface|type|enum|struct|trait|def|fn|func|const|let|var|fun|object|record)\\s+[A-Za-z_$][\\w$]*',d.path)}
    const r=await runProcess('rg',args,{timeoutMs:15000,maxOutputBytes:MAX_SEARCH_OUTPUT}),limit=int(a.maxResults,200,1,500),symbols=[]
    if(r.exitCode!==0&&r.exitCode!==1&&!r.truncated)throw new Error('symbol search failed: '+(r.stderr||r.stdout).slice(0,MAX_OUTPUT))
@@ -443,8 +443,8 @@ async function call(name,a={}){
    for(let i=0;i<edits.length;i++){
     const e=edits[i],f=await readTextFile(e.path),oldText=text(e.oldText,'edits['+i+'].oldText'),newText=text(e.newText,'edits['+i+'].newText'),expected=int(e.expectedOccurrences,1,1,100)
     if(e.expectedSha256&&sha256(f.text).toLowerCase()!==String(e.expectedSha256).toLowerCase())throw new Error('stale edit rejected for '+f.path)
-    const found=countOccurrences(f.text,oldText);if(found!==expected)throw new Error('edit '+i+' ('+f.path+'): expected '+expected+' context match(es), found '+found)
     const current=plans.get(f.path)||{path:f.path,original:f.text,next:f.text,sha:sha256(f.text),edits:0}
+    const found=countOccurrences(current.next,oldText);if(found!==expected)throw new Error('edit '+i+' ('+f.path+'): expected '+expected+' context match(es), found '+found)
     current.next=current.next.split(oldText).join(newText);current.edits++;if(Buffer.byteLength(current.next)>MAX_READ_FILE)throw new Error('patched file exceeds 16 MiB: '+f.path);plans.set(f.path,current)
    }
    const files=[...plans.values()],summary=files.map(x=>({path:x.path,edits:x.edits,beforeSha256:x.sha,afterSha256:sha256(x.next),beforeBytes:Buffer.byteLength(x.original),afterBytes:Buffer.byteLength(x.next)}))
@@ -743,8 +743,8 @@ async function selfTest(){
    if(malformedResult.isError!==true)throw new Error('MCP dispatch argument validation self-test failed')
    const ctx=await call('code_context',{path:sample,startLine:1,endLine:2});if(!ctx.content.includes('alpha')||!ctx.sha256)throw new Error('code_context self-test failed')
   const symbols=await call('code_symbols',{path:root,glob:'*.js'});if(!Array.isArray(symbols.symbols))throw new Error('code_symbols self-test failed')
-  const dry=await call('code_patch',{path:sample,oldText:'gamma',newText:'delta',dryRun:true});if(!dry.dryRun||dry.afterSha256===dry.beforeSha256)throw new Error('code_patch dry-run self-test failed')
-  const multi=await call('code_multi_edit',{edits:[{path:sample,oldText:'gamma',newText:'delta'}],dryRun:true});if(!multi.dryRun||multi.files.length!==1)throw new Error('code_multi_edit dry-run self-test failed')
+  const dry=await call('code_patch',{path:sample,oldText:'beta',newText:'delta',dryRun:true});if(!dry.dryRun||dry.afterSha256===dry.beforeSha256)throw new Error('code_patch dry-run self-test failed')
+  const multi=await call('code_multi_edit',{edits:[{path:sample,oldText:'beta',newText:'delta'}],dryRun:true});if(!multi.dryRun||multi.files.length!==1)throw new Error('code_multi_edit dry-run self-test failed')
   const diff=await call('code_diff',{before:'alpha\\nbeta',after:'alpha\\ngamma'});if(!diff.diff.includes('-beta')||!diff.diff.includes('+gamma'))throw new Error('code_diff self-test failed')
   await call('fs_patch',{path:sample,oldText:'beta',newText:'gamma'})
   const search=await call('fs_search',{path:root,query:'gamma'});if(search.matches.length!==1)throw new Error('fs_search self-test failed')
