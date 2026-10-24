@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { readFile, writeFile, rename, unlink, stat } from 'node:fs/promises'
-import { dirname, basename, resolve } from 'node:path'
+import { dirname, basename, resolve, relative, isAbsolute, sep } from 'node:path'
 import { spawn } from 'node:child_process'
+import { TextDecoder } from 'node:util'
 
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
@@ -10,10 +11,14 @@ export const codeTools=[
  {name:'code_search',description:'Search a source tree with ripgrep and return structured path/line matches.',inputSchema:obj({query:str,path:str,regex:{type:'boolean'},maxResults:{type:'integer',minimum:1,maximum:200}},['query'])},
  {name:'code_patch',description:'Replace exact source context with a SHA-256 concurrency precondition and dry run.',inputSchema:obj({path:str,oldText:str,newText:str,expectedSha256:str,dryRun:{type:'boolean'}},['path','oldText','newText'])},
  {name:'code_multi_edit',description:'Validate and apply a set of source edits with staged files and rollback on failure.',inputSchema:obj({edits:{type:'array',minItems:1,maxItems:32,items:obj({path:str,oldText:str,newText:str,expectedSha256:str},['path','oldText','newText'])},dryRun:{type:'boolean'}},['edits'])},
+ {name:'code_symbols',description:'Find best-effort source declarations and symbol locations (regex-based, not a full AST).',inputSchema:obj({path:str,query:str,maxResults:{type:'integer',minimum:1,maximum:200}},[])},
+ {name:'code_references',description:'Find exact identifier references across source files with file, line and column.',inputSchema:obj({symbol:str,path:str,maxResults:{type:'integer',minimum:1,maximum:200}},['symbol'])},
+ {name:'code_apply_patch',description:'Apply standard multi-file unified diff hunks with exact context and dry-run support. Modifies existing files only.',inputSchema:obj({patch:str,root:str,dryRun:{type:'boolean'}},['patch'])},
+ {name:'code_diff',description:'Create a valid unified-diff patch for one existing source file from its current contents to proposed UTF-8 text.',inputSchema:obj({path:str,after:str,context:{type:'integer',minimum:0,maximum:10}},['path','after'])},
 ]
 const hash=s=>createHash('sha256').update(s).digest('hex')
 const string=(v,label)=>{if(typeof v!=='string')throw Error(label+' must be a string');return v}
-const read=async p=>{const path=resolve(string(p,'path'));const bytes=await readFile(path);if(bytes.length>16*1024*1024)throw Error('file exceeds 16 MiB');return {path,text:bytes.toString('utf8'),meta:await stat(path)}}
+const read=async p=>{const path=resolve(string(p,'path'));const bytes=await readFile(path);if(bytes.length>16*1024*1024)throw Error('file exceeds 16 MiB');const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);if(text.includes('\u0000'))throw Error('refusing to treat a binary file as UTF-8 code: '+path);return {path,text,meta:await stat(path)}}
 async function stageFile(item){
  const temp=resolve(dirname(item.path),'.'+basename(item.path)+'.code2-'+randomBytes(8).toString('hex'))
  await writeFile(temp,item.after,{flag:'wx',mode:item.meta.mode})
@@ -38,7 +43,9 @@ async function edits(list,dryRun){
   if(e.expectedSha256&&hash(row.original)!==e.expectedSha256.toLowerCase())throw Error('stale source hash: '+path)
   row.after=apply(row.after,oldText,newText,path)
  }
- const rows=[...planned.values()]
+ return commit([...planned.values()],dryRun)
+}
+async function commit(rows,dryRun){
  const summary=rows.map(x=>({path:x.path,beforeSha256:hash(x.original),afterSha256:hash(x.after),changed:x.after!==x.original}))
  if(dryRun)return {dryRun:true,files:summary}
  const staged=[],committed=[]
