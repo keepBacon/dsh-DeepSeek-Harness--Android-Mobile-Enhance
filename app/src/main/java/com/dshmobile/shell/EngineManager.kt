@@ -392,7 +392,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         Log.w(TAG, "Cannot read installed MCP tool declarations: $fileName", t)
         return
       }
-      if (!source.contains("const tools=[")) return
+      if (!source.contains("const tools=[") && !source.contains("const codeTools=[")) return
       val seen = HashSet<String>()
       for (match in toolPattern.findAll(source)) {
         val name = match.groupValues[1]
