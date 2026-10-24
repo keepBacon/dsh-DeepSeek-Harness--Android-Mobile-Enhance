@@ -19,6 +19,7 @@ export const codeAstTools = [
  {name:'code_ast_rename',description:'Scope-aware JS/TS rename via TypeScript Language Service. Uses Code Engine multi-file transactional edits with dry run and stale hash detection.',inputSchema:obj({...location,newName:field,projectFiles:projects,dryRun:{type:'boolean'},maxFiles:{type:'integer',minimum:1,maximum:128}},['file','line','column','newName'])},
 ]
 const sha = x => createHash('sha256').update(x).digest('hex')
+const KEYWORDS=new Set('await break case catch class const continue debugger default delete do else enum export extends false finally for function if import in instanceof let new null return super switch this throw true try typeof var void while with yield implements interface package private protected public static'.split(' '))
 let compiler
 function typescript(){
  if(compiler)return compiler
@@ -148,7 +149,7 @@ async function references(args){
  }finally{ls.service.dispose()}
 }
 async function rename(args){
- if(!/^[A-Za-z_$][\w$]*$/.test(args.newName) || !typescript().isIdentifierText(args.newName,typescript().ScriptTarget.Latest))throw Error('newName must be a valid non-keyword JS/TS identifier')
+ if(KEYWORDS.has(args.newName)||!/^[A-Za-z_$][\w$]*$/.test(args.newName) || !typescript().isIdentifierText(args.newName,typescript().ScriptTarget.Latest))throw Error('newName must be a valid non-keyword JS/TS identifier')
  const ls=await languageService(args)
  try{
   const info=ls.service.getRenameInfo(ls.file,ls.position,{allowRenameOfImportPath:false})
