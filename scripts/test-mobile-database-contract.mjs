@@ -12,6 +12,7 @@ const bridge=read('app/src/main/java/com/dshmobile/shell/AndroidBridge.kt');
 const activity=read('app/src/main/java/com/dshmobile/shell/MainActivity.kt');
 const monitor=read('app/src/main/assets/dsh-tool-call-monitor.js');
 const classifier=read('app/src/main/java/com/dshmobile/shell/database/ToolErrorClassifier.kt');
+const dispatcher=read('app/src/main/java/com/dshmobile/shell/database/ToolObservationDispatcher.kt');
 execFileSync(process.execPath,['--check',new URL('../app/src/main/assets/dsh-tool-call-monitor.js',import.meta.url).pathname]);
 for(const table of ['registry_snapshots','registry_entries','tool_observations','extension_inventory','session_index','audit_events']){
  assert.ok(db.includes('CREATE TABLE '+table),'missing database table '+table);
@@ -25,6 +26,9 @@ assert.match(db,/event_key=\? AND status='running'/);
 assert.match(db,/digest\(item\.sessionKey/);
 assert.match(db,/fun observeBatch\(batch: List<ToolObservation>\)/);
 assert.match(db,/batch\.size <= 128/);
+assert.match(dispatcher,/runCatching \{ onError\(error\) \}/);
+assert.match(dispatcher,/worker\.shutdown\(\)/);
+assert.match(dispatcher,/private const val BATCH_SIZE = 64/);
 assert.match(backup,/VACUUM INTO/);
 assert.match(backup,/SELECT sqlite_version\(\)/);
 assert.match(backup,/PRAGMA wal_checkpoint\(TRUNCATE\)/);
