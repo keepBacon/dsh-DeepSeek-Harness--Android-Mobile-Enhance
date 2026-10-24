@@ -392,7 +392,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         Log.w(TAG, "Cannot read installed MCP tool declarations: $fileName", t)
         return
       }
-      if (!source.contains("const tools=[") && !source.contains("const codeTools=[")) return
+      if (!source.contains("const tools=[") && !source.contains("const codeTools=[") && !source.contains("const codeV3Tools=[")) return
       val seen = HashSet<String>()
       for (match in toolPattern.findAll(source)) {
         val name = match.groupValues[1]
@@ -415,6 +415,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     declaredTools("toolbox-mcp.mjs", "mobile_tools", false)
     // Code Engine definitions live in a sibling runtime module.
     declaredTools("dsh-code-engine.mjs", "mobile_tools", false)
+    declaredTools("dsh-code-engine-v3.mjs", "mobile_tools", false)
     declaredTools("basic-toolbox-mcp.mjs", "basic_tools", true)
 
     // Reuse the native runtime inventory (wrappers + actual binaries). The
