@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { codeTools, codeCall } from './dsh-code-engine.mjs'
 
 assert.equal(codeTools.length,8)
-assert.equal(new Set(codeTools.map(x=>x.name)).size,4)
+assert.equal(new Set(codeTools.map(x=>x.name)).size,8)
 const root=await mkdtemp(join(tmpdir(),'dsh-code2-'))
 const one=join(root,'one.js'),two=join(root,'two.js')
 const sha=s=>createHash('sha256').update(s).digest('hex')
