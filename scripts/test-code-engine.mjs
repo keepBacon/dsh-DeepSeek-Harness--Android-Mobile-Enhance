@@ -58,5 +58,14 @@ try{
  assert.equal(await readFile(one,'utf8'),proposal)
  await assert.rejects(codeCall('code_apply_patch',{root,patch:unified.patch}),/hunk context mismatch/)
  await assert.rejects(codeCall('code_apply_patch',{root,patch:unified.patch.replaceAll('one.js','../escape.js')}),/invalid patch path/)
+ // Test multiple consecutive ---/+++ headers in a single unified patch.
+ const another=await codeCall('code_diff',{path:two,after:'const two = 8;\n'})
+ const updatedOne=await codeCall('code_diff',{path:one,after:'const one = 9;\n'})
+ const combined=updatedOne.patch+another.patch
+ const multiDry=await codeCall('code_apply_patch',{root,patch:combined,dryRun:true})
+ assert.equal(multiDry.files.length,2)
+ await codeCall('code_apply_patch',{root,patch:combined})
+ assert.equal(await readFile(one,'utf8'),proposal)
+ assert.equal(await readFile(two,'utf8'),'const two = 8;\n')
  console.log('[DSH] Code Engine 2.0 editing contract: OK')
 }finally{await rm(root,{recursive:true,force:true})}
