@@ -141,7 +141,7 @@ async function recoverOne(dir,{dryRun=false}={}){
   return {id:base,status:'orphan-incomplete',error:String(error.message||error)}
  }
  const live=pidAlive(manifest.pid)
- if(live&&manifest.phase!=='rollback_pending')return summary(manifest,'active-skipped',{ownerPid:manifest.pid})
+ if(live)return summary(manifest,'active-skipped',{ownerPid:manifest.pid})
  if(manifest.phase==='verified'){
   if(!dryRun)await cleanup(dir)
   return summary(manifest,dryRun?'verified-cleanup-pending':'verified-committed-cleaned')
