@@ -83,10 +83,86 @@ async function search(a){
  }
  return {matches,truncated:result.truncated||matches.length>=limit,query:pattern}
 }
+
+async function symbols(a){
+ const decl='\\b(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(function|class|interface|type|enum|struct|trait|def|fn|func|const|let|var|fun|object|record)\\s+([A-Za-z_$][\\w$]*)'
+ const rx=new RegExp(decl)
+ const result=await search({path:a.path||'.',query:a.query||decl,regex:!a.query,maxResults:a.maxResults||100})
+ return {...result,strategy:'declaration-pattern',symbols:result.matches.map(m=>{const x=rx.exec(m.text||'');return {path:m.path,line:m.line,kind:x?.[1]||'match',name:x?.[2]||null,signature:(m.text||'').trim()}})}
+}
+const codeLines=value=>{const end=value.endsWith('\n'),lines=value.split('\n');if(end)lines.pop();if(!value)lines.length=0;return {lines,end}}
+function makeDiff(before,after,file){
+ if(before===after)return {changed:false,patch:''}
+ const a=codeLines(before),b=codeLines(after)
+ const lines=['--- a/'+file,'+++ b/'+file,'@@ -'+(a.lines.length?1:0)+','+a.lines.length+' +'+(b.lines.length?1:0)+','+b.lines.length+' @@']
+ for(const line of a.lines)lines.push('-'+line)
+ if(!a.end&&a.lines.length)lines.push('\\ No newline at end of file')
+ for(const line of b.lines)lines.push('+'+line)
+ if(!b.end&&b.lines.length)lines.push('\\ No newline at end of file')
+ return {changed:true,patch:lines.join('\n')+'\n',nonMinimal:true}
+}
+function parseUnified(text,root){
+ const lines=string(text,'patch').replace(/\r\n/g,'\n').split('\n'),result=[]
+ let i=0
+ while(i<lines.length){
+  if(!lines[i]){i++;continue}
+  const old=/^--- a\/(.+)$/.exec(lines[i++]||''),next=/^\+\+\+ b\/(.+)$/.exec(lines[i++]||'')
+  if(!old||!next||old[1]!==next[1])throw Error('invalid unified file headers')
+  const path=resolve(root,old[1])
+  if(old[1].startsWith('/')||old[1].split('/').includes('..')||path===root||!path.startsWith(root+sep))throw Error('invalid patch path')
+  const hunks=[]
+  while((lines[i]||'').startsWith('@@ ')){
+   const match=/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(lines[i++])
+   if(!match)throw Error('invalid hunk header')
+   const h={start:Number(match[1])===0?0:Number(match[1])-1,oldCount:match[2]===undefined?1:Number(match[2]),newCount:match[4]===undefined?1:Number(match[4]),rows:[]}
+   while(lines[i]&&[' ','-','+'].includes(lines[i][0])){
+    const row={op:lines[i][0],text:lines[i++].slice(1)}
+    if(lines[i]==='\\ No newline at end of file'){row.noNewline=true;i++}
+    h.rows.push(row)
+   }
+   if(!h.rows.length)throw Error('hunk is empty')
+   hunks.push(h)
+  }
+  if(!hunks.length||result.some(x=>x.path===path))throw Error('empty or duplicated patch file')
+  result.push({path,hunks})
+  if(result.length>32)throw Error('too many patch files')
+ }
+ if(!result.length)throw Error('empty patch')
+ return result
+}
+async function unified(args){
+ const root=resolve(args.root||'.'),patches=parseUnified(args.patch,root),plans=[]
+ for(const entry of patches){
+  const file=await read(entry.path),original=codeLines(file.text),lines=original.lines,out=[]
+  let offset=0,newline=original.end
+  for(const h of entry.hunks){
+   if(h.start<offset||h.start>lines.length)throw Error('misplaced hunk')
+   out.push(...lines.slice(offset,h.start))
+   let removed=0,added=0
+   for(const row of h.rows){
+    if(row.op!=='+'&&lines[h.start+removed]!==row.text)throw Error('hunk context mismatch: '+entry.path)
+    if(row.op!=='-'){out.push(row.text);added++}
+    if(row.op!=='+')removed++
+    if(row.noNewline&&row.op==='+')newline=false
+    if(row.noNewline&&row.op==='-')newline=true
+   }
+   if(removed!==h.oldCount||added!==h.newCount)throw Error('hunk count mismatch')
+   offset=h.start+removed
+  }
+  out.push(...lines.slice(offset))
+  plans.push({...file,original:file.text,after:out.join('\n')+(newline&&out.length?'\n':'')})
+ }
+ return commit(plans,args.dryRun===true)
+}
+
 export async function codeCall(name,a={}){
  switch(name){
   case 'code_context':{const f=await read(a.path),lines=f.text.split(/\r?\n/),start=Math.max(1,Number(a.startLine)||1),end=Math.min(lines.length,Math.max(start,Number(a.endLine)||start+120));return {path:f.path,sha256:hash(f.text),totalLines:lines.length,content:lines.slice(start-1,end).map((s,i)=>(start+i)+' | '+s).join('\n')}}
   case 'code_search':return search(a)
+  case 'code_symbols':return symbols(a)
+  case 'code_references':{const symbol=string(a.symbol,'symbol');if(!/^[A-Za-z_$][\w$]*$/.test(symbol))throw Error('invalid identifier');return search({query:'\\b'+symbol+'\\b',path:a.path,regex:true,maxResults:a.maxResults})}
+  case 'code_apply_patch':return unified(a)
+  case 'code_diff':{const file=await read(a.path);return makeDiff(file.text,string(a.after,'after'),relative(process.cwd(),file.path).replace(/\\/g,'/'))}
   case 'code_patch':return edits([{path:a.path,oldText:a.oldText,newText:a.newText,expectedSha256:a.expectedSha256}],a.dryRun===true)
   case 'code_multi_edit':return edits(a.edits,a.dryRun===true)
   default:throw Error('unknown Code Engine tool: '+name)
