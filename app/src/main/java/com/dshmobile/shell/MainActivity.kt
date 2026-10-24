@@ -4194,6 +4194,110 @@ class MainActivity : ComponentActivity() {
     return packageRoot.absolutePath
   }
 
+  /** Unified Android tool inventory: MCP declarations plus installed CLI tools. */
+  private fun showExtendedToolManager() {
+    Thread {
+      val catalog = runCatching { org.json.JSONObject(engineManager.toolManagementCatalogJson()) }
+        .getOrElse { org.json.JSONObject().put("ok", false).put("error", it.message ?: "无法读取工具目录") }
+      runOnUiThread {
+        if (isFinishing || isDestroyed) return@runOnUiThread
+        if (!catalog.optBoolean("ok")) {
+          showSimpleMessage("工具目录", catalog.optString("error", "工具目录不可用"))
+          return@runOnUiThread
+        }
+        val density = resources.displayMetrics.density
+        val root = LinearLayout(this).apply {
+          orientation = LinearLayout.VERTICAL
+          setPadding((18*density).toInt(), (8*density).toInt(), (18*density).toInt(), (8*density).toInt())
+        }
+        root.addView(TextView(this).apply {
+          text = "按已安装运行时扫描：MCP 显示脚本声明，并不代表已与运行中 Host 建立连接；命令行工具按实际安装的可执行文件显示。"
+          textSize = 12f
+        })
+        val sections = listOf(
+          Triple("协议工具 · MCP", "protocolTools", "mcp"),
+          Triple("逆向工具 · MCP", "reverseTools", "mcp"),
+          Triple("其他 mobile_tools · MCP", "otherMobileTools", "mcp"),
+          Triple("基础工具 · basic_tools", "basicTools", "mcp"),
+          Triple("协议与网络 · Termux", "cliProtocol", "cli"),
+          Triple("逆向与调试 · Termux", "cliReverse", "cli"),
+        )
+        for ((label, key, kind) in sections) {
+          val array = catalog.optJSONArray(key) ?: org.json.JSONArray()
+          root.addView(Button(this).apply {
+            text = "$label（${array.length()}）"
+            setOnClickListener { showToolCatalogSection(label, array, kind) }
+          })
+        }
+        val cliOther = catalog.optJSONObject("cliOther") ?: org.json.JSONObject()
+        val categories = listOf("terminal", "files", "processes", "packages", "git", "network", "system")
+        for (category in categories) {
+          val array = cliOther.optJSONArray(category) ?: continue
+          root.addView(Button(this).apply {
+            text = "其他命令 · $category（${array.length()}）"
+            setOnClickListener { showToolCatalogSection("其他命令 · $category", array, "cli") }
+          })
+        }
+        root.addView(TextView(this).apply {
+          text = "已发现 ${catalog.optInt("declaredTotal")} 条 MCP 工具声明和 ${catalog.optInt("cliTotal")} 个命令行工具；MCP 开关在上一级管理。"
+          textSize = 12f
+        })
+        android.app.AlertDialog.Builder(this)
+          .setTitle("协议 / 逆向 / 系统工具")
+          .setView(android.widget.ScrollView(this).apply { addView(root) })
+          .setNegativeButton("关闭", null)
+          .show()
+      }
+    }.start()
+  }
+
+  private fun showToolCatalogSection(title: String, entries: org.json.JSONArray, kind: String) {
+    val labels = ArrayList<String>(entries.length())
+    val items = ArrayList<org.json.JSONObject>(entries.length())
+    for (i in 0 until entries.length()) {
+      val item = entries.optJSONObject(i) ?: continue
+      val name = item.optString("name")
+      if (name.isEmpty()) continue
+      val desc = item.optString("description")
+      labels += if (desc.isEmpty()) name else "$name · ${desc.take(70)}"
+      items += item
+    }
+    if (items.isEmpty()) { showSimpleMessage(title, "当前运行时未发现此类工具。"); return }
+    android.app.AlertDialog.Builder(this)
+      .setTitle(title)
+      .setItems(labels.toTypedArray()) { _, position ->
+        val item = items[position]
+        val name = item.optString("name")
+        val description = item.optString("description", "命令行工具")
+        val installed = kind == "cli"
+        val message = if (installed)
+          "已安装命令：$name\n\n可在 DSH 终端直接执行，或查看帮助与版本信息。"
+        else
+          "MCP 工具声明：$name\n来源：${item.optString("provider")}\n\n$description\n\n此处展示脚本声明；实际可用性取决于当前 DSH Host 的 MCP 连接状态。"
+        val dialog = android.app.AlertDialog.Builder(this)
+          .setTitle(name)
+          .setMessage(message)
+          .setNegativeButton("返回", null)
+        if (installed) {
+          dialog.setPositiveButton("查看命令帮助") { _, _ ->
+            Thread {
+              val result = engineManager.runMobileToolRequest("terminal", "$name --help", currentWritableWorkspacePath())
+              runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                  val obj = runCatching { org.json.JSONObject(result) }.getOrNull()
+                  showSimpleMessage(name, obj?.optString("output")?.take(12000)
+                    ?.takeIf { it.isNotBlank() } ?: obj?.optString("error", result)?.take(12000) ?: result.take(12000))
+                }
+              }
+            }.start()
+          }
+        }
+        dialog.show()
+      }
+      .setNegativeButton("关闭", null)
+      .show()
+  }
+
   private fun showMcpManager() {
     val density = resources.displayMetrics.density
     val root = LinearLayout(this).apply {
@@ -4208,6 +4312,10 @@ class MainActivity : ComponentActivity() {
     engineManager.mcpConfigurationIssue()?.let { issue ->
       root.addView(TextView(this).apply { text = issue; textSize = 12f })
     }
+    root.addView(Button(this).apply {
+      text = "查看协议 / 逆向 / 系统工具目录"
+      setOnClickListener { showExtendedToolManager() }
+    })
 
     lateinit var dialog: android.app.AlertDialog
     root.addView(Button(this).apply {
