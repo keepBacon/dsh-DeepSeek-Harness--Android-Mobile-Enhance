@@ -23,6 +23,7 @@ try{
  assert.equal(dry.verificationSkipped,true)
  assert.equal(await read(js),'export const answer = 1;\n')
  const failed=await codeWorkflowCall('code_edit_verify',{edits:[invalid]})
+ console.log('[DSH] workflow failure case:',JSON.stringify(failed))
  assert.equal(failed.ok,false)
  assert.equal(failed.phase,'syntax')
  assert.equal(failed.rollback.ok,true)
