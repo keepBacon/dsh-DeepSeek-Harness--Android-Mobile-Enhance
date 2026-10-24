@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
-import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises'
+import {mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {codeWorkflowTools,codeWorkflowCall} from './dsh-code-engine-workflow.mjs'
