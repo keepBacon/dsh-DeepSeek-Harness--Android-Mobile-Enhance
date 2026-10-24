@@ -115,8 +115,15 @@ function parseUnified(text,root){
    const match=/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(lines[i++])
    if(!match)throw Error('invalid hunk header')
    const h={start:Number(match[1])===0?0:Number(match[1])-1,oldCount:match[2]===undefined?1:Number(match[2]),newCount:match[4]===undefined?1:Number(match[4]),rows:[]}
-   while(lines[i]&&[' ','-','+'].includes(lines[i][0])){
-    const row={op:lines[i][0],text:lines[i++].slice(1)}
+   let remainingOld=h.oldCount,remainingNew=h.newCount
+   while(remainingOld>0||remainingNew>0){
+    const line=lines[i]
+    if(!line||![' ','-','+'].includes(line[0]))throw Error('incomplete unified hunk')
+    const op=line[0]
+    if((op!=='+'&&remainingOld===0)||(op!=='-'&&remainingNew===0))throw Error('unified hunk exceeds declared counts')
+    const row={op,text:line.slice(1)};i++
+    if(op!=='-')remainingNew--
+    if(op!=='+')remainingOld--
     if(lines[i]==='\\ No newline at end of file'){row.noNewline=true;i++}
     h.rows.push(row)
    }
