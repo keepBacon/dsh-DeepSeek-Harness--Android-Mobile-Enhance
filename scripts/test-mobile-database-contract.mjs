@@ -10,6 +10,7 @@ const index=read('app/src/main/java/com/dshmobile/shell/database/MobileIndexServ
 const backup=read('app/src/main/java/com/dshmobile/shell/database/DatabaseBackup.kt');
 const bridge=read('app/src/main/java/com/dshmobile/shell/AndroidBridge.kt');
 const activity=read('app/src/main/java/com/dshmobile/shell/MainActivity.kt');
+const engine=read('app/src/main/java/com/dshmobile/shell/EngineManager.kt');
 const monitor=read('app/src/main/assets/dsh-tool-call-monitor.js');
 const classifier=read('app/src/main/java/com/dshmobile/shell/database/ToolErrorClassifier.kt');
 const dispatcher=read('app/src/main/java/com/dshmobile/shell/database/ToolObservationDispatcher.kt');
@@ -61,4 +62,16 @@ assert.match(classifier,/MCP_SCHEMA_REQUIRED/);
 for(const forbidden of [/fetch\(/,/XMLHttpRequest/,/sendBeacon/,/localStorage/,/sessionStorage/]){
  assert.ok(!forbidden.test(monitor),'monitor unexpectedly uses a network/storage API: '+forbidden);
 }
+// Tool settings must expose more than the MCP editor alone.
+assert.match(activity,/private fun showExtendedToolManager\(\)/);
+assert.match(activity,/private fun showToolCatalogSection\(/);
+assert.match(activity,/showExtendedToolManager\(\)/);
+for(const key of ['protocolTools','reverseTools','cliProtocol','cliReverse','basicTools','otherMobileTools']){
+ assert.ok(engine.includes('.put("'+key+'",'),'tool catalog missing '+key);
+ assert.ok(activity.includes('"'+key+'"'),'tool manager section missing '+key);
+}
+assert.match(engine,/JSONObject\(mobileToolCatalogJson\(\)\)/);
+assert.match(engine,/declaredTools\("toolbox-mcp\.mjs"/);
+assert.match(engine,/declaredTools\("basic-toolbox-mcp\.mjs"/);
+assert.match(activity,/engineManager\.runMobileToolRequest\("terminal"/);
 console.log('[DSH] Database integration source-contract regression: OK');
