@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os'
 import {codeWorkflowTools,codeWorkflowCall} from './dsh-code-engine-workflow.mjs'
 
 assert.deepEqual(codeWorkflowTools.map(x=>x.name),[
- 'code_edit_verify','code_repair_candidates','code_diagnostics_compare'
+ 'code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact'
 ])
 const root=await mkdtemp(join(tmpdir(),'dsh-code-workflow-'))
 const js=join(root,'main.js'),ts=join(root,'module.ts'),extra=join(root,'extra.js')
