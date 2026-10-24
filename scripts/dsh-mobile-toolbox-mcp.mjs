@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from 'node:crypto'
+import { codeTools, codeCall } from './dsh-code-engine.mjs'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
@@ -20,7 +21,7 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
-const tools=[
+const tools=[...codeTools,
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -279,6 +280,8 @@ function waitDebugStop(session,timeoutMs){for(let i=session.lines.length-1;i>=0&
 async function closeDebug(session){if(session.closed)return;try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}try{await miCommand(session,'-gdb-exit',3000)}catch{}try{session.child.kill('SIGKILL')}catch{}session.closed=true;DEBUG_SESSIONS.delete(session.id)}
 
 async function call(name,a={}){
+ if(codeTools.some(x=>x.name===name))return codeCall(name,a)
+
  switch(name){
   case 'android_shell_health': {
     const root=PREFIX.replace(/\/usr$/,'');
