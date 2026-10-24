@@ -56,13 +56,13 @@ class MainActivity : ComponentActivity() {
   private lateinit var progressText: TextView
   private val engineManager by lazy { EngineManager(this, pickToken) }
   private val skillManager by lazy { SkillManager(this, engineManager) }
-  // Metadata writes never block WebView's JavascriptInterface thread.
-  // Prefer the newest states when the bounded queue fills during long sessions.
-  private val databaseWriter = java.util.concurrent.ThreadPoolExecutor(
-    1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
-    java.util.concurrent.ArrayBlockingQueue<Runnable>(256),
-    java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy(),
-  )
+  private val databaseWriterDelegate = lazy {
+    com.dshmobile.shell.database.ToolObservationDispatcher(
+      store = { com.dshmobile.shell.database.MobileDatabase.get(applicationContext) },
+      onError = { Log.w("DSH-Database", "Tool metadata write failed", it) },
+    )
+  }
+  private val databaseWriter get() = databaseWriterDelegate.value
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -332,7 +332,7 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
-    databaseWriter.shutdown()
+    if (databaseWriterDelegate.isInitialized()) databaseWriter.close()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
     try {
@@ -617,16 +617,7 @@ class MainActivity : ComponentActivity() {
         },
         onOpenLocalUrl = { url -> openLocalPreviewUrl(url) },
         onRecordToolObservation = { session, call, tool, status, code ->
-          try {
-            databaseWriter.execute {
-              runCatching {
-                com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
-                  .observe(session, call, tool, status, code)
-              }.onFailure { Log.w("DSH-Database", "Tool metadata write failed", it) }
-            }
-          } catch (_: java.util.concurrent.RejectedExecutionException) {
-            // Activity destroyed during an asynchronous WebView callback.
-          }
+          databaseWriter.offer(session, call, tool, status, code)
         },
         pickToken = pickToken,
       ),

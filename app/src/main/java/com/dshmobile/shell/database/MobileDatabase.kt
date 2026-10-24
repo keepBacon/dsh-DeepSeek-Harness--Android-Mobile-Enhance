@@ -90,53 +90,68 @@ class MobileDatabase private constructor(context: Context) :
   }
 
   /**
-   * Idempotent observation. A running-to-success transition updates one row;
-   * session and call identifiers are SHA-256 hashed before persistence.
+   * Batch observations into a single SQLite transaction. The host observes
+   * UI state changes (not tool inputs/results), and terminal status never
+   * regresses when a delayed 'running' event arrives.
    */
-  @Synchronized fun observe(
-    sessionKey: String, callId: String, name: String, status: String, error: String?,
-  ) {
-    require(sessionKey.length in 1..2048 && callId.length in 1..160 && name.length in 1..160)
-    require(status in setOf("running", "success", "failure"))
-    require(callId.none(Char::isISOControl) && name.none(Char::isISOControl))
-    val key = digest(sessionKey + "\u0000" + callId)
+  data class ToolObservation(
+    val sessionKey: String, val callId: String, val name: String,
+    val status: String, val error: String?,
+  )
+
+  @Synchronized fun observeBatch(batch: List<ToolObservation>) {
+    if (batch.isEmpty()) return
+    require(batch.size <= 128)
     val db = writableDatabase
-    val now = System.currentTimeMillis()
-    val values = ContentValues().apply {
-      put("event_key", key)
-      put("session_hash", digest(sessionKey))
-      put("tool_name", name)
-      put("first_seen", now)
-      put("status", status)
-      put("category", ToolErrorClassifier.classify(status, error))
-      put("error_code", ToolErrorClassifier.safeCode(error))
-      put("last_seen", now)
-    }
     db.beginTransaction()
     try {
-      // Terminal statuses never regress when a late DOM poll reports "running".
-      val inserted = db.insertWithOnConflict(
-        "tool_observations", null, values, SQLiteDatabase.CONFLICT_IGNORE,
-      )
-      if (inserted == -1L && status != "running") {
-        val terminal = ContentValues().apply {
-          put("status", status)
-          put("category", ToolErrorClassifier.classify(status, error))
-          put("error_code", ToolErrorClassifier.safeCode(error))
+      for (item in batch) {
+        require(item.sessionKey.length in 1..2048 &&
+          item.callId.length in 1..160 && item.name.length in 1..160)
+        require(item.status in setOf("running", "success", "failure"))
+        require(item.callId.none(Char::isISOControl) && item.name.none(Char::isISOControl))
+        val key = digest(item.sessionKey + "\u0000" + item.callId)
+        val now = System.currentTimeMillis()
+        val category = ToolErrorClassifier.classify(item.status, item.error)
+        val code = ToolErrorClassifier.safeCode(item.error)
+        val values = ContentValues().apply {
+          put("event_key", key)
+          put("session_hash", digest(item.sessionKey))
+          put("tool_name", item.name)
+          put("first_seen", now)
+          put("status", item.status)
+          put("category", category)
+          put("error_code", code)
           put("last_seen", now)
         }
-        db.update("tool_observations", terminal,
-          "event_key=? AND status='running'", arrayOf(key))
+        val inserted = db.insertWithOnConflict(
+          "tool_observations", null, values, SQLiteDatabase.CONFLICT_IGNORE,
+        )
+        if (inserted == -1L && item.status != "running") {
+          val terminal = ContentValues().apply {
+            put("status", item.status)
+            put("category", category)
+            put("error_code", code)
+            put("last_seen", now)
+          }
+          db.update("tool_observations", terminal,
+            "event_key=? AND status='running'", arrayOf(key))
+        }
+        if (++observations % 128 == 0) db.execSQL(
+          """DELETE FROM tool_observations WHERE event_key IN
+          (SELECT event_key FROM tool_observations ORDER BY first_seen DESC
+          LIMIT -1 OFFSET 10000)""",
+        )
       }
-      // Amortize retention trimming: no large DELETE on every DOM observation.
-      if (++observations % 128 == 0) db.execSQL(
-        """DELETE FROM tool_observations WHERE event_key IN
-        (SELECT event_key FROM tool_observations ORDER BY first_seen DESC
-        LIMIT -1 OFFSET 10000)""",
-      )
       db.setTransactionSuccessful()
-    } finally { db.endTransaction() }
+    } finally {
+      db.endTransaction()
+    }
   }
+
+  @Synchronized fun observe(
+    sessionKey: String, callId: String, name: String, status: String, error: String?,
+  ) = observeBatch(listOf(ToolObservation(sessionKey, callId, name, status, error)))
 
   private var observations = 0
 
