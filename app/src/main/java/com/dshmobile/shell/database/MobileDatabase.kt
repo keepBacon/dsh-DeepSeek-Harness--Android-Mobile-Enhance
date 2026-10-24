@@ -103,6 +103,8 @@ class MobileDatabase private constructor(context: Context) :
     if (batch.isEmpty()) return
     require(batch.size <= 128)
     val db = writableDatabase
+    var insertedRows = 0
+    var trimmed = false
     db.beginTransaction()
     try {
       for (item in batch) {
@@ -127,6 +129,7 @@ class MobileDatabase private constructor(context: Context) :
         val inserted = db.insertWithOnConflict(
           "tool_observations", null, values, SQLiteDatabase.CONFLICT_IGNORE,
         )
+        if (inserted != -1L) insertedRows++
         if (inserted == -1L && item.status != "running") {
           val terminal = ContentValues().apply {
             put("status", item.status)
@@ -137,16 +140,23 @@ class MobileDatabase private constructor(context: Context) :
           db.update("tool_observations", terminal,
             "event_key=? AND status='running'", arrayOf(key))
         }
-        if (++observations % 128 == 0) db.execSQL(
+      }
+      // Retention depends on NEW rows, not repeated running/terminal DOM
+      // events. Run the indexed trim at most once per batch/transaction.
+      if (insertedRows > 0 && observations + insertedRows >= RETENTION_INTERVAL) {
+        db.execSQL(
           """DELETE FROM tool_observations WHERE event_key IN
           (SELECT event_key FROM tool_observations ORDER BY first_seen DESC
           LIMIT -1 OFFSET 10000)""",
         )
+        trimmed = true
       }
       db.setTransactionSuccessful()
     } finally {
       db.endTransaction()
     }
+    // Commit the counter only after the SQLite transaction really completes.
+    observations = if (trimmed) 0 else observations + insertedRows
   }
 
   @Synchronized fun observe(
@@ -174,6 +184,7 @@ class MobileDatabase private constructor(context: Context) :
 
   companion object {
     const val FILE_NAME = "dsh-mobile.db"
+    private const val RETENTION_INTERVAL = 128
     private val HEX = "0123456789abcdef".toCharArray()
     @Volatile private var instance: MobileDatabase? = null
     fun get(context: Context): MobileDatabase = instance ?: synchronized(this) {
