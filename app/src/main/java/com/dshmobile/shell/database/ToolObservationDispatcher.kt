@@ -68,7 +68,9 @@ class ToolObservationDispatcher(
       try {
         store().observeBatch(batch)
       } catch (error: Throwable) {
-        onError(error)
+        // Diagnostics must be fail-open: even a broken logging callback must
+        // not kill the drain loop and strand future observations in the queue.
+        runCatching { onError(error) }
       }
     }
   }
