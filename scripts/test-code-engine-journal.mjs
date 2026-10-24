@@ -4,7 +4,7 @@ import {mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {codeWorkflowTools,codeWorkflowCall} from './dsh-code-engine-workflow.mjs'
-import {createTransaction,setTransactionPhase,recoverTransactions,acquirePathLocks} from './dsh-code-engine-journal.mjs'
+import {createTransaction,setTransactionPhase,recoverTransactions,acquirePathLocks,expandTransactionLockPaths} from './dsh-code-engine-journal.mjs'
 
 assert.deepEqual(codeWorkflowTools.map(x=>x.name),[
  'code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact'
@@ -66,6 +66,8 @@ try{
  const tx=await createTransaction({purpose:'simulated-crash',files:[
   {path:crashFile,original,after,mode:0o644},{path:untouched,original:'const untouched = true;\n',after:'const untouched = false;\n',mode:0o644}
  ]})
+ const expanded=await expandTransactionLockPaths([crashFile])
+ assert.ok(expanded.includes(crashFile));assert.ok(expanded.includes(untouched))
  await setTransactionPhase(tx,'applying')
  await writeFile(crashFile,after)
  await setTransactionPhase(tx,'applied',{pid:null})

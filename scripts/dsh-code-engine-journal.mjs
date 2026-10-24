@@ -48,7 +48,7 @@ async function lockOwner(dir){
  catch(error){if(error?.code==='ENOENT')return null;return {invalid:true}}
 }
 export async function acquirePathLocks(paths,options={}){
- if(!Array.isArray(paths)||paths.length<1||paths.length>32)throw Error('path locks require 1..32 paths')
+ if(!Array.isArray(paths)||paths.length<1||paths.length>128)throw Error('path locks require 1..128 paths')
  const canonical=[...new Set(paths.map(path=>resolve(path)))].sort()
  const root=lockRoot()
  await mkdir(root,{recursive:true,mode:0o700})
@@ -201,6 +201,30 @@ export async function rollbackTransaction(transaction){
  await setTransactionPhase(transaction,'rolled_back',{pid:null})
  await removeTransaction(transaction)
  return {ok:true,id:transaction.id||transaction.manifest.id,results,conflicts:[]}
+}
+export async function expandTransactionLockPaths(paths,options={}){
+ if(!Array.isArray(paths)||paths.length<1||paths.length>32)throw Error('transaction lock expansion requires 1..32 target paths')
+ const targets=new Set(paths.map(path=>resolve(path)))
+ const root=journalRoot()
+ let entries
+ try{entries=await readdir(root,{withFileTypes:true})}catch(error){if(error?.code==='ENOENT')return [...targets].sort();throw error}
+ const dirs=entries.filter(entry=>entry.isDirectory()).map(entry=>join(root,entry.name)).sort()
+ const maxEntries=Math.min(5000,Math.max(100,Number(options.maxEntries)||1000))
+ if(dirs.length>maxEntries)throw Error('transaction journal scan limit exceeded while preparing file locks')
+ let changed=true,passes=0
+ while(changed){
+  changed=false
+  if(++passes>Math.min(32,dirs.length+1))throw Error('transaction relationship expansion did not converge')
+  for(const dir of dirs){
+   try{
+    const manifest=await readManifest(dir)
+    const files=manifest.files.map(entry=>resolve(entry.path))
+    if(files.some(path=>targets.has(path)))for(const path of files)if(!targets.has(path)){targets.add(path);changed=true}
+   }catch{}
+   if(targets.size>128)throw Error('related transaction lock set exceeds 128 paths; recover pending transactions before editing')
+  }
+ }
+ return [...targets].sort()
 }
 async function recoverOneUnlocked(dir,{dryRun=false}={}){
  const base=basename(dir)

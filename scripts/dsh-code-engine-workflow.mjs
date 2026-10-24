@@ -6,7 +6,7 @@ import {TextDecoder} from 'node:util'
 import {codeCall} from './dsh-code-engine.mjs'
 import {codeV4Call} from './dsh-code-engine-v4.mjs'
 import {codeAstCall} from './dsh-code-engine-ast.mjs'
-import {createTransaction,setTransactionPhase,rollbackTransaction,removeTransaction,recoverTransactions,acquirePathLocks} from './dsh-code-engine-journal.mjs'
+import {createTransaction,setTransactionPhase,rollbackTransaction,removeTransaction,recoverTransactions,acquirePathLocks,expandTransactionLockPaths} from './dsh-code-engine-journal.mjs'
 
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
@@ -84,7 +84,7 @@ async function executeLocked(batch,args){
  if(!Array.isArray(batch)||batch.length<1||batch.length>32)throw Error('edits must contain 1..32 entries')
  const requestedPaths=[...new Set(batch.map(entry=>normalizePath(entry.path)))]
  let recovery={results:[]}
- if(args.dryRun!==true){try{recovery=await recoverBeforeEdit(requestedPaths,requestedPaths,args.lockTimeoutMs)}catch(error){return {ok:false,phase:'recovery',error:String(error.message||error),transactions:error?.transactions}}}
+ if(args.dryRun!==true){try{recovery=await recoverBeforeEdit(requestedPaths,args._lockPathsHeld??requestedPaths,args.lockTimeoutMs)}catch(error){return {ok:false,phase:'recovery',error:String(error.message||error),transactions:error?.transactions}}}
  const prepared=await planEdits(batch),changed=prepared.rows.map(x=>x.path)
  const verify=verificationArgs(args,changed)
  const preview=await codeCall('code_multi_edit',{edits:prepared.normalized,dryRun:true})
@@ -124,7 +124,7 @@ async function execute(batch,args={}){
  const paths=[...new Set(batch.map(entry=>normalizePath(entry.path)))]
  if(args.dryRun===true)return executeLocked(batch,args)
  let locks
- try{locks=await acquirePathLocks(paths,{timeoutMs:args.lockTimeoutMs})}
+ try{const lockPaths=await expandTransactionLockPaths(paths);locks=await acquirePathLocks(lockPaths,{timeoutMs:args.lockTimeoutMs});args={...args,_lockPathsHeld:lockPaths}}
  catch(error){return {ok:false,phase:'lock',error:String(error.message||error),nextAction:'Retry after the conflicting edit finishes; no files were changed.'}}
  try{return await executeLocked(batch,args)}
  finally{await locks.release()}
@@ -157,7 +157,7 @@ async function collectDiagnostics(files,projectFiles,semantic){
 async function compareLocked(args){
  if(!Array.isArray(args.edits)||args.edits.length<1||args.edits.length>32)throw Error('edits must contain 1..32 entries')
  const requestedPaths=[...new Set(args.edits.map(entry=>normalizePath(entry.path)))]
- await recoverBeforeEdit(requestedPaths,requestedPaths,args.lockTimeoutMs)
+ await recoverBeforeEdit(requestedPaths,args._lockPathsHeld??requestedPaths,args.lockTimeoutMs)
  const prepared=await planEdits(args.edits),changed=prepared.rows.map(x=>x.path)
  const files=args.files??changed
  if(!Array.isArray(files)||!files.length||files.length>32)throw Error('files must contain 1..32 source files')
@@ -189,7 +189,7 @@ async function compare(args){
  if(!Array.isArray(args.edits)||args.edits.length<1||args.edits.length>32)throw Error('edits must contain 1..32 entries')
  const paths=[...new Set(args.edits.map(entry=>normalizePath(entry.path)))]
  let locks
- try{locks=await acquirePathLocks(paths,{timeoutMs:args.lockTimeoutMs})}
+ try{const lockPaths=await expandTransactionLockPaths(paths);locks=await acquirePathLocks(lockPaths,{timeoutMs:args.lockTimeoutMs});args={...args,_lockPathsHeld:lockPaths}}
  catch(error){return {ok:false,phase:'lock',error:String(error.message||error),nextAction:'Retry after the conflicting edit finishes; no files were changed.'}}
  try{return await compareLocked(args)}
  finally{await locks.release()}
