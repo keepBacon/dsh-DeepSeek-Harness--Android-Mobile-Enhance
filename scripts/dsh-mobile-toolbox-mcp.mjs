@@ -673,6 +673,13 @@ async function selfTest(){
    if(writeResult.isError)throw new Error('MCP dispatch fs_write self-test failed: '+writeResult.content[0].text)
    const readResult=await dispatchToolCall({name:'fs_read',arguments:{path:sample}})
    if(readResult.isError||readResult.structuredContent?.content!==payload)throw new Error('MCP dispatch argument round-trip self-test failed')
+   for(const requiredName of ['code_context','code_search','code_patch','code_multi_edit','code_symbols','code_references','code_apply_patch','code_diff','code_rename_identifier','code_check','code_test']){
+    if(!tools.some(tool=>tool.name===requiredName))throw new Error('Code Engine tool missing from registry: '+requiredName)
+   }
+   const codeContext=await dispatchToolCall({name:'code_context',arguments:{path:sample}})
+   if(codeContext.isError||!codeContext.structuredContent?.sha256||!codeContext.structuredContent?.content?.includes('alpha'))throw new Error('Code Engine dispatch self-test failed')
+   const codeDry=await dispatchToolCall({name:'code_patch',arguments:{path:sample,oldText:'alpha',newText:'omega',dryRun:true}})
+   if(codeDry.isError||!codeDry.structuredContent?.dryRun)throw new Error('Code Engine patch routing self-test failed')
    const missingResult=await dispatchToolCall({name:'__dsh_missing_tool_self_test__',arguments:{}})
    if(missingResult.isError!==true||!missingResult.content?.[0]?.text.includes('unknown tool'))throw new Error('MCP dispatch error-result self-test failed')
    const malformedResult=await dispatchToolCall({name:'fs_read',arguments:[]})
