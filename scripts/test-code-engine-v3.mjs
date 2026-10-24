@@ -19,6 +19,7 @@ try{
  assert.match(changed,/const newName = newName/);assert.match(changed,/\/\/ oldName/);assert.match(changed,/'oldName'/);assert.match(changed,/\/oldName\+\//)
  assert.match(await readFile(b,'utf8'),/newName: number/)
  await assert.rejects(codeV3Call('code_rename_identifier',{paths:[a],from:'newName',to:'class'}),/invalid identifier/)
+ await assert.rejects(codeV3Call('code_rename_identifier',{paths:[a],from:'const',to:'renamed'}),/invalid identifier/)
  await assert.rejects(codeV3Call('code_rename_identifier',{paths:[a],from:'newName',to:'other',expectedSha256ByPath:{[a]:'0'.repeat(64)}}),/stale source hash/)
  await writeFile(bad,'const = ;\n')
  const check=await codeV3Call('code_check',{paths:[a,bad]})
