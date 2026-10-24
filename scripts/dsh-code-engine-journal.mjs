@@ -38,6 +38,77 @@ function pidAlive(pid){
  if(!Number.isInteger(pid)||pid<=0)return false
  try{process.kill(pid,0);return true}catch(error){return error?.code==='EPERM'}
 }
+function lockRoot(){
+ const root=journalRoot()
+ return join(dirname(root),'.'+basename(root)+'.locks')
+}
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+async function lockOwner(dir){
+ try{return JSON.parse(await readFile(join(dir,'owner.json'),'utf8'))}
+ catch(error){if(error?.code==='ENOENT')return null;return {invalid:true}}
+}
+export async function acquirePathLocks(paths,options={}){
+ if(!Array.isArray(paths)||paths.length<1||paths.length>32)throw Error('path locks require 1..32 paths')
+ const canonical=[...new Set(paths.map(path=>resolve(path)))].sort()
+ const root=lockRoot()
+ await mkdir(root,{recursive:true,mode:0o700})
+ await chmod(root,0o700)
+ const timeoutMs=Math.min(60000,Math.max(100,Number(options.timeoutMs)||10000))
+ const staleMs=Math.min(300000,Math.max(1000,Number(options.staleMs)||60000))
+ const pollMs=Math.min(200,Math.max(10,Number(options.pollMs)||40))
+ const deadline=Date.now()+timeoutMs,token=randomBytes(16).toString('hex'),acquired=[]
+ async function release(){
+  const results=[]
+  for(const item of [...acquired].reverse()){
+   try{
+    const owner=await lockOwner(item.dir)
+    if(owner?.token===token){await rm(item.dir,{recursive:true,force:true});await syncDir(root).catch(()=>{});results.push({path:item.path,released:true})}
+    else results.push({path:item.path,released:false,reason:'lock ownership changed'})
+   }catch(error){results.push({path:item.path,released:false,error:String(error.message||error)})}
+  }
+  acquired.length=0
+  return results
+ }
+ try{
+  for(const path of canonical){
+   const dir=join(root,digest(Buffer.from(path)))
+   while(true){
+    let created=false
+    try{
+     await mkdir(dir,{mode:0o700});created=true
+     await durableFile(join(dir,'owner.json'),JSON.stringify({version:1,pid:process.pid,token,path,createdAt:new Date().toISOString()})+'\n',0o600)
+     await syncDir(dir);await syncDir(root)
+     acquired.push({path,dir})
+     break
+    }catch(error){
+     if(created)await rm(dir,{recursive:true,force:true}).catch(()=>{})
+     if(error?.code!=='EEXIST')throw error
+     let meta
+     try{meta=await lstat(dir)}catch(cause){if(cause?.code==='ENOENT')continue;throw cause}
+     if(meta.isSymbolicLink()||!meta.isDirectory())throw Error('unsafe path-lock entry: '+dir)
+     const owner=await lockOwner(dir)
+     const old=Date.now()-meta.mtimeMs>staleMs
+     const stale=owner&&!owner.invalid?!pidAlive(owner.pid):old
+     if(stale){
+      const quarantine=dir+'.stale-'+randomBytes(8).toString('hex')
+      try{await rename(dir,quarantine);await rm(quarantine,{recursive:true,force:true});await syncDir(root).catch(()=>{});continue}
+      catch(cause){if(cause?.code==='ENOENT'||cause?.code==='EEXIST')continue;throw cause}
+     }
+     if(Date.now()>=deadline){
+      const timeout=Error('timed out waiting for path lock: '+path)
+      timeout.code='DSH_LOCK_TIMEOUT'
+      throw timeout
+     }
+     await pause(Math.min(pollMs,Math.max(1,deadline-Date.now())))
+    }
+   }
+  }
+  return {paths:canonical,token,release}
+ }catch(error){
+  await release()
+  throw error
+ }
+}
 async function targetHash(path){
  try{
   const meta=await lstat(path)
@@ -131,7 +202,7 @@ export async function rollbackTransaction(transaction){
  await removeTransaction(transaction)
  return {ok:true,id:transaction.id||transaction.manifest.id,results,conflicts:[]}
 }
-async function recoverOne(dir,{dryRun=false}={}){
+async function recoverOneUnlocked(dir,{dryRun=false}={}){
  const base=basename(dir)
  let manifest
  try{manifest=await readManifest(dir)}catch(error){
@@ -170,6 +241,28 @@ async function recoverOne(dir,{dryRun=false}={}){
  await cleanup(dir)
  return summary(manifest,'recovered',{results})
 }
+async function recoverOne(dir,options={}){
+ const dryRun=options.dryRun===true
+ if(dryRun)return recoverOneUnlocked(dir,options)
+ const base=basename(dir)
+ let manifest
+ try{manifest=await readManifest(dir)}catch{return recoverOneUnlocked(dir,options)}
+ if(pidAlive(manifest.pid))return recoverOneUnlocked(dir,options)
+ if(!['prepared','applying','applied','rollback_pending'].includes(manifest.phase))return recoverOneUnlocked(dir,options)
+ const held=new Set((options.lockPathsHeld||[]).map(path=>resolve(path)))
+ const paths=[...new Set(manifest.files.map(entry=>resolve(entry.path)).filter(path=>!held.has(path)))]
+ let locks
+ try{if(paths.length)locks=await acquirePathLocks(paths,{timeoutMs:options.lockTimeoutMs})}
+ catch(error){return summary(manifest,'lock-busy',{error:String(error.message||error)})}
+ try{
+  let current
+  try{current=await readManifest(dir)}catch{return {id:base,status:'already-recovered'}}
+  if(pidAlive(current.pid))return summary(current,'active-skipped',{ownerPid:current.pid})
+  if(['verified','rolled_back','preparing'].includes(current.phase))return recoverOneUnlocked(dir,options)
+  if(!['prepared','applying','applied','rollback_pending'].includes(current.phase))return summary(current,'unknown-phase',{error:'manual inspection required'})
+  return await recoverOneUnlocked(dir,options)
+ }finally{if(locks)await locks.release()}
+}
 export async function recoverTransactions(options={}){
  const root=journalRoot(),limit=Math.min(100,Math.max(1,Number(options.maxTransactions)||50))
  let entries
@@ -179,8 +272,19 @@ export async function recoverTransactions(options={}){
  }
  let dirs=entries.filter(x=>x.isDirectory()).map(x=>join(root,x.name)).sort()
  if(options.transactionId)dirs=dirs.filter(x=>basename(x)===options.transactionId)
+ if(Array.isArray(options.onlyPaths)&&options.onlyPaths.length){
+  const targets=new Set(options.onlyPaths.map(path=>resolve(path)))
+  const matching=[]
+  for(const dir of dirs){
+   try{
+    const manifest=await readManifest(dir)
+    if(manifest.files.some(entry=>targets.has(resolve(entry.path))))matching.push(dir)
+   }catch{}
+  }
+  dirs=matching
+ }
  dirs=dirs.slice(0,limit)
  const results=[]
- for(const dir of dirs)results.push(await recoverOne(dir,{dryRun:options.dryRun===true}))
+ for(const dir of dirs)results.push(await recoverOne(dir,{dryRun:options.dryRun===true,lockPathsHeld:options.lockPathsHeld,lockTimeoutMs:options.lockTimeoutMs}))
  return {root,checked:results.length,results}
 }

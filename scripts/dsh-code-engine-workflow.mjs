@@ -6,19 +6,19 @@ import {TextDecoder} from 'node:util'
 import {codeCall} from './dsh-code-engine.mjs'
 import {codeV4Call} from './dsh-code-engine-v4.mjs'
 import {codeAstCall} from './dsh-code-engine-ast.mjs'
-import {createTransaction,setTransactionPhase,rollbackTransaction,removeTransaction,recoverTransactions} from './dsh-code-engine-journal.mjs'
+import {createTransaction,setTransactionPhase,rollbackTransaction,removeTransaction,recoverTransactions,acquirePathLocks} from './dsh-code-engine-journal.mjs'
 
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
 const edit=obj({path:str,oldText:str,newText:str,expectedSha256:str},['path','oldText','newText'])
 const edits={type:'array',minItems:1,maxItems:32,items:edit}
 const paths={type:'array',minItems:1,maxItems:32,items:str}
-const verifyArgs={checkPaths:paths,command:str,args:{type:'array',maxItems:128,items:str},cwd:str,timeoutMs:{type:'integer',minimum:100,maximum:120000}}
+const verifyArgs={checkPaths:paths,command:str,args:{type:'array',maxItems:128,items:str},cwd:str,timeoutMs:{type:'integer',minimum:100,maximum:120000},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}}
 export const codeWorkflowTools=[
  {name:'code_edit_verify',description:'Journal exact-context edits durably, run syntax/test verification, commit on success, and recover originals on failure or process crash.',inputSchema:obj({edits,...verifyArgs,dryRun:{type:'boolean'}},['edits'])},
  {name:'code_repair_candidates',description:'Try up to six model-supplied alternative edit batches; durably journal each, verify, recover failed candidates and stop on the first passing candidate or a rollback conflict.',inputSchema:obj({candidates:{type:'array',minItems:1,maxItems:6,items:obj({label:str,edits},['edits'])},...verifyArgs,dryRun:{type:'boolean'}},['candidates'])},
- {name:'code_diagnostics_compare',description:'Durably journal a temporary edit, compare TypeScript diagnostics before/after, and restore original files even after a process crash.',inputSchema:obj({edits,files:paths,projectFiles:{type:'array',maxItems:128,items:str},semantic:{type:'boolean'}},['edits'])},
- {name:'code_edit_recover',description:'Inspect or recover abandoned Code Engine edit transactions after process termination. Unknown external changes are reported as conflicts and never overwritten.',inputSchema:obj({transactionId:str,maxTransactions:{type:'integer',minimum:1,maximum:100},dryRun:{type:'boolean'}},[])},
+ {name:'code_diagnostics_compare',description:'Durably journal a temporary edit, compare TypeScript diagnostics before/after, and restore original files even after a process crash.',inputSchema:obj({edits,files:paths,projectFiles:{type:'array',maxItems:128,items:str},semantic:{type:'boolean'},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}},['edits'])},
+ {name:'code_edit_recover',description:'Inspect or recover abandoned Code Engine edit transactions after process termination. Unknown external changes are reported as conflicts and never overwritten.',inputSchema:obj({transactionId:str,maxTransactions:{type:'integer',minimum:1,maximum:100},dryRun:{type:'boolean'},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}},[])},
  {name:'code_change_impact',description:'Combine TypeScript semantic references with reverse module dependency impact for the symbol at a source location.',inputSchema:obj({root:str,file:str,line:{type:'integer',minimum:1},column:{type:'integer',minimum:1},projectFiles:{type:'array',minItems:1,maxItems:128,items:str},maxResults:{type:'integer',minimum:1,maximum:500},maxFiles:{type:'integer',minimum:1,maximum:4000},maxDepth:{type:'integer',minimum:1,maximum:32}},['file','line','column','projectFiles'])},
 ]
 const digest=x=>createHash('sha256').update(x).digest('hex')
@@ -59,11 +59,11 @@ function verificationArgs(args,changed){
  return supplied.length?{paths:supplied,command:args.command,args:args.args,cwd:args.cwd,timeoutMs:args.timeoutMs}:{command:args.command,args:args.args,cwd:args.cwd,timeoutMs:args.timeoutMs}
 }
 function compactVerification(value){return {ok:value.ok,failedPhase:value.failedPhase,results:value.results,nextAction:value.nextAction}}
-async function recoverBeforeEdit(paths){
- const recovered=await recoverTransactions({maxTransactions:100})
+async function recoverBeforeEdit(paths,lockPathsHeld=paths,lockTimeoutMs){
+ const recovered=await recoverTransactions({maxTransactions:100,onlyPaths:paths,lockPathsHeld,lockTimeoutMs})
  const targets=new Set(paths.map(path=>resolve(path)))
  const unresolved=recovered.results.filter(item=>
-  ['conflict','active-skipped'].includes(item.status)&&item.files?.some(file=>targets.has(resolve(file))))
+  ['conflict','active-skipped','lock-busy'].includes(item.status)&&item.files?.some(file=>targets.has(resolve(file))))
  if(unresolved.length)throw Object.assign(Error('unresolved edit transaction overlaps target files: '+unresolved.map(x=>x.id).join(', ')),{code:'DSH_RECOVERY_CONFLICT',transactions:unresolved})
  return recovered
 }
@@ -80,11 +80,11 @@ async function finalizeCommitted(transaction){
  try{await removeTransaction(transaction);return {cleanupPending:false}}
  catch(error){return {cleanupPending:true,error:String(error.message||error)}}
 }
-async function execute(batch,args){
+async function executeLocked(batch,args){
  if(!Array.isArray(batch)||batch.length<1||batch.length>32)throw Error('edits must contain 1..32 entries')
  const requestedPaths=[...new Set(batch.map(entry=>normalizePath(entry.path)))]
  let recovery={results:[]}
- if(args.dryRun!==true){try{recovery=await recoverBeforeEdit(requestedPaths)}catch(error){return {ok:false,phase:'recovery',error:String(error.message||error),transactions:error?.transactions}}}
+ if(args.dryRun!==true){try{recovery=await recoverBeforeEdit(requestedPaths,requestedPaths,args.lockTimeoutMs)}catch(error){return {ok:false,phase:'recovery',error:String(error.message||error),transactions:error?.transactions}}}
  const prepared=await planEdits(batch),changed=prepared.rows.map(x=>x.path)
  const verify=verificationArgs(args,changed)
  const preview=await codeCall('code_multi_edit',{edits:prepared.normalized,dryRun:true})
@@ -119,6 +119,16 @@ async function execute(batch,args){
  try{rollback=await rollbackTransaction(transaction)}catch(error){rollback={ok:false,id:transaction.id,error:String(error.message||error)}}
  return {ok:false,dryRun:false,phase:result.failedPhase,preview,verification:compactVerification(result),rollback,changedFiles:changed,recovery}
 }
+async function execute(batch,args={}){
+ if(!Array.isArray(batch)||batch.length<1||batch.length>32)throw Error('edits must contain 1..32 entries')
+ const paths=[...new Set(batch.map(entry=>normalizePath(entry.path)))]
+ if(args.dryRun===true)return executeLocked(batch,args)
+ let locks
+ try{locks=await acquirePathLocks(paths,{timeoutMs:args.lockTimeoutMs})}
+ catch(error){return {ok:false,phase:'lock',error:String(error.message||error),nextAction:'Retry after the conflicting edit finishes; no files were changed.'}}
+ try{return await executeLocked(batch,args)}
+ finally{await locks.release()}
+}
 async function candidates(args){
  if(!Array.isArray(args.candidates)||!args.candidates.length||args.candidates.length>6)throw Error('candidates must contain 1..6 edit batches')
  const attempts=[]
@@ -144,9 +154,10 @@ async function collectDiagnostics(files,projectFiles,semantic){
  }
  return out
 }
-async function compare(args){
+async function compareLocked(args){
  if(!Array.isArray(args.edits)||args.edits.length<1||args.edits.length>32)throw Error('edits must contain 1..32 entries')
- await recoverBeforeEdit([...new Set(args.edits.map(entry=>normalizePath(entry.path)))])
+ const requestedPaths=[...new Set(args.edits.map(entry=>normalizePath(entry.path)))]
+ await recoverBeforeEdit(requestedPaths,requestedPaths,args.lockTimeoutMs)
  const prepared=await planEdits(args.edits),changed=prepared.rows.map(x=>x.path)
  const files=args.files??changed
  if(!Array.isArray(files)||!files.length||files.length>32)throw Error('files must contain 1..32 source files')
@@ -173,6 +184,15 @@ async function compare(args){
    introduced:after[i].diagnostics.filter(x=>!initial.has(fingerprint(x)))}
  })
  return {ok:rollback.ok&&!diff.some(x=>x.introduced.length),restored:rollback.ok,rollback,before,after,diff,approximate:true}
+}
+async function compare(args){
+ if(!Array.isArray(args.edits)||args.edits.length<1||args.edits.length>32)throw Error('edits must contain 1..32 entries')
+ const paths=[...new Set(args.edits.map(entry=>normalizePath(entry.path)))]
+ let locks
+ try{locks=await acquirePathLocks(paths,{timeoutMs:args.lockTimeoutMs})}
+ catch(error){return {ok:false,phase:'lock',error:String(error.message||error),nextAction:'Retry after the conflicting edit finishes; no files were changed.'}}
+ try{return await compareLocked(args)}
+ finally{await locks.release()}
 }
 async function changeImpact(args){
  const file=resolve(args.file),root=resolve(args.root||'.')

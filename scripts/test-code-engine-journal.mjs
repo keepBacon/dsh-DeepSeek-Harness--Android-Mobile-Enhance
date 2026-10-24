@@ -4,7 +4,7 @@ import {mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {codeWorkflowTools,codeWorkflowCall} from './dsh-code-engine-workflow.mjs'
-import {createTransaction,setTransactionPhase,recoverTransactions} from './dsh-code-engine-journal.mjs'
+import {createTransaction,setTransactionPhase,recoverTransactions,acquirePathLocks} from './dsh-code-engine-journal.mjs'
 
 assert.deepEqual(codeWorkflowTools.map(x=>x.name),[
  'code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact'
@@ -16,7 +16,12 @@ const replace=(path,oldText,newText)=>({path,oldText,newText})
 const read=path=>readFile(path,'utf8')
 try{
  await mkdir(journal,{recursive:true})
- await writeFile(js,'export const answer = 1;\n')
+ const held=await acquirePathLocks([js,extra],{timeoutMs:500})
+  await assert.rejects(()=>acquirePathLocks([extra,js],{timeoutMs:120}),error=>error.code==='DSH_LOCK_TIMEOUT')
+  assert.equal((await held.release()).every(item=>item.released),true)
+  const reacquired=await acquirePathLocks([extra,js],{timeoutMs:500})
+  assert.equal((await reacquired.release()).every(item=>item.released),true)
+  await writeFile(js,'export const answer = 1;\n')
  await writeFile(extra,'export const extra = 1;\n')
  const invalid=replace(js,'answer = 1','answer = =')
  const dry=await codeWorkflowCall('code_edit_verify',{edits:[invalid],dryRun:true})
