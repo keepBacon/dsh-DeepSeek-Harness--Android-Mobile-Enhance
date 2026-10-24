@@ -38,7 +38,7 @@ class MobileIndexService(private val engine: EngineManager, private val store: M
           val modified = file.lastModified()
           val bytes = file.length()
           val previous = staleSessions.remove(path)
-          if (previous?.first == modified && previous.second == bytes) continue
+          if (previous != null && previous.first == modified && previous.second == bytes) continue
           val v = ContentValues().apply {
             put("relative_path", path)
             put("modified_at", modified)
@@ -58,7 +58,22 @@ class MobileIndexService(private val engine: EngineManager, private val store: M
             db.delete("session_index", "relative_path IN ($slots)", batch.toTypedArray())
           }
         }
+        // Skip unchanged entries. A refresh usually sees the same
+        // plugins, skills and MCP servers; rewriting them amplifies WAL I/O.
+        val previousExtensions = HashMap<Pair<String, String>, Triple<String, Boolean, String>>()
+        db.rawQuery(
+          "SELECT kind, stable_id, version, configured_enabled, source FROM extension_inventory",
+          null,
+        ).use { c ->
+          while (c.moveToNext()) {
+            previousExtensions[c.getString(0) to c.getString(1)] =
+              Triple(c.getString(2), c.getInt(3) != 0, c.getString(4))
+          }
+        }
         for (entry in extensions.first) {
+          val previous = previousExtensions.remove(entry.kind to entry.id)
+          if (previous != null && previous.first == entry.version &&
+            previous.second == entry.enabled && previous.third == "filesystem/configured") continue
           db.insertWithOnConflict("extension_inventory", null, ContentValues().apply {
             put("kind", entry.kind)
             put("stable_id", entry.id)
@@ -69,8 +84,16 @@ class MobileIndexService(private val engine: EngineManager, private val store: M
           }, SQLiteDatabase.CONFLICT_REPLACE)
         }
         for (kind in extensions.second) {
-          db.delete("extension_inventory", "kind=? AND observed_at != ?",
-            arrayOf(kind, now.toString()))
+          // Only a complete scan may prune stale entries of that kind.
+          val stale = previousExtensions.keys.asSequence().filter { it.first == kind }
+            .map { it.second }.iterator()
+          while (stale.hasNext()) {
+            val batch = ArrayList<String>(400)
+            while (stale.hasNext() && batch.size < 400) batch += stale.next()
+            val slots = List(batch.size) { "?" }.joinToString(",")
+            db.delete("extension_inventory", "kind=? AND stable_id IN ($slots)",
+              arrayOf(kind, *batch.toTypedArray()))
+          }
         }
         db.setTransactionSuccessful()
       } finally { db.endTransaction() }
