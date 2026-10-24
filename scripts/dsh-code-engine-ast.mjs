@@ -148,7 +148,7 @@ async function references(args){
  }finally{ls.service.dispose()}
 }
 async function rename(args){
- if(!/^[A-Za-z_$][\w$]*$/.test(args.newName))throw Error('newName must be a JS/TS identifier')
+ if(!/^[A-Za-z_$][\w$]*$/.test(args.newName) || !typescript().isIdentifierText(args.newName,typescript().ScriptTarget.Latest))throw Error('newName must be a valid non-keyword JS/TS identifier')
  const ls=await languageService(args)
  try{
   const info=ls.service.getRenameInfo(ls.file,ls.position,{allowRenameOfImportPath:false})
