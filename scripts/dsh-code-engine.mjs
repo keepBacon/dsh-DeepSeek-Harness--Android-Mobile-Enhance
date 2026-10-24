@@ -162,7 +162,7 @@ export async function codeCall(name,a={}){
   case 'code_symbols':return symbols(a)
   case 'code_references':{const symbol=string(a.symbol,'symbol');if(!/^[A-Za-z_$][\w$]*$/.test(symbol))throw Error('invalid identifier');return search({query:'\\b'+symbol+'\\b',path:a.path,regex:true,maxResults:a.maxResults})}
   case 'code_apply_patch':return unified(a)
-  case 'code_diff':{const file=await read(a.path);return makeDiff(file.text,string(a.after,'after'),relative(process.cwd(),file.path).replace(/\\/g,'/'))}
+  case 'code_diff':{const file=await read(a.path);return makeDiff(file.text,string(a.after,'after'),basename(file.path))}
   case 'code_patch':return edits([{path:a.path,oldText:a.oldText,newText:a.newText,expectedSha256:a.expectedSha256}],a.dryRun===true)
   case 'code_multi_edit':return edits(a.edits,a.dryRun===true)
   default:throw Error('unknown Code Engine tool: '+name)
