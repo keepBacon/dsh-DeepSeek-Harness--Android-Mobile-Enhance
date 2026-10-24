@@ -366,6 +366,120 @@ class EngineManager(private val context: Context, private val pickToken: String?
       .toString()
   }
 
+  /**
+   * Tool manager data comes from entrypoints and wrapper files actually installed
+   * in this app, NOT a hard-coded list of advertised capabilities. Declarations
+   * are marked as such: only the running DSH Host can confirm live MCP discovery.
+   */
+  fun toolManagementCatalogJson(): String {
+    val appSafeMode = ShellState.safeModeEnabled(context)
+    val toolboxConfigured = mcpConfigManager.toolboxEnabled()
+    val mcpConfigured = toolboxConfigured && !appSafeMode
+    val protocolTools = JSONArray()
+    val reverseTools = JSONArray()
+    val otherMobileTools = JSONArray()
+    val basicTools = JSONArray()
+    val mcpFiles = JSONObject()
+    val toolPattern = Regex("""\{name:'([A-Za-z0-9_-]{1,160})',description:'((?:\\.|[^'\\])*)'""")
+
+    fun declaredTools(fileName: String, provider: String, basic: Boolean) {
+      val file = File(usrDir, "libexec/dsh-mobile/$fileName")
+      val present = file.isFile && file.length() in 1L..2_000_000L
+      mcpFiles.put(provider, present)
+      if (!present) return
+      val source = try { file.readText() } catch (t: Exception) {
+        mcpFiles.put(provider, false)
+        Log.w(TAG, "Cannot read installed MCP tool declarations: $fileName", t)
+        return
+      }
+      if (!source.contains("const tools=[")) return
+      val seen = HashSet<String>()
+      for (match in toolPattern.findAll(source)) {
+        val name = match.groupValues[1]
+        if (!seen.add(name)) continue
+        val item = JSONObject()
+          .put("name", name)
+          .put("description", match.groupValues[2].replace("\\'", "'"))
+          .put("provider", provider)
+          .put("kind", "mcp-declared")
+          .put("configured", mcpConfigured)
+        val target = when {
+          basic -> basicTools
+          name.startsWith("protocol_") || name == "http_request" -> protocolTools
+          isReverseMcpTool(name) -> reverseTools
+          else -> otherMobileTools
+        }
+        target.put(item)
+      }
+    }
+    declaredTools("toolbox-mcp.mjs", "mobile_tools", false)
+    declaredTools("basic-toolbox-mcp.mjs", "basic_tools", true)
+
+    // Reuse the native runtime inventory (wrappers + actual binaries). The
+    // categorization is only presentation and NEVER enables/disables commands.
+    val cliCatalog = JSONObject(mobileToolCatalogJson())
+    val cliSource = cliCatalog.optJSONObject("categories") ?: JSONObject()
+    val cliProtocol = JSONArray()
+    val cliReverse = JSONArray()
+    val cliOther = JSONObject()
+    val cliProtocolNames = setOf(
+      "adb", "curl", "wget", "aria2c", "http", "openssl", "dig",
+      "ip", "ss", "ifconfig", "nmap", "socat", "nc", "whois",
+      "traceroute", "tcpdump",
+    )
+    val cliReverseNames = setOf(
+      "aapt2", "apksigner", "apktool", "jadx", "gdb", "gdbserver",
+      "strace", "ltrace", "rizin", "r2", "frida", "frida-ps",
+      "frida-trace", "frida-server", "readelf", "objdump", "nm",
+      "strings", "addr2line", "objcopy", "strip", "file",
+      "ctags", "cscope",
+    )
+    var cliTotal = 0
+    val groups = listOf("terminal", "files", "processes", "packages", "git", "network", "system")
+    for (category in groups) {
+      val names = cliSource.optJSONArray(category) ?: JSONArray()
+      val others = JSONArray()
+      for (i in 0 until names.length()) {
+        val name = names.optString(i)
+        if (name.isBlank()) continue
+        cliTotal++
+        val item = JSONObject().put("name", name).put("category", category).put("kind", "cli-installed")
+        when (name) {
+          in cliProtocolNames -> cliProtocol.put(item)
+          in cliReverseNames -> cliReverse.put(item)
+          else -> others.put(item)
+        }
+      }
+      if (others.length() > 0) cliOther.put(category, others)
+    }
+    return JSONObject()
+      .put("ok", true)
+      .put("runtime", "embedded-termux")
+      .put("safeMode", appSafeMode)
+      .put("mcpConfigured", mcpConfigured)
+      .put("mcpFiles", mcpFiles)
+      .put("protocolTools", protocolTools)
+      .put("reverseTools", reverseTools)
+      .put("otherMobileTools", otherMobileTools)
+      .put("basicTools", basicTools)
+      .put("cliProtocol", cliProtocol)
+      .put("cliReverse", cliReverse)
+      .put("cliOther", cliOther)
+      .put("cliTotal", cliTotal)
+      .put("declaredTotal", protocolTools.length() + reverseTools.length() +
+        otherMobileTools.length() + basicTools.length())
+      .toString()
+  }
+
+  private fun isReverseMcpTool(name: String): Boolean =
+    listOf(
+      "reverse_", "frida_", "debug_", "binary_", "il2cpp_",
+      "process_", "memory_", "module_", "symbol_", "address_",
+      "syscall_", "jni_", "native_", "runtime_", "self_runtime_",
+      "adb_", "apk_",
+    ).any { name.startsWith(it) } ||
+      name in setOf("child_strace", "no_root_capabilities", "package_process_info")
+
   private fun mobileToolCwd(workspacePath: String?): File {
     if (!workspacePath.isNullOrBlank()) {
       try {
