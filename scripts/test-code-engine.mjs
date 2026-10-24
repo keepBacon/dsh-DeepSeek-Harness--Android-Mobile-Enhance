@@ -65,7 +65,7 @@ try{
  const multiDry=await codeCall('code_apply_patch',{root,patch:combined,dryRun:true})
  assert.equal(multiDry.files.length,2)
  await codeCall('code_apply_patch',{root,patch:combined})
- assert.equal(await readFile(one,'utf8'),proposal)
+ assert.equal(await readFile(one,'utf8'),'const one = 9;\n')
  assert.equal(await readFile(two,'utf8'),'const two = 8;\n')
  console.log('[DSH] Code Engine 2.0 editing contract: OK')
 }finally{await rm(root,{recursive:true,force:true})}
