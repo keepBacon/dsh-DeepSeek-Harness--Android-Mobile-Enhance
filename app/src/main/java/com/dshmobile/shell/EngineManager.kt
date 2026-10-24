@@ -392,7 +392,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         Log.w(TAG, "Cannot read installed MCP tool declarations: $fileName", t)
         return
       }
-      if (!source.contains("const tools=[") && !source.contains("const codeTools=[") && !source.contains("const codeV3Tools=[")) return
+      if (!source.contains("const tools=[") && !source.contains("const codeTools=[") && !source.contains("const codeV3Tools=[") && !source.contains("const codeV4Tools=[")) return
       val seen = HashSet<String>()
       for (match in toolPattern.findAll(source)) {
         val name = match.groupValues[1]
@@ -416,6 +416,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     // Code Engine definitions live in a sibling runtime module.
     declaredTools("dsh-code-engine.mjs", "mobile_tools", false)
     declaredTools("dsh-code-engine-v3.mjs", "mobile_tools", false)
+    declaredTools("dsh-code-engine-v4.mjs", "mobile_tools", false)
     declaredTools("basic-toolbox-mcp.mjs", "basic_tools", true)
 
     // Reuse the native runtime inventory (wrappers + actual binaries). The
@@ -1128,6 +1129,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-v3.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v3.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-v4.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v4.mjs",
       File(rootUsr, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
       File(rootUsr, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
       File(rootUsr, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
@@ -2905,6 +2907,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine-v3.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v3.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-code-engine-v4.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v4.mjs",
       File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
       File(usrDir, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
       File(usrDir, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
