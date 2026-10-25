@@ -81,26 +81,29 @@ try{
  assert.equal(await read(untouched),'const untouched = true;\n')
  // Real subprocess crash: recovery must use the dead process PID, not a same-process simulation.
  const crashedFile=join(root,'subprocess-crash.js'),untouchedAfterCrash=join(root,'subprocess-untouched.js')
- await writeFile(crashedFile,'const subprocessCrash = 1;\\n')
- await writeFile(untouchedAfterCrash,'const subprocessUntouched = true;\\n')
+ await writeFile(crashedFile,'const subprocessCrash = 1;\n')
+ await writeFile(untouchedAfterCrash,'const subprocessUntouched = true;\n')
  const journalUrl=new URL('./dsh-code-engine-journal.mjs',import.meta.url).href
- const childScript=[
-  \"import {writeFile} from 'node:fs/promises'\",
-  `const j=await import(${JSON.stringify(journalUrl)})`,
-  \"const [target,untouched]=process.argv.slice(1)\",
-  \"const original='const subprocessCrash = 1;\\\\n', after='const subprocessCrash = 2;\\\\n'\",
-  \"const tx=await j.createTransaction({purpose:'subprocess-crash',files:[{path:target,original,after,mode:0o644},{path:untouched,original:'const subprocessUntouched = true;\\\\n',after:'const subprocessUntouched = false;\\\\n',mode:0o644}]})\",
-  \"await j.setTransactionPhase(tx,'applying')\",
-  \"await writeFile(target,after)\",
-  \"process.exit(71)\"
- ].join('\\n')
- const child=spawnSync(process.execPath,['--input-type=module','-e',childScript,crashedFile,untouchedAfterCrash],{env:process.env,encoding:'utf8',timeout:10000})
+ const payload=JSON.stringify({purpose:'subprocess-crash',files:[
+  {path:crashedFile,original:'const subprocessCrash = 1;\n',after:'const subprocessCrash = 2;\n',mode:0o644},
+  {path:untouchedAfterCrash,original:'const subprocessUntouched = true;\n',after:'const subprocessUntouched = false;\n',mode:0o644}
+ ]})
+ const childCode=[
+  "import {writeFile} from 'node:fs/promises'",
+  "const j=await import("+JSON.stringify(journalUrl)+")",
+  "const [target,untouched,payload]=process.argv.slice(1)",
+  "const tx=await j.createTransaction(JSON.parse(payload))",
+  "await j.setTransactionPhase(tx,'applying')",
+  "await writeFile(target,JSON.parse(payload).files[0].after)",
+  "process.exit(71)"
+ ].join('\n')
+ const child=spawnSync(process.execPath,['--input-type=module','-e',childCode,crashedFile,untouchedAfterCrash,payload],{env:process.env,encoding:'utf8',timeout:10000})
  assert.equal(child.status,71,child.stderr||child.error?.message)
  const crashRecovery=await recoverTransactions({onlyPaths:[crashedFile],maxTransactions:10})
  assert.equal(crashRecovery.results.length,1,JSON.stringify(crashRecovery))
  assert.equal(crashRecovery.results[0].status,'recovered',JSON.stringify(crashRecovery.results[0]))
- assert.equal(await read(crashedFile),'const subprocessCrash = 1;\\n')
- assert.equal(await read(untouchedAfterCrash),'const subprocessUntouched = true;\\n')
+ assert.equal(await read(crashedFile),'const subprocessCrash = 1;\n')
+ assert.equal(await read(untouchedAfterCrash),'const subprocessUntouched = true;\n')
  // Unknown external output is never overwritten by recovery.
  const conflictTx=await createTransaction({purpose:'conflict-test',files:[{path:crashFile,original,after,mode:0o644}]})
  await setTransactionPhase(conflictTx,'applying')
