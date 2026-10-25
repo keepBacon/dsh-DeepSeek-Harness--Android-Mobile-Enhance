@@ -104,7 +104,34 @@ try{
  assert.equal(crashRecovery.results[0].status,'recovered',JSON.stringify(crashRecovery.results[0]))
  assert.equal(await read(crashedFile),'const subprocessCrash = 1;\n')
  assert.equal(await read(untouchedAfterCrash),'const subprocessUntouched = true;\n')
- // Unknown external output is never overwritten by recovery.
+  // A second crash after one file has already been restored must finish the remaining rollback.
+ const partialA=join(root,'partial-a.js'),partialB=join(root,'partial-b.js')
+ const originalA='const partialA = 1;\n',afterA='const partialA = 2;\n'
+ const originalB='const partialB = 1;\n',afterB='const partialB = 2;\n'
+ await writeFile(partialA,originalA);await writeFile(partialB,originalB)
+ const partialTx=await createTransaction({purpose:'partial-rollback-crash',files:[
+  {path:partialA,original:originalA,after:afterA,mode:0o644},
+  {path:partialB,original:originalB,after:afterB,mode:0o644}
+ ]})
+ await setTransactionPhase(partialTx,'applying')
+ await writeFile(partialA,afterA);await writeFile(partialB,afterB)
+ await setTransactionPhase(partialTx,'rollback_pending',{pid:null})
+ await writeFile(partialA,originalA) // Simulate the first restore completing before another crash.
+ const partialRecovery=await recoverTransactions({onlyPaths:[partialA],maxTransactions:10})
+ assert.equal(partialRecovery.results.length,1,JSON.stringify(partialRecovery))
+ assert.equal(partialRecovery.results[0].status,'recovered',JSON.stringify(partialRecovery.results[0]))
+ assert.equal(await read(partialA),originalA)
+ assert.equal(await read(partialB),originalB)
+
+ // A malformed, recent journal must be preserved for inspection rather than silently deleted.
+ const malformedDir=join(journal,'malformed-journal')
+ await mkdir(malformedDir,{recursive:true})
+ await writeFile(join(malformedDir,'manifest.json'),'{ this is not valid JSON')
+ const malformed=await recoverTransactions({transactionId:'malformed-journal',maxTransactions:10})
+ assert.equal(malformed.results.length,1,JSON.stringify(malformed))
+ assert.equal(malformed.results[0].status,'orphan-incomplete',JSON.stringify(malformed.results[0]))
+ assert.match(await readFile(join(malformedDir,'manifest.json'),'utf8'),/not valid JSON/)
+// Unknown external output is never overwritten by recovery.
  const conflictTx=await createTransaction({purpose:'conflict-test',files:[{path:crashFile,original,after,mode:0o644}]})
  await setTransactionPhase(conflictTx,'applying')
  await writeFile(crashFile,'const crash = 99;\n')
