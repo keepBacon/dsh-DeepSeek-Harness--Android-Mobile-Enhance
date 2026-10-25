@@ -88,7 +88,7 @@ export async function acquirePathLocks(paths,options={}){
      if(meta.isSymbolicLink()||!meta.isDirectory())throw Error('unsafe path-lock entry: '+dir)
      const owner=await lockOwner(dir)
      const old=Date.now()-meta.mtimeMs>staleMs
-     const stale=owner&&!owner.invalid?!pidAlive(owner.pid):old
+     const stale=owner&&!owner.invalid?(!pidAlive(owner.pid)&&old):(!owner&&old)
      if(stale){
       const quarantine=dir+'.stale-'+randomBytes(8).toString('hex')
       try{await rename(dir,quarantine);await rm(quarantine,{recursive:true,force:true});await syncDir(root).catch(()=>{});continue}
