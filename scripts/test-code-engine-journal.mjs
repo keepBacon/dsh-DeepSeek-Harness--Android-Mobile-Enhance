@@ -131,6 +131,24 @@ try{
  assert.equal(malformed.results.length,1,JSON.stringify(malformed))
  assert.equal(malformed.results[0].status,'orphan-incomplete',JSON.stringify(malformed.results[0]))
  assert.match(await readFile(join(malformedDir,'manifest.json'),'utf8'),/not valid JSON/)
+ // Two concurrent recovery requests for one transaction must not race or restore twice.
+ const raceFile=join(root,'concurrent-recovery.js')
+ const raceOriginal='const concurrentRecovery = 1;\n',raceAfter='const concurrentRecovery = 2;\n'
+ await writeFile(raceFile,raceOriginal)
+ const raceTx=await createTransaction({purpose:'concurrent-recovery',files:[
+  {path:raceFile,original:raceOriginal,after:raceAfter,mode:0o644}
+ ]})
+ await setTransactionPhase(raceTx,'applying')
+ await writeFile(raceFile,raceAfter)
+ await setTransactionPhase(raceTx,'applied',{pid:null})
+ const [raceOne,raceTwo]=await Promise.all([
+  recoverTransactions({onlyPaths:[raceFile],maxTransactions:10}),
+  recoverTransactions({onlyPaths:[raceFile],maxTransactions:10})
+ ])
+ const raceResults=[raceOne.results[0]?.status,raceTwo.results[0]?.status].sort()
+ assert.deepEqual(raceResults,['already-recovered','recovered'],JSON.stringify({raceOne,raceTwo}))
+ assert.equal(await read(raceFile),raceOriginal)
+
 // Unknown external output is never overwritten by recovery.
  const conflictTx=await createTransaction({purpose:'conflict-test',files:[{path:crashFile,original,after,mode:0o644}]})
  await setTransactionPhase(conflictTx,'applying')
