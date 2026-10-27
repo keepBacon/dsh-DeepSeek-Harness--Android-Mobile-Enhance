@@ -7,7 +7,7 @@
 DeepSeek Harness Mobile is a standalone Android shell for DeepSeek Harness. It starts a local DSH Host on the device and provides a mobile interface through a restricted Android WebView while preserving workspace, plugin, terminal, Git/SSH, and file-search capabilities.
 
 > App version: **V0.1**  
-> Default DSH: `@deepseek-ai/dsh 0.1.5-rc.2`  
+> Default DSH: `@deepseek-ai/dsh 0.2.1-rc.3`  
 > Android: `minSdk 26` / `targetSdk 34` / `compileSdk 36`  
 > Primary architecture: `arm64`
 
