@@ -413,7 +413,9 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: partial app-UID sandbox runner'
   if (txt.includes(marker)) return 'already'
-  const anchor = /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
+  // New upstream versions accept a cancellation signal as a third parameter.
+  // Match the actual published method, not the old 0.1.5 argument count.
+  const anchor = /(?:async\s+)?confine\s*\(\s*argv\s*,\s*policy\s*(?:,\s*signal\s*)?\)\s*\{/
   const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
   if (matches.length !== 1) throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}`)
   const injection = `${matches[0]}
@@ -453,7 +455,7 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
   const injection = `${matches[0]}
     // ${marker}.
     if (process.env.DSH_ANDROID_STANDALONE === "1") {
-      this.warnFallback?.(kind, "Android app runtime uses the app UID/process-session boundary");
+      this.warnFallback?.(this.internals?.platform ?? process.platform, kind, "Android app runtime uses the app UID/process-session boundary");
       return "fallback";
     }`
   txt = txt.replace(anchor, injection)
