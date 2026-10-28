@@ -1,8 +1,8 @@
 {
   "schema": 2,
-  "version": "0.1.5-rc.2",
+  "version": "0.2.1-rc.3",
   "sourceRepository": "deepseek-ai/deepseek-harness",
-  "sourceCommit": "a30530342297e6006623a775166fee1d14fd413a",
+  "sourceCommit": "1f81c047fc48fa190a683e469daa699857e9afe8",
   "packages": [
     "@deepseek-ai/dsh",
     "@deepseek-ai/dsh-acp",

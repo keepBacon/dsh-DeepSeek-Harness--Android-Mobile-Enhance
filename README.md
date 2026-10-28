@@ -7,7 +7,7 @@
 DeepSeek Harness Mobile 是面向 Android 的 DeepSeek Harness 独立运行外壳。应用在本机启动 DSH Host，并通过受限的 Android WebView 提供移动端界面，同时保留插件、工作区、终端、Git/SSH 与文件搜索等能力。
 
 > 当前应用版本：**V0.1.1**  
-> 默认 DSH：`@deepseek-ai/dsh 0.1.5-rc.2`  
+> 默认 DSH：`@deepseek-ai/dsh 0.2.1-rc.3`  
 > Android：`minSdk 26` / `targetSdk 34` / `compileSdk 36`  
 > 主要架构：`arm64`
 
@@ -242,7 +242,7 @@ Android Runtime 现在除 `mobile_tools` 外，额外内置独立的 `basic_tool
 
 ## Android Desktop Backend Parity
 
-Android standalone keeps the upstream DSH 0.1.5-rc.2 Web/workspace composition and adapts only host capabilities that assume a desktop OS:
+Android standalone keeps the upstream DSH 0.2.1-rc.3 Web/workspace composition and adapts only host capabilities that assume a desktop OS:
 
 - **Workspace / filesystem:** the official `dsh-fs-sandbox` remains active. Model-controlled writes and edits still use canonical workspace containment; the Android phone-file import/export bridge only copies to or from the selected DSH workspace.
 - **Process sandbox:** `dsh-sandbox-local` uses an Android-specific app-UID runner when `DSH_ANDROID_STANDALONE=1`. It reports `partial` enforcement rather than pretending Android provides desktop Linux `bwrap`/Landlock confinement.
