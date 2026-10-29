@@ -1366,12 +1366,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
         continue
       }
       if (!expected) {
-        // Marker proves a public migration was completed. Never silently
-        // accept an absent session store as a fresh first-run profile.
+        // A migrated profile may legitimately have zero sessions. Keep both
+        // paths untouched and surface the missing source in diagnostics;
+        // absence alone cannot prove deletion or justify synthesizing history.
         if (relative == "sessions" && marker.isFile && !src.isDirectory) {
-          throw java.io.IOException(
-            "原会话目录缺失：${dst.absolutePath}。已阻止创建空会话数据；请从备份或原路径恢复。",
-          )
+          Log.w(TAG, "migrated profile has no readable session directory: ${dst.absolutePath}")
         }
         continue
       }
