@@ -1266,7 +1266,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val dshData = dshDataDir
     val privateDsh = File(homeDir, ".dsh")
     val marker = File(dshData, ".migrated-from")
-    if (privateDsh.isDirectory && !marker.exists()) {
+    // Never stamp a completed migration for a freshly created empty profile.
+    // Doing so would make later recovery mistake a first install for lost data.
+    val hasLegacyUserData = listOf("sessions", "storages", "attachments", "settings.yaml",
+      "profiles/web/cordis.yml", "profiles/web/cordis.patch.yml").any { relative ->
+      File(privateDsh, relative).exists()
+    }
+    if (privateDsh.isDirectory && !marker.exists() && hasLegacyUserData) {
       try {
         dshData.mkdirs()
         // settings.yaml is copied, never moved: settings-file is configured to
