@@ -528,6 +528,13 @@ jobs:
             echo "Android sandbox runner accepted an invalid mode" >&2
             exit 1
           fi
+      - name: Runtime migration verifier regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci-validate-runtime.py scripts/ci-verify-upgrade-apk.py scripts/test-ci-runtime-validator.py
+          python3 scripts/test-ci-runtime-validator.py
+
       - name: Repository static regression suite
         shell: bash
         run: |
