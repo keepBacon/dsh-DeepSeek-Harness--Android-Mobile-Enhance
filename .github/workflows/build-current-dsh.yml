@@ -42,6 +42,30 @@ jobs:
           unzip -p "$RUNNER_TEMP/dsh-verified/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > app/src/main/assets/snapshot.tar.xz
           test -s app/src/main/assets/snapshot.tar.xz
           sha256sum app/src/main/assets/snapshot.tar.xz
+      - name: Inspect historical snapshot compatibility before rebuilding
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, tarfile
+          p = 'app/src/main/assets/snapshot.tar.xz'
+          wanted = {
+            'usr/lib/node_modules/@deepseek-ai/dsh/package.json',
+            'usr/bin/node',
+            'usr/bin/proot',
+            'usr/libexec/dsh-mobile/toolbox-mcp.mjs',
+            'usr/libexec/dsh-mobile/dsh-code-engine.mjs',
+            'usr/libexec/dsh-mobile/android-sandbox-runner.sh'
+          }
+          with tarfile.open(p, 'r|xz') as archive:
+            for entry in archive:
+              name=entry.name.removeprefix('./')
+              if name not in wanted: continue
+              if name.endswith('package.json') and entry.isfile():
+                data=json.load(archive.extractfile(entry))
+                print('HISTORICAL_DSH_VERSION='+str(data.get('version')))
+              else: print('FOUND_RUNTIME_ENTRY='+name)
+          PY
       - name: Verify full runtime is current DSH and embedded ARM64
         shell: bash
         run: |
