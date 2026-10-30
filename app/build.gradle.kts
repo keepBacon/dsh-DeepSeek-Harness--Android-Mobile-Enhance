@@ -14,13 +14,7 @@ android {
     // (the embedded engine, bash, and every child command would need linker64
     // wrappers); 34 keeps native exec working on Android 15/16 devices.
     targetSdk = 34
-    // GitHub Actions picks a code strictly newer than the verified baseline.
-    // Local/Termux builds preserve their historical default versionCode.
-    versionCode = providers.gradleProperty("dshUpgradeVersionCode").orNull?.let { value ->
-      val code = value.toIntOrNull()
-      require(code != null && code in 1..2100000000) { "invalid dshUpgradeVersionCode" }
-      code
-    } ?: 37
+    versionCode = 37
     versionName = "0.1.2"
   }
 
