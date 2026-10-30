@@ -1,10 +1,10 @@
-name: Build DSH from Android ARM64 Termux Runtime
+name: Build DSH on GitHub (Android ARM64, no Termux)
 on:
   push:
     branches: [feature/actions-full-apk-legacy-signing]
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
-      - 'build-termux.sh'
+      - 'scripts/ci-assemble-github-runtime.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,33 +14,22 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
-      - name: Generate complete Android ARM64 runtime within Termux Docker
+      - name: Build Android ARM64 runtime on GitHub runner (no Termux)
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          docker run --rm --security-opt seccomp=unconfined \
-            -v "$PWD:/work" -w /work \
-            -e DSH_RUNTIME_ONLY=1 \
-            -e DSH_REFRESH_RUNTIME=1 \
-            -e DSH_NATIVE_COMPAT=1 \
-            -e DSH_ALLOW_DEGRADED=0 \
-            --platform linux/arm64 \
-            termux/termux-docker:aarch64 bash -lc '
-              set -e
-              echo "OS and architecture: $(uname -sm)"
-              echo "Termux prefix: $PREFIX"
-              # The Termux Docker entrypoint/login wrapper may reset host-injected
-              # environment. Set the mode at the actual build process boundary.
-              # A missing flag would run SDK/Gradle in this native-only container.
-              export DSH_RUNTIME_ONLY=1 DSH_REFRESH_RUNTIME=1
-              export DSH_NATIVE_COMPAT=1 DSH_ALLOW_DEGRADED=0
-              echo "DSH runtime-only mode: $DSH_RUNTIME_ONLY"
-              test "$DSH_RUNTIME_ONLY" = 1
-              DSH_RUNTIME_ONLY=1 DSH_REFRESH_RUNTIME=1 \
-                DSH_NATIVE_COMPAT=1 DSH_ALLOW_DEGRADED=0 \
-                bash build-termux.sh
-            '
-          test -s app/src/main/assets/snapshot.tar.xz
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3 dpkg-dev nodejs npm xz-utils
+          mkdir -p "$RUNNER_TEMP/dsh-seed" app/src/main/assets
+          gh release download "1" -R "$GITHUB_REPOSITORY" -p "Dsh.Mobile.Pro.V0.1.apk" -D "$RUNNER_TEMP/dsh-seed"
+          unzip -p "$RUNNER_TEMP/dsh-seed/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > "$RUNNER_TEMP/dsh-seed/seed.tar.xz"
+          python3 scripts/ci-assemble-github-runtime.py \
+            --repo . \
+            --seed "$RUNNER_TEMP/dsh-seed/seed.tar.xz" \
+            --output app/src/main/assets/snapshot.tar.xz \
+            --audit runtime-build-audit.json
       - name: Validate ARM64 runtime (no placeholder)
         shell: bash
         run: |
@@ -52,6 +41,7 @@ jobs:
           path: |
             app/src/main/assets/snapshot.tar.xz
             runtime-audit.json
+            runtime-build-audit.json
           if-no-files-found: error
           retention-days: 7
   assemble-legacy-signed:
