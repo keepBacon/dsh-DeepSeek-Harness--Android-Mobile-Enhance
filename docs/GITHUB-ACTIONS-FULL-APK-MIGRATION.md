@@ -1,0 +1,5 @@
+# DSH GitHub Actions APK migration and signature acceptance
+Round 1: strict archive validator tests the exact Android runtime package family, ARM64 ELF, required tools and MCP files, rejecting placeholder snapshots.
+Round 2: manual Actions workflow extracts a prebuilt Android Termux runtime from a Release APK, creates a debug APK, and checks signer, application ID, versionCode and embedded runtime hash before artifacts upload.
+**Signing prerequisite:** Set repo Actions Secret DSH_LEGACY_DEBUG_KEYSTORE_B64 to the *original* Termux ~/.android/debug.keystore encoded in base64. Never commit or send the key. The baseline Release APK must be exactly the APK installed on the phone, not just any old release.
+**Limits:** This workflow repacks a prebuilt Android runtime; GitHub Linux does not compile Android native Node/Koffi/PTy modules. Signature equivalence is necessary but not sufficient to prove data retention; backup Documents/dshdata and app-private HOME before an in-place install. Never uninstall or clear app storage.

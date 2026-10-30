@@ -1,0 +1,129 @@
+name: Build complete Android APK (same-signature gate)
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_tag:
+        description: Release tag of the APK actually installed on the device
+        required: true
+        default: "1"
+      baseline_asset:
+        description: Exact installed APK asset name
+        required: true
+        default: "Dsh.Mobile.Pro.V0.1.apk"
+      runtime_tag:
+        description: Release tag holding a verified Android DSH runtime
+        required: true
+        default: "1"
+      runtime_asset:
+        description: Android APK containing assets/snapshot.tar.xz
+        required: true
+        default: "Dsh.Mobile.Pro.V0.1.apk"
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
+          echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
+      - name: Test runtime verifier
+        run: python3 scripts/test-ci-runtime-validator.py
+      - name: Download exact baseline and prebuilt Android runtime
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_TAG: ${{ inputs.baseline_tag }}
+          BASE_ASSET: ${{ inputs.baseline_asset }}
+          RUN_TAG: ${{ inputs.runtime_tag }}
+          RUN_ASSET: ${{ inputs.runtime_asset }}
+        run: |
+          set -euo pipefail
+          case "$BASE_ASSET" in *.apk) ;; *) exit 4 ;; esac
+          case "$RUN_ASSET" in *.apk) ;; *) exit 4 ;; esac
+          mkdir -p "$RUNNER_TEMP/dsh-input" app/src/main/assets
+          gh release download "$BASE_TAG" -R "$REPO" -p "$BASE_ASSET" -D "$RUNNER_TEMP/dsh-input"
+          mv "$RUNNER_TEMP/dsh-input/$BASE_ASSET" "$RUNNER_TEMP/dsh-input/baseline.apk"
+          if [[ "$BASE_TAG" == "$RUN_TAG" && "$BASE_ASSET" == "$RUN_ASSET" ]]; then
+            cp "$RUNNER_TEMP/dsh-input/baseline.apk" "$RUNNER_TEMP/dsh-input/runtime.apk"
+          else
+            gh release download "$RUN_TAG" -R "$REPO" -p "$RUN_ASSET" -D "$RUNNER_TEMP/dsh-input"
+            mv "$RUNNER_TEMP/dsh-input/$RUN_ASSET" "$RUNNER_TEMP/dsh-input/runtime.apk"
+          fi
+          unzip -p "$RUNNER_TEMP/dsh-input/runtime.apk" assets/snapshot.tar.xz > app/src/main/assets/snapshot.tar.xz
+      - name: Validate actual Android runtime and stamp runtime identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output "$RUNNER_TEMP/dsh-input/runtime.json"
+          python3 - "$RUNNER_TEMP/dsh-input/runtime.json" <<'PY'
+          import json,pathlib,sys
+          m=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          pathlib.Path('app/src/main/assets/runtime-version.txt').write_text('app=0.1.2\ndsh={dsh_version}\nsha256={runtime_sha256}\n'.format(**m))
+          PY
+      - name: Calculate non-downgrading version code
+        id: code
+        shell: bash
+        run: |
+          set -euo pipefail
+          aapt dump badging "$RUNNER_TEMP/dsh-input/baseline.apk" | grep '^package: ' > "$RUNNER_TEMP/dsh-input/pkg.txt"
+          python3 - "$RUNNER_TEMP/dsh-input/pkg.txt" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib,re,sys
+          s=pathlib.Path(sys.argv[1]).read_text()
+          p=re.search(r"name='([^']+)'",s)
+          v=re.search(r"versionCode='([0-9]+)'",s)
+          if not p or p.group(1)!='com.dshmobile.shell' or not v: raise SystemExit('Wrong baseline package')
+          code=max(38,int(v.group(1))+1)
+          if code>2100000000: raise SystemExit('versionCode overflow')
+          with open(sys.argv[2],'a') as out: out.write('version_code='+str(code)+'\n')
+          PY
+      - name: Import original signing key
+        shell: bash
+        env:
+          KEY_B64: ${{ secrets.DSH_LEGACY_DEBUG_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" || { echo 'Original Termux debug.keystore secret is required' >&2; exit 12; }
+          umask 077
+          mkdir -p "$HOME/.android"
+          printf '%s' "$KEY_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
+      - name: Verify signing certificate matches the installed APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          old="$(apksigner verify --print-certs "$RUNNER_TEMP/dsh-input/baseline.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr 'A-F' 'a-f')"
+          key="$(keytool -exportcert -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey 2>/dev/null | sha256sum | cut -d' ' -f1)"
+          if [[ -z "$old" || "$old" != "$key" ]]; then echo 'Signing certificate mismatch: refusing build' >&2; exit 13; fi
+      - name: Build actual runtime APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode="${{ steps.code.outputs.version_code }}"
+      - name: Verify package certificate version and bundled runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-verify-upgrade-apk.py --baseline "$RUNNER_TEMP/dsh-input/baseline.apk" --built app/build/outputs/apk/debug/app-debug.apk --snapshot app/src/main/assets/snapshot.tar.xz --report app/build/outputs/apk/debug/upgrade-provenance.json
+      - name: Upload verified APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-in-place-upgrade-${{ github.run_number }}
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/upgrade-provenance.json
+          if-no-files-found: error
+          retention-days: 30

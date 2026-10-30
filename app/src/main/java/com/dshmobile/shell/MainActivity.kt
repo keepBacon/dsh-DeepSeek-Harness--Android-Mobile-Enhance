@@ -728,8 +728,209 @@ class MainActivity : ComponentActivity() {
     dialog.show()
   }
 
-  /** App-only settings opened from the gear icon in the top navigation bar. */
+  /**
+   * Full-screen HTML settings. This is a separate, local-asset-only WebView:
+   * the privileged DSH Host bridge is never installed here.
+   */
+  private val settingsDatabaseBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
   private fun showAppSettings() {
+    val panel = WebView(this)
+    val dialog = android.app.Dialog(this)
+    try {
+      dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+      panel.settings.apply {
+        javaScriptEnabled = true
+        domStorageEnabled = false
+        allowFileAccess = true // Needed only for file:///android_asset/ui/app-settings.html
+        allowContentAccess = false
+        allowFileAccessFromFileURLs = false
+        allowUniversalAccessFromFileURLs = false
+        blockNetworkLoads = true
+        javaScriptCanOpenWindowsAutomatically = false
+        setSupportMultipleWindows(false)
+        setSupportZoom(false)
+      }
+      panel.addJavascriptInterface(SettingsHtmlBridge(panel, dialog), "DSHSettings")
+      panel.webViewClient = object : WebViewClient() {
+        // Only the bundled settings asset is allowed. Failure to load must
+        // expose the old native settings rather than leaving an empty dialog.
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
+        override fun onReceivedError(
+          view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError,
+        ) {
+          if (!request.isForMainFrame) return
+          runOnUiThread {
+            if (dialog.isShowing) {
+              dialog.dismiss()
+              showLegacyAppSettings()
+            }
+          }
+        }
+      }
+      dialog.setContentView(panel, ViewGroup.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+      dialog.setOnDismissListener {
+        panel.stopLoading()
+        panel.removeJavascriptInterface("DSHSettings")
+        panel.destroy()
+      }
+      dialog.show()
+      dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+      panel.loadUrl("file:///android_asset/ui/app-settings.html")
+    } catch (failure: Throwable) {
+      Log.e("DSH-Settings", "HTML settings failed; using native fallback", failure)
+      try { dialog.dismiss() } catch (_: Throwable) {}
+      showLegacyAppSettings()
+    }
+  }
+
+  /**
+   * Two explicitly named bridge methods. The untrusted DSH Host webpage has
+   * no reference to this bridge; it exists only in the isolated HTML asset.
+   * All UI mutations are marshalled to Android's main thread.
+   */
+  inner class SettingsHtmlBridge(
+    private val panel: WebView,
+    private val dialog: android.app.Dialog,
+  ) {
+    @android.webkit.JavascriptInterface
+    fun state(): String = org.json.JSONObject().apply {
+      put("safeMode", ShellState.safeModeEnabled(this@MainActivity))
+      put("interfaceMode", ShellState.interfaceMode(this@MainActivity))
+      put("workspace", currentWritableWorkspacePath() ?: "")
+      put("mcpSummary", engineManager.mcpRuntimeSummary())
+      put("engineName", "DSH " + engineManager.dshVersion())
+      put("engineStatus", if (EngineProbe.check(250).optBoolean("running", false)) "running" else "idle")
+      put("version", "0.1.2")
+    }.toString()
+
+    @android.webkit.JavascriptInterface
+    fun action(name: String, payload: String) {
+      // Limit both accepted operations and payload size. No generic command,
+      // file access, SQL, script evaluation or arbitrary URL bridge is exposed.
+      if (name.length > 36 || payload.length > 2048) return
+      val options = try { org.json.JSONObject(payload) } catch (_: Throwable) { org.json.JSONObject() }
+      runOnUiThread {
+        if (isFinishing || isDestroyed || !dialog.isShowing) return@runOnUiThread
+        when (name) {
+          "close" -> dialog.dismiss()
+          "dbOverview", "dbCheck", "dbBackup", "sessionDiagnosis", "reconnectSessions" ->
+            executeHtmlDatabaseAction(panel, dialog, name)
+          "apply" -> {
+            val requestedMode = options.optString("interfaceMode")
+            if (requestedMode != ShellState.UI_MODE_NATIVE && requestedMode != ShellState.UI_MODE_MOBILE) {
+              panel.evaluateJavascript("window.DSHSettingsUI?.message('无效的界面模式')", null)
+              return@runOnUiThread
+            }
+            val wasSafe = ShellState.safeModeEnabled(this@MainActivity)
+            val nowSafe = options.optBoolean("safeMode", wasSafe)
+            val oldMode = ShellState.interfaceMode(this@MainActivity)
+            dialog.dismiss()
+            if (requestedMode != oldMode) {
+              ShellState.setInterfaceMode(this@MainActivity, requestedMode)
+              applyInterfaceModeSettings()
+            }
+            if (nowSafe != wasSafe) {
+              runProfileMutation(
+                if (nowSafe) "正在进入安全模式…" else "正在关闭安全模式并重启 DSH…",
+                rollbackOnBootFailure = { ShellState.setSafeModeEnabled(this@MainActivity, wasSafe) },
+              ) {
+                if (!ShellState.setSafeModeEnabled(this@MainActivity, nowSafe))
+                  PluginCommandResult(false, -3, "无法保存安全模式设置")
+                else PluginCommandResult(true, 0,
+                  if (nowSafe) "安全模式已启用。会话与所有插件文件已保留。"
+                  else "安全模式已关闭，原有配置已保留。")
+              }
+            } else if (requestedMode != oldMode) {
+              showStartingState("正在应用界面设置…")
+              startEngineFlow()
+            }
+          }
+          "plugins" -> { dialog.dismiss(); showPluginManager() }
+          "importSkill" -> {
+            dialog.dismiss()
+            skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream"))
+          }
+          "skills" -> { dialog.dismiss(); showNativeSkillManager() }
+          "importFiles" -> { dialog.dismiss(); showWorkspaceImportDialog() }
+          "importFolder" -> { dialog.dismiss(); showWorkspaceBulkImportPicker() }
+          "mcp" -> { dialog.dismiss(); showMcpManager() }
+          "spatial" -> { dialog.dismiss(); showSpatialTestLab() }
+          "luau" -> { dialog.dismiss(); showLuauTestLab() }
+          "github" -> { dialog.dismiss(); openExternalUrl(GITHUB_REPOSITORY_URL) }
+          else -> Log.w("DSH-Settings", "Unrecognized settings action: " + name.take(40))
+        }
+      }
+    }
+  }
+
+  /** All SQLite scans and backups run off the UI thread. No raw DSH session
+   * contents are modified or transferred to the HTML settings interface. */
+  private fun executeHtmlDatabaseAction(panel: WebView, dialog: android.app.Dialog, action: String) {
+    if (!settingsDatabaseBusy.compareAndSet(false, true)) {
+      panel.evaluateJavascript("window.DSHSettingsUI?.message('已有数据库任务正在执行')", null)
+      return
+    }
+    panel.evaluateJavascript(
+      "window.DSHSettingsUI?.databaseBusy(" + org.json.JSONObject.quote(action) + ")", null)
+    Thread {
+      val result = runCatching {
+        when (action) {
+          "sessionDiagnosis" -> engineManager.sessionRecoveryStatus()
+          "reconnectSessions" -> engineManager.reconnectExistingSessionData()
+          "dbOverview" -> {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val counts = db.counts()
+            "SQLite 快速完整性检查：" + db.quickCheck() +
+              "\n已索引会话文件：" + (counts["sessions"] ?: 0) +
+              "\n扩展索引：" + (counts["extensions"] ?: 0) +
+              "\n工具注册快照：" + (counts["snapshots"] ?: 0) +
+              "\n工具调用观察：" + (counts["observations"] ?: 0) +
+              "\n无效参数记录：" + (counts["invalidArguments"] ?: 0) +
+              "\n\n以上为可重建的元数据索引数量，不代表实际聊天总数。"
+          }
+          "dbCheck" -> {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val integrity = db.quickCheck()
+            check(integrity == "ok") { "数据库完整性异常：" + integrity }
+            val indexed = com.dshmobile.shell.database.MobileIndexService(engineManager, db).refresh()
+            val counts = db.counts()
+            "完整性：" + integrity +
+              "\n本轮发现会话文件：" + indexed.indexedSessions +
+              "\n本轮发现扩展：" + indexed.indexedExtensions +
+              "\n内置工具声明：" + indexed.bundledTools +
+              "\n会话目录扫描完整：" + indexed.sessionScanComplete +
+              "\n已记录工具观察：" + (counts["observations"] ?: 0) +
+              "\n\n会话扫描不完整时保留旧索引，不会删除原始聊天文件。"
+          }
+          "dbBackup" -> {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val saved = com.dshmobile.shell.database.DatabaseBackup.create(applicationContext, db)
+            "SQLite 一致性备份已创建。" +
+              "\n文件：" + saved.absolutePath +
+              "\n大小：" + saved.length() + " 字节" +
+              "\n校验文件：" + saved.name + ".sha256" +
+              "\n\n仅包含本应用元数据，不包含原始会话内容。"
+          }
+          else -> error("unsupported database action")
+        }
+      }
+      runOnUiThread {
+        settingsDatabaseBusy.set(false)
+        if (isFinishing || isDestroyed || !dialog.isShowing) return@runOnUiThread
+        val report = result.getOrElse { "操作失败：" + (it.message ?: it.javaClass.simpleName) }
+        val js = "window.DSHSettingsUI?.finishDatabaseAction(" +
+          org.json.JSONObject.quote(action) + "," +
+          org.json.JSONObject.quote(report.take(16000)) + "," +
+          result.isSuccess + ")"
+        panel.evaluateJavascript(js, null)
+      }
+    }.start()
+  }
+
+  /** Legacy fallback retained for older WebView providers. */
+  private fun showLegacyAppSettings() {
     val density = resources.displayMetrics.density
     val wrap = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
@@ -872,6 +1073,18 @@ class MainActivity : ComponentActivity() {
             "元数据备份已创建：${saved.absolutePath}"
           }.getOrElse { "数据库备份失败：${it.message ?: it.javaClass.simpleName}" }
           runOnUiThread { if (!isFinishing && !isDestroyed) showSimpleMessage("数据库备份", report) }
+        }.start()
+      }
+    })
+    wrap.addView(Button(this).apply {
+      text = "会话数据恢复诊断（只读）"
+      setOnClickListener {
+        Thread {
+          val result = runCatching { engineManager.sessionRecoveryStatus() }
+            .getOrElse { "诊断失败：${it.message ?: it.javaClass.simpleName}" }
+          runOnUiThread {
+            if (!isFinishing && !isDestroyed) showSimpleMessage("会话恢复诊断", result)
+          }
         }.start()
       }
     })
@@ -1654,25 +1867,69 @@ class MainActivity : ComponentActivity() {
               display: none !important;
             }
 
-            [data-rightbar-col] {
+            /*
+             * The upstream narrow-layout rightbar is fixed with inset:0
+             * (fullscreen). Clamping only its max-height left its TOP at 0
+             * and pushed file previews underneath the Android top bar.
+             * Anchor the actual rightbar panel to the BOTTOM instead.
+             *
+             * The adjacent float host contains portalled menus/tooltips;
+             * never clip/style every direct child of [data-rightbar-col].
+             */
+            :root[data-dsh-android="mobile"] [data-rightbar-col] {
               position: fixed !important;
               z-index: 820 !important;
-              left: 0 !important;
-              right: 0 !important;
-              bottom: 0 !important;
-              top: auto !important;
+              inset: auto 0 0 0 !important;
               width: 100vw !important;
               max-width: 100vw !important;
               min-width: 0 !important;
-              max-height: 72svh !important;
+              height: 0 !important;
+              overflow: visible !important;
+              pointer-events: none !important;
             }
 
-            [data-rightbar-col] > * {
+            :root[data-dsh-android="mobile"] [data-rightbar-col] > [data-sidebar-right-panel] {
+              position: fixed !important;
+              inset: auto 0 0 0 !important;
+              box-sizing: border-box !important;
               width: 100vw !important;
+              min-width: 0 !important;
               max-width: 100vw !important;
-              max-height: 72svh !important;
+              height: min(72svh, 760px) !important;
+              max-height: min(72svh, 760px) !important;
+              display: flex !important;
+              overflow: hidden !important;
+              pointer-events: none !important;
               border-radius: var(--dsh-mobile-sheet-radius) var(--dsh-mobile-sheet-radius) 0 0 !important;
-              overflow: auto !important;
+              background: var(--dsw-alias-bg-base, #fff) !important;
+              box-shadow: 0 -12px 48px rgba(0, 0, 0, .16) !important;
+            }
+
+            :root[data-dsh-android="mobile"] [data-rightbar-col] > [data-sidebar-right-panel][data-sidebar-right-open] {
+              pointer-events: auto !important;
+            }
+
+            /* Keep the toolbar of every docked file preview reachable while
+             * the inner code/file body owns its own scroll area. */
+            :root[data-dsh-android="mobile"] [data-sidebar-right-panel] [data-code-preview] {
+              min-width: 0 !important;
+              min-height: 0 !important;
+            }
+
+            #dsh-android-rightbar-scrim {
+              position: fixed;
+              inset: var(--dsh-mobile-bar) 0 0;
+              z-index: 819;
+              background: rgba(0, 0, 0, .12);
+              opacity: 0;
+              pointer-events: none;
+              transition: opacity 160ms ease;
+            }
+
+            :root[data-dsh-android="mobile"]:has([data-sidebar-right-panel][data-sidebar-right-open])
+              #dsh-android-rightbar-scrim {
+              opacity: 1;
+              pointer-events: auto;
             }
 
             [data-conversation-content] {
@@ -1688,6 +1945,18 @@ class MainActivity : ComponentActivity() {
               padding-right: var(--dsh-mobile-gutter) !important;
               scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom));
               overscroll-behavior-y: contain;
+            }
+
+            /* The upstream Chat ledger retains the loaded message window.
+             * Offscreen, settled ChatNodeSeat rows can skip paint/layout
+             * without deleting DOM nodes or changing the session/context.
+             * Keep the latest six seats fully live for streaming, focus,
+             * composer scroll-follow, popovers and turn-tail actions. */
+            @supports (content-visibility: auto) {
+              :root[data-dsh-android="mobile"] [data-chat-flow] > [data-chat-flow-key]:not(:nth-last-child(-n+6)) {
+                content-visibility: auto;
+                contain-intrinsic-size: auto 160px;
+              }
             }
 
             [data-composer-seat] {
@@ -2236,7 +2505,7 @@ class MainActivity : ComponentActivity() {
               }
               #dsh-android-mobile-bar { height: 46px; padding-block: 3px; }
               #dsh-android-mobile-bar button { width: 38px; height: 38px; min-width: 38px; min-height: 38px; }
-              [data-rightbar-col], [data-rightbar-col] > * { max-height: 82svh !important; }
+              :root[data-dsh-android="mobile"] [data-rightbar-col] > [data-sidebar-right-panel] { height: min(82svh, 760px) !important; max-height: min(82svh, 760px) !important; }
             }
 
             @media (min-width: 900px) {
@@ -2328,6 +2597,12 @@ class MainActivity : ComponentActivity() {
 
         let lastWorkspaceSyncKey = '';
         let workspaceSyncRunning = false;
+        // The full session/list RPC can be expensive for a large workspace.
+        // Deduplicate repeated shell-click/observer syncs for the same session.
+        // Always allow a new session ID immediately; retry failed probes soon.
+        let lastWorkspaceProbeSession = '';
+        let lastWorkspaceProbeAt = -Infinity;
+        let workspaceProbeSucceeded = false;
         const activeSessionId = () => {
           try {
             // The Workspace browser exposes the real main-view selection as a
@@ -2349,6 +2624,13 @@ class MainActivity : ComponentActivity() {
         const syncActiveWorkspace = async () => {
           const sessionId = activeSessionId();
           if (!sessionId || workspaceSyncRunning) return;
+          const now = performance.now();
+          const sameSession = sessionId === lastWorkspaceProbeSession;
+          const cooldown = workspaceProbeSucceeded ? 15000 : 1800;
+          if (sameSession && now - lastWorkspaceProbeAt < cooldown) return;
+          lastWorkspaceProbeSession = sessionId;
+          lastWorkspaceProbeAt = now;
+          workspaceProbeSucceeded = false;
           workspaceSyncRunning = true;
           try {
             const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
@@ -2379,7 +2661,10 @@ class MainActivity : ComponentActivity() {
               accepted = !!(window.androidBridge
                 && window.androidBridge.setCurrentWorkspacePath(BRIDGE_CAP, cwd));
             } catch (_) {}
-            if (accepted) lastWorkspaceSyncKey = key;
+            if (accepted) {
+              lastWorkspaceSyncKey = key;
+              workspaceProbeSucceeded = true;
+            }
           } catch (_) {
             // Session navigation can race the Host list update. The next
             // structural navigation/click retries without changing the root.
@@ -2974,6 +3259,19 @@ class MainActivity : ComponentActivity() {
             document.body.appendChild(bar);
           }
           installToolsPanel();
+          // The Android sheet replaces the upstream fullscreen document pane.
+          // Tapping outside must close the dock panel, not activate the chat
+          // behind it. The upstream toggle keeps session/tab state intact.
+          if (UI_MODE === 'mobile' && !document.getElementById('dsh-android-rightbar-scrim')) {
+            const rightbarScrim = document.createElement('div');
+            rightbarScrim.id = 'dsh-android-rightbar-scrim';
+            rightbarScrim.setAttribute('aria-hidden', 'true');
+            rightbarScrim.addEventListener('click', () => {
+              const rightbar = document.querySelector('[data-sidebar-right-panel][data-sidebar-right-open]');
+              rightbar?.querySelector('[data-sidebar-right-toggle]')?.click();
+            });
+            document.body.appendChild(rightbarScrim);
+          }
           let scrim = document.getElementById(SCRIM_ID);
           if (!scrim) {
             scrim = document.createElement('div');
@@ -3475,14 +3773,22 @@ class MainActivity : ComponentActivity() {
           'nav', 'button[aria-current]', 'button[aria-selected]',
           '[data-sidebar-collapsed]', '[data-state="active"]'
         ].join(',');
+        // Streaming Markdown, code toolbars and historical message cards often
+        // contain buttons/nav nodes. Those are NOT Android shell changes.
+        // A broad querySelector over every inserted subtree grows costly as
+        // the loaded conversation grows; short-circuit before the subtree walk.
+        const inTranscript = (node) => node instanceof Element
+          && !!node.closest('[data-chat-flow], [data-trajectory-scroll]');
         const mutationRelevant = (mutation) => {
           const target = mutation.target instanceof Element ? mutation.target : null;
+          if (target && inTranscript(target)) return false;
           if (mutation.type === 'attributes') {
             return !!target && (target.matches(relevantSelector) || !!target.closest('[role="dialog"], nav, [data-composer-card]'));
           }
           const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
           return nodes.some((node) => {
             if (!(node instanceof Element)) return false;
+            if (inTranscript(node)) return false;
             return node.matches(relevantSelector) || !!node.querySelector(relevantSelector);
           });
         };
@@ -3501,7 +3807,12 @@ class MainActivity : ComponentActivity() {
         // No polling and no message-body text scans. Streaming conversation DOM
         // changes that do not touch app-shell/settings/composer structures are
         // ignored, avoiding a sync/layout pass on every generated token.
-        document.addEventListener('click', schedule, true);
+        document.addEventListener('click', (event) => {
+          // Chat message actions do not change the Android toolbar. Avoid a
+          // full DOM synchronization and session/list fetch on every click.
+          if (inTranscript(event.target)) return;
+          schedule();
+        }, true);
         window.addEventListener('resize', schedule, { passive: true });
         window.addEventListener('popstate', () => { schedule(); void syncActiveWorkspace(); }, { passive: true });
         window.addEventListener('hashchange', () => { schedule(); void syncActiveWorkspace(); }, { passive: true });
@@ -5837,6 +6148,33 @@ class MainActivity : ComponentActivity() {
           .show()
       }
     }
+    val recoveryHistory = Button(this).apply {
+      text = "历史会话诊断与重连（不删除数据）"
+      setOnClickListener {
+        Thread {
+          val report = engineManager.sessionRecoveryStatus()
+          runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("历史会话诊断")
+              .setMessage(report.take(14000))
+              .setNegativeButton("关闭", null)
+              .setPositiveButton("尝试重新连接已有会话") { _, _ ->
+                Thread {
+                  val result = runCatching { engineManager.reconnectExistingSessionData() }
+                  runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                      .setTitle(if (result.isSuccess) "重连完成" else "无法自动重连")
+                      .setMessage(result.getOrElse { it.message ?: "重连失败，原文件未修改" })
+                      .setPositiveButton("确定", null).show()
+                  }
+                }.start()
+              }.show()
+          }
+        }.start()
+      }
+    }
     val copyDiagnostics = Button(this).apply {
       text = "复制诊断"
       setOnClickListener {
@@ -5847,7 +6185,7 @@ class MainActivity : ComponentActivity() {
       }
     }
     recoveryControls.clear()
-    recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, copyDiagnostics)
+    recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, recoveryHistory, copyDiagnostics)
     recoveryControls.forEach { it.visibility = View.GONE }
     guide.addView(engineStatus)
     guide.addView(progressText)
@@ -5855,6 +6193,7 @@ class MainActivity : ComponentActivity() {
     guide.addView(retry)
     guide.addView(safeMode)
     guide.addView(resetConfig)
+    guide.addView(recoveryHistory)
     guide.addView(copyDiagnostics)
     return guide
   }
@@ -5869,6 +6208,25 @@ class MainActivity : ComponentActivity() {
     runOnUiThread { showStartingState("正在连接 DeepSeek Harness…") }
     Thread {
       try {
+        // Verify history visibility even if a previous Host is still alive.
+        // This protects old sessions from being masked by a fresh empty store.
+        engineManager.sessionStoreBlockReason()?.let { issue ->
+          runOnUiThread {
+            showEngineFailure("历史会话不可访问：" + issue)
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("需要恢复会话目录")
+              .setMessage(issue + "\\n\\n不要卸载或清除应用数据。")
+              .setNegativeButton("稍后", null)
+              .setPositiveButton("存储权限") { _, _ ->
+                try {
+                  startActivity(android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    android.net.Uri.parse("package:" + packageName)))
+                } catch (_: Exception) {}
+              }.show()
+          }
+          return@Thread
+        }
         if (EngineProbe.check(250).optBoolean("running", false)) {
           // Re-arm foreground ownership even when the Host survived an
           // Activity recreation or was already listening before this launch.
@@ -5879,22 +6237,54 @@ class MainActivity : ComponentActivity() {
         }
 
         if (!engineManager.engineReady) {
+          // The old live /usr may be missing Code Engine modules. Showing that
+          // stale health report *during extraction* falsely suggests the new
+          // APK still lacks them. The complete snapshot is independently
+          // checked in a staging directory before it can replace live /usr.
           runOnUiThread {
             progressText.visibility = View.VISIBLE
-            progressText.text = engineManager.runtimeHealth().describe()
+            progressText.text = "正在从当前 APK 恢复完整运行时。旧版缺失文件不代表新版缺失；解压完成后会重新校验 Code Engine 和 MCP。原有会话及配置不会被覆盖。"
             guideView.visibility = View.VISIBLE
             webView.visibility = View.GONE
             engineStatus.text = "正在修复并解压内置运行时…"
           }
+          var lastProgressMb = -1L
           val ok = engineManager.extractSnapshot { done, _ ->
-            runOnUiThread {
-              engineStatus.text = "正在解压运行时… " + done / 1024 / 1024 + " MB"
+            val progressMb = done / (4L * 1024 * 1024)
+            if (progressMb != lastProgressMb) {
+              lastProgressMb = progressMb
+              runOnUiThread {
+                engineStatus.text = "正在解压运行时… " + done / 1024 / 1024 + " MB"
+                progressText.text = "正在写入临时目录，完成后才会核验并启用新版运行时。请保留当前应用及用户数据。"
+              }
             }
           }
           if (!ok) {
             runOnUiThread { showEngineFailure("运行时解压/校验失败") }
             return@Thread
           }
+        }
+
+        // Never start an apparently fresh Host while prior sessions may be
+        // unreadable after an APK upgrade. A running Host could otherwise
+        // generate new empty state and mask recoverable history.
+        val sessionBlock = engineManager.sessionStoreBlockReason()
+        if (sessionBlock != null) {
+          runOnUiThread {
+            showEngineFailure("历史会话目录暂时不可访问：" + sessionBlock)
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("需要恢复会话目录访问")
+              .setMessage(sessionBlock + "\n\n原始数据没有被此操作删除。")
+              .setNegativeButton("稍后", null)
+              .setPositiveButton("打开应用设置") { _, _ ->
+                try {
+                  val uri = android.net.Uri.parse("package:" + packageName)
+                  startActivity(android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri))
+                } catch (_: Exception) {}
+              }.show()
+          }
+          return@Thread
         }
 
         runOnUiThread { showStartingState("正在启动 DSH 引擎…", "首次启动或插件较多时可能需要一些时间。") }
