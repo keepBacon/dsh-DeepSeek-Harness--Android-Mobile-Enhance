@@ -1420,29 +1420,102 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
+  /**
+   * Refuse to silently present an empty DSH when the previous session store is
+   * inaccessible or two independent history roots compete. No file mutation.
+   * The app's global storage grant can be revoked after an APK update.
+   */
+  fun sessionStoreBlockReason(): String? {
+    val privateDsh = File(homeDir, ".dsh")
+    val privateSessions = File(privateDsh, "sessions")
+    val publicDsh = dshDataDir
+    val publicSessions = File(publicDsh, "sessions")
+    val hasPrivateHistory = privateSessions.isDirectory &&
+      (privateSessions.listFiles()?.isNotEmpty() == true)
+    val hasPublicHistory = publicSessions.isDirectory &&
+      (publicSessions.listFiles()?.isNotEmpty() == true)
+    val isLinked = java.nio.file.Files.isSymbolicLink(privateSessions.toPath())
+    if (isLinked && (!privateSessions.isDirectory || privateSessions.listFiles() == null)) {
+      return "旧会话链接不可读取，历史数据可能仍在 Documents/dshdata。请恢复本应用的所有文件访问权限；不要卸载或清除数据。"
+    }
+    if (android.os.Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+      // A running profile from a previous install may have put sessions in
+      // Documents/dshdata. Without permission File.exists() reports false;
+      // treating that as a genuinely empty profile silently hides history.
+      if (userHomeInitializedMarker.isFile || isLinked ||
+          File(publicDsh, ".migrated-from").isFile || File(privateDsh, "settings.yaml").isFile) {
+        return "Android 未授予所有文件访问权限，不能排除旧会话存储在 Documents/dshdata。请先授权，避免误进入空会话库。"
+      }
+    }
+    if (!isLinked && hasPrivateHistory && hasPublicHistory) {
+      return "检测到私有和公共目录均有会话文件。为防止选错会话库，已暂停自动启动；两个目录均保持原样，请先检查数据恢复诊断。"
+    }
+    if (!isLinked && !hasPrivateHistory && hasPublicHistory) {
+      // The normal recovery path should reconnect the data. If it did not,
+      // do not proceed with a newly-created empty session tree.
+      return "公共目录中存在旧会话，而当前私有会话目录没有连接它。请运行数据恢复诊断并重新连接。"
+    }
+    return null
+  }
+
+  /** Only reattach already-present public files; never initiate a migration. */
+  @Synchronized
+  fun reconnectExistingSessionData(): String {
+    val publicDsh = dshDataDir
+    val privateDsh = File(homeDir, ".dsh")
+    if (android.os.Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+      throw java.io.IOException("尚未获得所有文件访问权限，请先在 Android 设置中授权。")
+    }
+    if (!publicDsh.isDirectory || publicDsh.listFiles() == null) {
+      throw java.io.IOException("Documents/dshdata 不可读取。未移动或删除任何文件。")
+    }
+    val publicSessions = File(publicDsh, "sessions")
+    if (!publicSessions.isDirectory) {
+      throw java.io.IOException("公共目录下没有可读取的 sessions/，请检查旧数据实际存放位置。未创建空目录。")
+    }
+    recoverExternalDataLinks(privateDsh, publicDsh, File(publicDsh, ".migrated-from"))
+    val issue = sessionStoreBlockReason()
+    if (issue != null) throw java.io.IOException(issue)
+    return sessionRecoveryStatus()
+  }
+
   /** Read-only local recovery report; never includes session contents or credentials. */
   fun sessionRecoveryStatus(): String {
     val publicDsh = dshDataDir
     val privateDsh = File(homeDir, ".dsh")
     return buildString {
       append("公共目录：").append(publicDsh.absolutePath)
-      append("\\n公共目录可读取：").append(publicDsh.isDirectory && publicDsh.listFiles() != null)
+      append("\n私有 HOME：").append(homeDir.absolutePath)
+      append("\n会话读取保护：").append(sessionStoreBlockReason() ?: "未发现明显的路径冲突")
+      append("\n原始文件未由此诊断修改。")
+      append("\n公共目录可读取：").append(publicDsh.isDirectory && publicDsh.listFiles() != null)
       if (android.os.Build.VERSION.SDK_INT >= 30) {
-        append("\\n所有文件访问权限：").append(Environment.isExternalStorageManager())
+        append("\n所有文件访问权限：").append(Environment.isExternalStorageManager())
       }
-      append("\\n迁移标记：").append(File(publicDsh, ".migrated-from").isFile)
+      append("\n迁移标记：").append(File(publicDsh, ".migrated-from").isFile)
       for (relative in listOf("sessions", "storages", "attachments")) {
         val privateFile = File(privateDsh, relative)
         val publicFile = File(publicDsh, relative)
         val symlink = java.nio.file.Files.isSymbolicLink(privateFile.toPath())
-        append("\\n").append(relative)
+        append("\n").append(relative)
           .append("：私有路径=").append(if (symlink) "链接" else if (privateFile.isDirectory) "目录" else "缺失")
           .append("；链接有效=").append(if (symlink) privateFile.isDirectory else "不适用")
           .append("；公共目录=").append(publicFile.isDirectory)
           .append("；公共条目=").append(publicFile.listFiles()?.size ?: -1)
           .append("；私有条目=").append(privateFile.listFiles()?.size ?: -1)
       }
-      append("\\n注意：条目数是目录第一层文件数，不等于会话总数；此检查不读取或删除聊天内容。")
+      val oldLocations = listOf(
+        File(homeDir, ".dsh/sessions"),
+        File(dshDataDir, "sessions"),
+        File(context.filesDir, "dshdata-fallback/sessions"),
+        File(homeDir, ".dsh/profiles/web/sessions"),
+      )
+      for (candidate in oldLocations) {
+        append("\n候选路径：").append(candidate.absolutePath)
+          .append("；目录可读：").append(candidate.isDirectory && candidate.listFiles() != null)
+          .append("；条目：").append(candidate.listFiles()?.size ?: -1)
+      }
+      append("\n注意：条目数是目录第一层文件数，不等于会话总数；此检查不读取或删除聊天内容。")
     }
   }
 
@@ -1696,6 +1769,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
     // 进程级 CAS：并发调用只有一个能真正启动（设备实证 EADDRINUSE 双启动）。
     if (!STARTING.compareAndSet(false, true)) return true
     return try {
+      // Stop before any profile/plugin initialization can create an apparent
+      // empty session store in place of inaccessible old history.
+      sessionStoreBlockReason()?.let { message ->
+        LAST_START_ERROR = message
+        Log.e(TAG, "protected session startup blocked: $message")
+        return false
+      }
       // This must run before the Host starts, not only before Android-native
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
