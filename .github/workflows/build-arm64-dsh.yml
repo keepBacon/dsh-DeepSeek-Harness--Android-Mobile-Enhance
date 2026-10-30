@@ -6,6 +6,7 @@ on:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
       - 'scripts/ci-restore-legacy-keystore.py'
+      - 'scripts/ci-verify-current-apk.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -102,23 +103,27 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
           bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=38
+      - name: Explicitly sign APK with verified original key
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          "$tools/apksigner" sign --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey --ks-pass pass:android \
+            --key-pass pass:android --out "$RUNNER_TEMP/original-signed.apk" "$apk"
+          mv "$RUNNER_TEMP/original-signed.apk" "$apk"
       - name: Verify signed APK, package ID, version and Runtime
         shell: bash
         run: |
           set -euo pipefail
-          apk=app/build/outputs/apk/debug/app-debug.apk
-          test -s "$apk"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" > signer.txt
-          grep -F 'Signer #1 certificate SHA-256 digest: 0dfb924793215056c19d413987c9858b8aa9d90604ffb18d60cfd75be0697792' signer.txt
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep "^package: name='com.dshmobile.shell' versionCode='38'"
-          python3 - "$apk" <<'PY'
-          import hashlib,sys,zipfile,pathlib
-          data=pathlib.Path('app/src/main/assets/snapshot.tar.xz').read_bytes()
-          digest=hashlib.sha256(data).hexdigest()
-          with zipfile.ZipFile(sys.argv[1]) as archive:
-              if hashlib.sha256(archive.read('assets/snapshot.tar.xz')).hexdigest()!=digest: raise SystemExit('runtime content mismatch')
-              if 'sha256='+digest not in archive.read('assets/runtime-version.txt').decode(): raise SystemExit('runtime marker mismatch')
-          PY
+          python3 scripts/ci-verify-current-apk.py \
+            --apk app/build/outputs/apk/debug/app-debug.apk \
+            --snapshot app/src/main/assets/snapshot.tar.xz \
+            --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
+            --version-code 38
       - uses: actions/upload-artifact@v4
         with:
           name: DSH-ARM64-Signed-Upgrade-${{ github.run_number }}
