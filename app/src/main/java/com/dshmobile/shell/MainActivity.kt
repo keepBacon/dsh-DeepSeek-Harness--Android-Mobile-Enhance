@@ -753,8 +753,20 @@ class MainActivity : ComponentActivity() {
       }
       panel.addJavascriptInterface(SettingsHtmlBridge(panel, dialog), "DSHSettings")
       panel.webViewClient = object : WebViewClient() {
-        // No navigation is permitted from this trusted, offline settings asset.
+        // Only the bundled settings asset is allowed. Failure to load must
+        // expose the old native settings rather than leaving an empty dialog.
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
+        override fun onReceivedError(
+          view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError,
+        ) {
+          if (!request.isForMainFrame) return
+          runOnUiThread {
+            if (dialog.isShowing) {
+              dialog.dismiss()
+              showLegacyAppSettings()
+            }
+          }
+        }
       }
       dialog.setContentView(panel, ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
