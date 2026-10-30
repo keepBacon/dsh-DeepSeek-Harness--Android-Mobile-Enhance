@@ -5891,9 +5891,13 @@ class MainActivity : ComponentActivity() {
         }
 
         if (!engineManager.engineReady) {
+          // The old live /usr may be missing Code Engine modules. Showing that
+          // stale health report *during extraction* falsely suggests the new
+          // APK still lacks them. The complete snapshot is independently
+          // checked in a staging directory before it can replace live /usr.
           runOnUiThread {
             progressText.visibility = View.VISIBLE
-            progressText.text = engineManager.runtimeHealth().describe()
+            progressText.text = "正在从当前 APK 恢复完整运行时。旧版缺失文件不代表新版缺失；解压完成后会重新校验 Code Engine 和 MCP。原有会话及配置不会被覆盖。"
             guideView.visibility = View.VISIBLE
             webView.visibility = View.GONE
             engineStatus.text = "正在修复并解压内置运行时…"
@@ -5901,6 +5905,8 @@ class MainActivity : ComponentActivity() {
           val ok = engineManager.extractSnapshot { done, _ ->
             runOnUiThread {
               engineStatus.text = "正在解压运行时… " + done / 1024 / 1024 + " MB"
+              // Keep the explanation visible, not the old /usr error list.
+              progressText.text = "正在写入临时目录，完成后才会核验并启用新版运行时。请保留当前应用及用户数据。"
             }
           }
           if (!ok) {
