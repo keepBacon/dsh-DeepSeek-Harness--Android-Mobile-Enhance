@@ -1,4 +1,4 @@
-name: Build CURRENT DSH (legacy-signed, no APK upload)
+name: Build CURRENT DSH (legacy-signed APK)
 on:
   push:
     branches:
@@ -50,7 +50,7 @@ jobs:
           python3 - "$RUNNER_TEMP/dsh-verified/runtime.json" <<'PY'
           import pathlib,sys,json
           d=json.loads(pathlib.Path(sys.argv[1]).read_text())
-          pathlib.Path("app/src/main/assets/runtime-version.txt").write_text("app=0.1.2\\ndsh={dsh_version}\\nsha256={runtime_sha256}\\n".format(**d))
+          pathlib.Path("app/src/main/assets/runtime-version.txt").write_text("app=0.1.2\ndsh={dsh_version}\nsha256={runtime_sha256}\n".format(**d))
           PY
       - name: Recover ORIGINAL Termux signing key and match installed certificate
         shell: bash
