@@ -842,6 +842,19 @@ class MainActivity : ComponentActivity() {
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
 
+    wrap.addView(Button(this).apply {
+      text = "检查会话与归档数据（只读）"
+      setOnClickListener {
+        Thread {
+          val report = runCatching { engineManager.sessionDataDiagnostics() }
+            .getOrElse { "数据检查失败：" + (it.message ?: it.javaClass.simpleName) }
+          runOnUiThread {
+            if (!isFinishing && !isDestroyed) showSimpleMessage("会话数据检查", report)
+          }
+        }.start()
+      }
+    })
+
     wrap.addView(TextView(this).apply {
       text = "数据库与诊断"
       textSize = 16f
@@ -4951,10 +4964,15 @@ class MainActivity : ComponentActivity() {
             started = engineManager.startEngine(runtimeAlreadyChecked = true)
             running = started && waitForEngineReady(45_000L)
           }
-          result = PluginCommandResult(false, -3, if (running)
-            "安全模式切换启动失败；已恢复切换前设置并重新启动 DSH。"
-            else if (restored) "已恢复切换前设置，但 DSH 仍无法启动。请使用启动恢复入口。"
-            else "安全模式启动失败，回滚设置失败。请使用启动恢复入口。")
+          val recoveryDiagnostics = engineManager.engineDiagnostics(8000)
+          result = PluginCommandResult(false, -3, buildString {
+            append(if (running)
+              "安全模式切换启动失败；已恢复切换前设置并重新启动 DSH。"
+              else if (restored) "已恢复切换前设置，但 DSH 仍无法启动。"
+              else "安全模式启动失败，回滚设置失败。")
+            append("\n-3 是 Android 操作失败标记，不是 DSH 进程实际退出码。")
+            if (recoveryDiagnostics.isNotBlank()) append("\n\n").append(recoveryDiagnostics)
+          })
         }
         if (running) {
           startEngineService()
