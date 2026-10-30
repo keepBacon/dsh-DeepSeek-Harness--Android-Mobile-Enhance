@@ -6205,6 +6205,28 @@ class MainActivity : ComponentActivity() {
           }
         }
 
+        // Never start an apparently fresh Host while prior sessions may be
+        // unreadable after an APK upgrade. A running Host could otherwise
+        // generate new empty state and mask recoverable history.
+        val sessionBlock = engineManager.sessionStoreBlockReason()
+        if (sessionBlock != null) {
+          runOnUiThread {
+            showEngineFailure("历史会话目录暂时不可访问：" + sessionBlock)
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("需要恢复会话目录访问")
+              .setMessage(sessionBlock + "\n\n原始数据没有被此操作删除。")
+              .setNegativeButton("稍后", null)
+              .setPositiveButton("打开应用设置") { _, _ ->
+                try {
+                  val uri = android.net.Uri.parse("package:" + packageName)
+                  startActivity(android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri))
+                } catch (_: Exception) {}
+              }.show()
+          }
+          return@Thread
+        }
+
         runOnUiThread { showStartingState("正在启动 DSH 引擎…", "首次启动或插件较多时可能需要一些时间。") }
         var started = engineManager.startEngine(runtimeAlreadyChecked = true)
         var running = started && waitForEngineReady()
