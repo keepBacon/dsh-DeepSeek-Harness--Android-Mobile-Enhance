@@ -29,8 +29,16 @@ jobs:
               set -e
               echo "OS and architecture: $(uname -sm)"
               echo "Termux prefix: $PREFIX"
-              node -e "console.log(process.platform,process.arch)" || true
-              bash build-termux.sh
+              # The Termux Docker entrypoint/login wrapper may reset host-injected
+              # environment. Set the mode at the actual build process boundary.
+              # A missing flag would run SDK/Gradle in this native-only container.
+              export DSH_RUNTIME_ONLY=1 DSH_REFRESH_RUNTIME=1
+              export DSH_NATIVE_COMPAT=1 DSH_ALLOW_DEGRADED=0
+              echo "DSH runtime-only mode: $DSH_RUNTIME_ONLY"
+              test "$DSH_RUNTIME_ONLY" = 1
+              DSH_RUNTIME_ONLY=1 DSH_REFRESH_RUNTIME=1 \
+                DSH_NATIVE_COMPAT=1 DSH_ALLOW_DEGRADED=0 \
+                bash build-termux.sh
             '
           test -s app/src/main/assets/snapshot.tar.xz
       - name: Validate ARM64 runtime (no placeholder)
