@@ -1890,6 +1890,18 @@ class MainActivity : ComponentActivity() {
               overscroll-behavior-y: contain;
             }
 
+            /* The upstream Chat ledger retains the loaded message window.
+             * Offscreen, settled ChatNodeSeat rows can skip paint/layout
+             * without deleting DOM nodes or changing the session/context.
+             * Keep the latest six seats fully live for streaming, focus,
+             * composer scroll-follow, popovers and turn-tail actions. */
+            @supports (content-visibility: auto) {
+              :root[data-dsh-android="mobile"] [data-chat-flow] > [data-chat-flow-key]:not(:nth-last-child(-n+6)) {
+                content-visibility: auto;
+                contain-intrinsic-size: auto 160px;
+              }
+            }
+
             [data-composer-seat] {
               width: 100% !important;
               min-width: 0 !important;
@@ -2528,6 +2540,12 @@ class MainActivity : ComponentActivity() {
 
         let lastWorkspaceSyncKey = '';
         let workspaceSyncRunning = false;
+        // The full session/list RPC can be expensive for a large workspace.
+        // Deduplicate repeated shell-click/observer syncs for the same session.
+        // Always allow a new session ID immediately; retry failed probes soon.
+        let lastWorkspaceProbeSession = '';
+        let lastWorkspaceProbeAt = -Infinity;
+        let workspaceProbeSucceeded = false;
         const activeSessionId = () => {
           try {
             // The Workspace browser exposes the real main-view selection as a
@@ -2549,6 +2567,13 @@ class MainActivity : ComponentActivity() {
         const syncActiveWorkspace = async () => {
           const sessionId = activeSessionId();
           if (!sessionId || workspaceSyncRunning) return;
+          const now = performance.now();
+          const sameSession = sessionId === lastWorkspaceProbeSession;
+          const cooldown = workspaceProbeSucceeded ? 15000 : 1800;
+          if (sameSession && now - lastWorkspaceProbeAt < cooldown) return;
+          lastWorkspaceProbeSession = sessionId;
+          lastWorkspaceProbeAt = now;
+          workspaceProbeSucceeded = false;
           workspaceSyncRunning = true;
           try {
             const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
@@ -2579,7 +2604,10 @@ class MainActivity : ComponentActivity() {
               accepted = !!(window.androidBridge
                 && window.androidBridge.setCurrentWorkspacePath(BRIDGE_CAP, cwd));
             } catch (_) {}
-            if (accepted) lastWorkspaceSyncKey = key;
+            if (accepted) {
+              lastWorkspaceSyncKey = key;
+              workspaceProbeSucceeded = true;
+            }
           } catch (_) {
             // Session navigation can race the Host list update. The next
             // structural navigation/click retries without changing the root.
@@ -3675,14 +3703,22 @@ class MainActivity : ComponentActivity() {
           'nav', 'button[aria-current]', 'button[aria-selected]',
           '[data-sidebar-collapsed]', '[data-state="active"]'
         ].join(',');
+        // Streaming Markdown, code toolbars and historical message cards often
+        // contain buttons/nav nodes. Those are NOT Android shell changes.
+        // A broad querySelector over every inserted subtree grows costly as
+        // the loaded conversation grows; short-circuit before the subtree walk.
+        const inTranscript = (node) => node instanceof Element
+          && !!node.closest('[data-chat-flow], [data-trajectory-scroll]');
         const mutationRelevant = (mutation) => {
           const target = mutation.target instanceof Element ? mutation.target : null;
+          if (target && inTranscript(target)) return false;
           if (mutation.type === 'attributes') {
             return !!target && (target.matches(relevantSelector) || !!target.closest('[role="dialog"], nav, [data-composer-card]'));
           }
           const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
           return nodes.some((node) => {
             if (!(node instanceof Element)) return false;
+            if (inTranscript(node)) return false;
             return node.matches(relevantSelector) || !!node.querySelector(relevantSelector);
           });
         };
@@ -3701,7 +3737,12 @@ class MainActivity : ComponentActivity() {
         // No polling and no message-body text scans. Streaming conversation DOM
         // changes that do not touch app-shell/settings/composer structures are
         // ignored, avoiding a sync/layout pass on every generated token.
-        document.addEventListener('click', schedule, true);
+        document.addEventListener('click', (event) => {
+          // Chat message actions do not change the Android toolbar. Avoid a
+          // full DOM synchronization and session/list fetch on every click.
+          if (inTranscript(event.target)) return;
+          schedule();
+        }, true);
         window.addEventListener('resize', schedule, { passive: true });
         window.addEventListener('popstate', () => { schedule(); void syncActiveWorkspace(); }, { passive: true });
         window.addEventListener('hashchange', () => { schedule(); void syncActiveWorkspace(); }, { passive: true });
