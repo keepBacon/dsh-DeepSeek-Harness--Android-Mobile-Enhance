@@ -12,6 +12,8 @@
   ]);
   const rows = new Map();
   let enabled = true, opened = false, chosen = null, queued = false, tabParent = null, currentSession = null;
+  const pendingCalls = new Set();
+  let fullRescan = false, remountNeeded = false, scanTimer = null;
 
   function el(tag, cls, value) {
     const node = document.createElement(tag);
@@ -39,21 +41,19 @@
     return document.querySelector('[data-row-key^="session:"][aria-selected="true"]')
       ?.getAttribute('data-row-key') || location.pathname + location.search;
   }
-  function take(item) {
-    if (!enabled || !item || typeof item !== 'object') return;
+  function take(item, deferDraw = false) {
+    if (!enabled || !item || typeof item !== 'object') return false;
     const id = short(item.callId || item.id, 160);
-    if (!id) return;
+    if (!id) return false;
     const old = rows.get(id);
     const status = ['running', 'success', 'failure'].includes(item.status)
       ? item.status : (old?.status || 'running');
-    // A DOM poll with unchanged data must not redraw the UI; otherwise the
-    // pill mutation would schedule another observation frame indefinitely.
     const normalizedName = short(item.name || old?.name || 'tool', 90);
     const normalizedOperation = short(item.operation ?? old?.operation ?? '', 160);
     const normalizedInput = item.input === undefined ? (old?.input || '（界面未公开输入）') : redact(item.input);
     const normalizedResult = item.result === undefined ? (old?.result || '（界面未公开结果）') : redact(item.result);
     if (old && old.name === normalizedName && old.operation === normalizedOperation &&
-        old.status === status && old.input === normalizedInput && old.result === normalizedResult) return;
+        old.status === status && old.input === normalizedInput && old.result === normalizedResult) return false;
     rows.set(id, {
       id, status, name: normalizedName,
       operation: normalizedOperation,
@@ -64,8 +64,7 @@
       endedAt: status === 'running' ? null : (old?.endedAt || Date.now())
     });
     if (rows.size > MAX_ROWS) rows.delete(rows.keys().next().value);
-    // Only state transitions are sent; DOM result streaming can change on
-    // every frame. No prompts, tool arguments or outputs cross the bridge.
+    // Only status transitions cross the Android bridge, never tool arguments/results.
     if (!old || old.status !== status) {
       try {
         const raw = status === 'failure' ? String(normalizedResult).toUpperCase() : '';
@@ -77,16 +76,27 @@
         }
       } catch (_) { /* Observation is never required for a real tool call. */ }
     }
-    draw();
+    if (!deferDraw) draw();
+    return true;
   }
-  function observeDom() {
+  function observeDom(calls = null) {
     if (!enabled) return;
     const now = sessionKey();
+    let changed = false;
     if (currentSession !== null && now !== currentSession) {
       rows.clear(); chosen = null;
+      changed = true;
+      calls = null;
     }
     currentSession = now;
-    for (const call of document.querySelectorAll('[data-chat-call-id]')) {
+    // A long conversation may retain thousands of tool nodes. Only the newest
+    // MAX_ROWS are relevant on initial load/session switch; normal mutations
+    // scan their affected calls only, not every historical call each frame.
+    const targets = calls === null
+      ? Array.from(document.querySelectorAll('[data-chat-call-id]')).slice(-MAX_ROWS)
+      : calls;
+    for (const call of targets) {
+      if (!call?.isConnected) continue;
       const tool = call.querySelector('[data-tool][data-state]');
       if (!tool) continue;
       const original = tool.getAttribute('data-state') || '';
@@ -96,12 +106,14 @@
       const caption = short(tool.querySelector('button,[role="button"]')?.textContent?.trim()
         || name, 170);
       const blocks = Array.from(tool.querySelectorAll('pre,code'))
-        .map(node => short(node.textContent, 2000));
-      take({id:call.getAttribute('data-chat-call-id'), name, operation:caption, status,
-        input:blocks[0], result:blocks[1], source: 'DSH / 内置或插件'});
+        .slice(0, 2).map(node => short(node.textContent, 2000));
+      changed = take({id:call.getAttribute('data-chat-call-id'), name, operation:caption, status,
+        input:blocks[0], result:blocks[1], source: 'DSH / 内置或插件'}, true) || changed;
     }
+    // One redraw for the entire batch instead of a full panel rebuild per call.
+    if (changed) draw();
   }
-  function findTabRow() {
+    function findTabRow() {
     const candidates = Array.from(document.querySelectorAll('button,[role="tab"]'))
       .filter(node => /^(对话|轨迹|上下文|Chat|Trajectory|Context)$/i.test((node.textContent || '').trim()));
     const chat = candidates.find(node => /^(对话|Chat)$/i.test((node.textContent || '').trim()));
@@ -158,12 +170,14 @@
       panel.append(head,el('div','dsh-pcm-body'));
       document.body.appendChild(panel);
     }
-    const next = findTabRow();
-    if (next && next !== tabParent) {
+    const next = tabParent?.isConnected && pill.parentElement === tabParent
+      ? tabParent : findTabRow();
+    if (next && (next !== tabParent || pill.parentElement !== next)) {
       tabParent = next;
       next.appendChild(pill);
       next.style.minWidth = '0';
     }
+    if (!next) tabParent = null;
   }
   function draw() {
     mount();
@@ -208,29 +222,77 @@
       body.appendChild(card);
     }
   }
-  function schedule() {
+  function schedule(calls = [], full = false, remount = false) {
+    if (!enabled) return;
+    for (const call of calls) pendingCalls.add(call);
+    if (full || pendingCalls.size > MAX_ROWS) fullRescan = true;
+    if (remount) remountNeeded = true;
     if (queued) return;
-    queued=true;
-    requestAnimationFrame(()=>{queued=false;mount();observeDom();draw();});
+    queued = true;
+    // Streaming tool results can mutate the DOM on every token. Bound
+    // observation to roughly 8Hz and coalesce all calls in that interval.
+    scanTimer = setTimeout(() => {
+      scanTimer = null;
+      requestAnimationFrame(() => {
+        queued = false;
+        if (!enabled) return;
+        const scanAll = fullRescan, remount = remountNeeded;
+        const work = [...pendingCalls];
+        pendingCalls.clear(); fullRescan = false; remountNeeded = false;
+        if (remount) tabParent = null;
+        mount();
+        observeDom(scanAll ? null : work);
+        if (remount) draw();
+      });
+    }, 120);
   }
-  const observer=new MutationObserver(records=>{
-    if(records.every(record=>record.target?.closest?.('#dsh-pcm-panel')))return;
-    schedule();
+  const observer = new MutationObserver(records => {
+    if (!enabled) return;
+    const calls = new Set();
+    let full = false, remount = false;
+    for (const record of records) {
+      const target = record.target instanceof Element
+        ? record.target : record.target?.parentElement;
+      // Mutations made by our own pill/panel must never schedule another pass.
+      if (target?.closest('#dsh-pcm-panel,#dsh-pcm-pill')) continue;
+      if (record.type === 'attributes') {
+        if (record.attributeName === 'aria-selected' &&
+            target?.matches('[data-row-key^="session:"]')) full = true;
+        else if (record.attributeName !== 'aria-selected') {
+          const call = target?.closest('[data-chat-call-id]');
+          if (call) calls.add(call);
+        }
+        continue;
+      }
+      const ownerCall = target?.closest('[data-chat-call-id]');
+      if (ownerCall) { calls.add(ownerCall); continue; }
+      for (const node of record.addedNodes) {
+        if (!(node instanceof Element) || node.closest('#dsh-pcm-panel,#dsh-pcm-pill')) continue;
+        if (node.matches('[data-chat-call-id]')) calls.add(node);
+        // Query only newly inserted subtrees, never the entire conversation.
+        for (const call of node.querySelectorAll('[data-chat-call-id]')) calls.add(call);
+        if (node.matches('[data-row-key^="session:"]') ||
+            node.querySelector('[data-row-key^="session:"]')) full = true;
+        if (node.matches('[role="tab"]') || node.querySelector('[role="tab"]')) remount = true;
+      }
+      if (tabParent && !tabParent.isConnected) remount = true;
+    }
+    if (full || remount || calls.size) schedule(calls, full, remount);
   });
   function start() {
     if (!document.body){document.addEventListener('DOMContentLoaded',start,{once:true});return;}
-    mount();observeDom();draw();
+    mount(); observeDom();
     observer.observe(document.body,{
       subtree:true,childList:true,attributes:true,
       attributeFilter:['data-state','data-chat-call-id','data-tool','aria-selected']
     });
   }
-  const external=event=>take(event.detail);
+    const external=event=>take(event.detail);
   window.addEventListener('dsh-android-tool-observed',external);
   window.__dshAndroidToolMonitor=Object.freeze({
     observe:take,
-    setVisible:value=>{enabled=Boolean(value);if(!enabled){opened=false;rows.clear();}draw();},
-    stop:()=>{observer.disconnect();window.removeEventListener('dsh-android-tool-observed',external);rows.clear();enabled=false;opened=false;draw();}
+    setVisible:value=>{enabled=Boolean(value);if(!enabled){opened=false;rows.clear();pendingCalls.clear();}else schedule([],true,true);draw();},
+    stop:()=>{observer.disconnect();if(scanTimer!==null)clearTimeout(scanTimer);window.removeEventListener('dsh-android-tool-observed',external);pendingCalls.clear();rows.clear();enabled=false;opened=false;draw();}
   });
   start();
 })();
