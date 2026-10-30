@@ -259,6 +259,19 @@ class MainActivity : ComponentActivity() {
       }.start()
     }
 
+  /** SAF destination chosen by the user; no in-app ZIP copy is created. */
+  private val rescueExportPicker =
+    registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+      if (uri == null) return@registerForActivityResult
+      Thread {
+        val result = runCatching { SessionDataRescue.export(applicationContext, uri).describe() }
+          .getOrElse { "导出未成功：${it.message ?: it.javaClass.simpleName}。目标文件可能不完整，请保留原始应用数据。" }
+        runOnUiThread {
+          if (!isFinishing && !isDestroyed) showSimpleMessage("DSH 离线备份", result)
+        }
+      }.start()
+    }
+
   private val notificationPermission =
     registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
       notificationPermissionRunning.set(false)
@@ -842,6 +855,10 @@ class MainActivity : ComponentActivity() {
       setPadding(0, (6 * density).toInt(), 0, 0)
     })
 
+    wrap.addView(Button(this).apply {
+      text = "救援导出会话 / 附件 ZIP（不修改源数据）"
+      setOnClickListener { showSessionRescueDialog() }
+    })
     wrap.addView(Button(this).apply {
       text = "检查会话与归档数据（只读）"
       setOnClickListener {
@@ -4995,6 +5012,25 @@ class MainActivity : ComponentActivity() {
     }.start()
   }
 
+  /** Offline recovery remains available if the embedded DSH Host is broken. */
+  private fun showSessionRescueDialog() {
+    Thread {
+      val report = runCatching { SessionDataRescue.describeSources(applicationContext) }
+        .getOrElse { "无法读取数据目录：" + (it.message ?: it.javaClass.simpleName) }
+      runOnUiThread {
+        if (isFinishing || isDestroyed) return@runOnUiThread
+        android.app.AlertDialog.Builder(this)
+          .setTitle("救援原始会话与附件")
+          .setMessage(report + "\n\n将原始目录以 ZIP 形式保存到你指定的位置。不会删除、迁移或修改已有文件；请勿将 ZIP 公开上传。")
+          .setNegativeButton("取消", null)
+          .setPositiveButton("选择保存位置") { _, _ ->
+            rescueExportPicker.launch("DSH-session-rescue-" + System.currentTimeMillis() + ".zip")
+          }
+          .show()
+      }
+    }.start()
+  }
+
   private fun showProfileMutationResult(result: PluginCommandResult, engineRunning: Boolean) {
     val title = if (result.ok) "操作完成" else "操作失败"
     val bodyText = buildString {
@@ -5855,6 +5891,10 @@ class MainActivity : ComponentActivity() {
           .show()
       }
     }
+    val rescue = Button(this).apply {
+      text = "救援导出私人会话与附件"
+      setOnClickListener { showSessionRescueDialog() }
+    }
     val copyDiagnostics = Button(this).apply {
       text = "复制诊断"
       setOnClickListener {
@@ -5865,7 +5905,7 @@ class MainActivity : ComponentActivity() {
       }
     }
     recoveryControls.clear()
-    recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, copyDiagnostics)
+    recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, rescue, copyDiagnostics)
     recoveryControls.forEach { it.visibility = View.GONE }
     guide.addView(engineStatus)
     guide.addView(progressText)
@@ -5873,6 +5913,7 @@ class MainActivity : ComponentActivity() {
     guide.addView(retry)
     guide.addView(safeMode)
     guide.addView(resetConfig)
+    guide.addView(rescue)
     guide.addView(copyDiagnostics)
     return guide
   }
