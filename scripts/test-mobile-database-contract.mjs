@@ -58,6 +58,15 @@ assert.match(activity,/script\.replace\(marker, "const MONITOR_CAP = "/);
 assert.match(monitor,/\/\*__DSH_MONITOR_CAP__\*\//);
 assert.match(monitor,/bridge\.recordToolObservation\(/);
 assert.match(monitor,/old\.status !== status/);
+assert.match(monitor,/pendingCalls = new Set\(\)/);
+assert.match(monitor,/if \(queued\) return/);
+assert.match(monitor,/scanTimer = setTimeout/);
+assert.match(monitor,/\.slice\(-MAX_ROWS\)/);
+assert.match(monitor,/observeDom\(scanAll \? null : work\)/);
+assert.match(monitor,/if \(changed\) draw\(\)/);
+assert.match(monitor,/target\?\.closest\('#dsh-pcm-panel,#dsh-pcm-pill'\)/);
+assert.ok(!monitor.includes("requestAnimationFrame(()=>{queued=false;mount();observeDom();draw();})"),
+  'full rescans per animation frame must never return');
 assert.match(classifier,/MCP_SCHEMA_REQUIRED/);
 for(const forbidden of [/fetch\(/,/XMLHttpRequest/,/sendBeacon/,/localStorage/,/sessionStorage/]){
  assert.ok(!forbidden.test(monitor),'monitor unexpectedly uses a network/storage API: '+forbidden);
