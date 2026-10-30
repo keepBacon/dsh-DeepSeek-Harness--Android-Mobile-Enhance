@@ -803,7 +803,7 @@ class MainActivity : ComponentActivity() {
         if (isFinishing || isDestroyed || !dialog.isShowing) return@runOnUiThread
         when (name) {
           "close" -> dialog.dismiss()
-          "dbOverview", "dbCheck", "dbBackup", "sessionDiagnosis" ->
+          "dbOverview", "dbCheck", "dbBackup", "sessionDiagnosis", "reconnectSessions" ->
             executeHtmlDatabaseAction(panel, dialog, name)
           "apply" -> {
             val requestedMode = options.optString("interfaceMode")
@@ -866,6 +866,7 @@ class MainActivity : ComponentActivity() {
       val result = runCatching {
         when (action) {
           "sessionDiagnosis" -> engineManager.sessionRecoveryStatus()
+          "reconnectSessions" -> engineManager.reconnectExistingSessionData()
           "dbOverview" -> {
             val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
             val counts = db.counts()
@@ -6167,6 +6168,25 @@ class MainActivity : ComponentActivity() {
     runOnUiThread { showStartingState("正在连接 DeepSeek Harness…") }
     Thread {
       try {
+        // Verify history visibility even if a previous Host is still alive.
+        // This protects old sessions from being masked by a fresh empty store.
+        engineManager.sessionStoreBlockReason()?.let { issue ->
+          runOnUiThread {
+            showEngineFailure("历史会话不可访问：" + issue)
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("需要恢复会话目录")
+              .setMessage(issue + "\\n\\n不要卸载或清除应用数据。")
+              .setNegativeButton("稍后", null)
+              .setPositiveButton("存储权限") { _, _ ->
+                try {
+                  startActivity(android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    android.net.Uri.parse("package:" + packageName)))
+                } catch (_: Exception) {}
+              }.show()
+          }
+          return@Thread
+        }
         if (EngineProbe.check(250).optBoolean("running", false)) {
           // Re-arm foreground ownership even when the Host survived an
           // Activity recreation or was already listening before this launch.
