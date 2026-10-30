@@ -1,12 +1,5 @@
 name: Build CURRENT DSH (legacy-signed APK)
 on:
-  push:
-    branches:
-      - feature/actions-full-apk-legacy-signing
-    paths:
-      - .github/workflows/build-current-dsh.yml
-      - scripts/ci-validate-runtime.py
-      - app/build.gradle.kts
   workflow_dispatch:
 permissions:
   contents: read
