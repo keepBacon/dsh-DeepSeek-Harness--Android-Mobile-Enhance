@@ -1177,11 +1177,17 @@ class EngineManager(private val context: Context, private val pickToken: String?
       if (!stageRoot.mkdirs()) throw java.io.IOException("无法创建运行时暂存目录")
 
       val fd = context.assets.openFd("snapshot.tar.xz")
+      // An upgrade must keep the existing HOME (sessions, plugins, secrets and
+      // Skills) authoritative. The old path extracted the unused bundled HOME
+      // to a temporary directory and then discarded it, incurring avoidable
+      // file writes, chmod calls and cleanup. Skip those archive entries here
+      // while the extractor continues to validate paths and consume the tar.
+      val preserveHome = shouldPreserveUserHome()
       SnapshotExtractor.extract(
         context.assets.open("snapshot.tar.xz"),
         fd.length,
         stageRoot,
-        preservedRoots = emptySet(),
+        preservedRoots = if (preserveHome) setOf(stageHome) else emptySet(),
         onProgress = onProgress,
       )
 
