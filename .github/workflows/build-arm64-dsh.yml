@@ -7,6 +7,13 @@ on:
       - 'scripts/ci-assemble-github-runtime.py'
       - 'scripts/ci-restore-legacy-keystore.py'
       - 'scripts/ci-verify-current-apk.py'
+      # Build the actual APK after Android UI / WebView / data-layer changes,
+      # not only when the build scripts themselves change.
+      - 'app/src/main/**'
+      - 'app/build.gradle.kts'
+      - 'gradle.properties'
+      - 'scripts/ci-validate-runtime.py'
+      - 'scripts/dsh-release-family-lock.json'
   workflow_dispatch:
 permissions:
   contents: read
