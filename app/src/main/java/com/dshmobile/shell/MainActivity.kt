@@ -1854,25 +1854,69 @@ class MainActivity : ComponentActivity() {
               display: none !important;
             }
 
-            [data-rightbar-col] {
+            /*
+             * The upstream narrow-layout rightbar is fixed with inset:0
+             * (fullscreen). Clamping only its max-height left its TOP at 0
+             * and pushed file previews underneath the Android top bar.
+             * Anchor the actual rightbar panel to the BOTTOM instead.
+             *
+             * The adjacent float host contains portalled menus/tooltips;
+             * never clip/style every direct child of [data-rightbar-col].
+             */
+            :root[data-dsh-android="mobile"] [data-rightbar-col] {
               position: fixed !important;
               z-index: 820 !important;
-              left: 0 !important;
-              right: 0 !important;
-              bottom: 0 !important;
-              top: auto !important;
+              inset: auto 0 0 0 !important;
               width: 100vw !important;
               max-width: 100vw !important;
               min-width: 0 !important;
-              max-height: 72svh !important;
+              height: 0 !important;
+              overflow: visible !important;
+              pointer-events: none !important;
             }
 
-            [data-rightbar-col] > * {
+            :root[data-dsh-android="mobile"] [data-rightbar-col] > [data-sidebar-right-panel] {
+              position: fixed !important;
+              inset: auto 0 0 0 !important;
+              box-sizing: border-box !important;
               width: 100vw !important;
+              min-width: 0 !important;
               max-width: 100vw !important;
-              max-height: 72svh !important;
+              height: min(72svh, 760px) !important;
+              max-height: min(72svh, 760px) !important;
+              display: flex !important;
+              overflow: hidden !important;
+              pointer-events: none !important;
               border-radius: var(--dsh-mobile-sheet-radius) var(--dsh-mobile-sheet-radius) 0 0 !important;
-              overflow: auto !important;
+              background: var(--dsw-alias-bg-base, #fff) !important;
+              box-shadow: 0 -12px 48px rgba(0, 0, 0, .16) !important;
+            }
+
+            :root[data-dsh-android="mobile"] [data-rightbar-col] > [data-sidebar-right-panel][data-sidebar-right-open] {
+              pointer-events: auto !important;
+            }
+
+            /* Keep the toolbar of every docked file preview reachable while
+             * the inner code/file body owns its own scroll area. */
+            :root[data-dsh-android="mobile"] [data-sidebar-right-panel] [data-code-preview] {
+              min-width: 0 !important;
+              min-height: 0 !important;
+            }
+
+            #dsh-android-rightbar-scrim {
+              position: fixed;
+              inset: var(--dsh-mobile-bar) 0 0;
+              z-index: 819;
+              background: rgba(0, 0, 0, .12);
+              opacity: 0;
+              pointer-events: none;
+              transition: opacity 160ms ease;
+            }
+
+            :root[data-dsh-android="mobile"]:has([data-sidebar-right-panel][data-sidebar-right-open])
+              #dsh-android-rightbar-scrim {
+              opacity: 1;
+              pointer-events: auto;
             }
 
             [data-conversation-content] {
@@ -2448,7 +2492,7 @@ class MainActivity : ComponentActivity() {
               }
               #dsh-android-mobile-bar { height: 46px; padding-block: 3px; }
               #dsh-android-mobile-bar button { width: 38px; height: 38px; min-width: 38px; min-height: 38px; }
-              [data-rightbar-col], [data-rightbar-col] > * { max-height: 82svh !important; }
+              :root[data-dsh-android="mobile"] [data-rightbar-col] > [data-sidebar-right-panel] { height: min(82svh, 760px) !important; max-height: min(82svh, 760px) !important; }
             }
 
             @media (min-width: 900px) {
@@ -3202,6 +3246,19 @@ class MainActivity : ComponentActivity() {
             document.body.appendChild(bar);
           }
           installToolsPanel();
+          // The Android sheet replaces the upstream fullscreen document pane.
+          // Tapping outside must close the dock panel, not activate the chat
+          // behind it. The upstream toggle keeps session/tab state intact.
+          if (UI_MODE === 'mobile' && !document.getElementById('dsh-android-rightbar-scrim')) {
+            const rightbarScrim = document.createElement('div');
+            rightbarScrim.id = 'dsh-android-rightbar-scrim';
+            rightbarScrim.setAttribute('aria-hidden', 'true');
+            rightbarScrim.addEventListener('click', () => {
+              const rightbar = document.querySelector('[data-sidebar-right-panel][data-sidebar-right-open]');
+              rightbar?.querySelector('[data-sidebar-right-toggle]')?.click();
+            });
+            document.body.appendChild(rightbarScrim);
+          }
           let scrim = document.getElementById(SCRIM_ID);
           if (!scrim) {
             scrim = document.createElement('div');
