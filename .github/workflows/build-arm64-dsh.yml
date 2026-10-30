@@ -88,7 +88,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "$ANDROID_HOME/platforms;android-36" || sdkmanager 'platforms;android-36'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
           bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=38
       - name: Verify signed APK, package ID, version and Runtime
