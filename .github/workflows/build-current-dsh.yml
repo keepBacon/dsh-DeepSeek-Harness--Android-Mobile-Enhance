@@ -1,0 +1,107 @@
+name: Build CURRENT DSH (legacy-signed, no APK upload)
+on:
+  push:
+    branches:
+      - feature/actions-full-apk-legacy-signing
+    paths:
+      - .github/workflows/build-current-dsh.yml
+      - scripts/ci-validate-runtime.py
+      - app/build.gradle.kts
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-current-dsh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Install Android SDK and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager"
+          "$sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+          echo "${ANDROID_HOME}/build-tools/36.0.0" >> "$GITHUB_PATH"
+      - name: Validate runtime archive code
+        run: python3 scripts/test-ci-runtime-validator.py
+      - name: Download repository prebuilt Android runtime APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dsh-verified" app/src/main/assets
+          gh release download '1' --repo "$GITHUB_REPOSITORY" --pattern 'Dsh.Mobile.Pro.V0.1.apk' --dir "$RUNNER_TEMP/dsh-verified"
+          unzip -p "$RUNNER_TEMP/dsh-verified/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > app/src/main/assets/snapshot.tar.xz
+          test -s app/src/main/assets/snapshot.tar.xz
+          sha256sum app/src/main/assets/snapshot.tar.xz
+      - name: Verify full runtime is current DSH and embedded ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output "$RUNNER_TEMP/dsh-verified/runtime.json"
+          python3 - "$RUNNER_TEMP/dsh-verified/runtime.json" <<'PY'
+          import pathlib,sys,json
+          d=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          pathlib.Path("app/src/main/assets/runtime-version.txt").write_text("app=0.1.2\\ndsh={dsh_version}\\nsha256={runtime_sha256}\\n".format(**d))
+          PY
+      - name: Recover ORIGINAL Termux signing key and match installed certificate
+        shell: bash
+        env:
+          ORIGINAL_KEY_B64: ${{ secrets.DSH_LEGACY_DEBUG_KEYSTORE_B64 }}
+          EXPECTED_SHA256: 0DFB924793215056C19D413987C9858B8AA9D90604FFB18D60CFD75BE0697792
+        run: |
+          set -euo pipefail
+          test -n "$ORIGINAL_KEY_B64" || { echo 'Missing configured original debug.keystore Secret' >&2; exit 12; }
+          umask 077
+          mkdir -p "$HOME/.android"
+          printf '%s' "$ORIGINAL_KEY_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
+          actual="$(keytool -exportcert -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey 2>/dev/null | sha256sum | cut -d' ' -f1)"
+          if [ "$actual" != "${EXPECTED_SHA256,,}" ]; then
+            echo 'Key does not match screenshot-verified currently installed DSH certificate' >&2; exit 13
+          fi
+          echo "Original debug keystore fingerprint matched installed DSH"
+      - name: Build currently checked out DSH APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=38
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify signing, install identity and runtime
+        shell: bash
+        env:
+          EXPECTED_SHA256: 0DFB924793215056C19D413987C9858B8AA9D90604FFB18D60CFD75BE0697792
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          apksigner verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/dsh-verified/cert.txt"
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/dsh-verified/cert.txt" | head -n 1)"
+          if [ "$actual" != "${EXPECTED_SHA256,,}" ]; then echo 'Built APK signing mismatch' >&2; exit 14; fi
+          aapt dump badging "$apk" | grep "^package: name='com.dshmobile.shell' versionCode='38'"
+          python3 - "$apk" app/src/main/assets/snapshot.tar.xz <<'PY'
+          import hashlib,pathlib,sys,zipfile
+          apk=pathlib.Path(sys.argv[1]);snapshot=pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(apk) as z:
+            embedded=z.read('assets/snapshot.tar.xz')
+            marker=z.read('assets/runtime-version.txt').decode()
+          expected=hashlib.sha256(snapshot.read_bytes()).hexdigest()
+          if hashlib.sha256(embedded).hexdigest()!=expected or f'sha256={expected}' not in marker:
+            raise SystemExit('Embedded runtime or identity marker mismatch')
+          print('Full runtime verified in signed APK:',expected)
+          PY
+          sha256sum "$apk"
+      - name: Publish verified installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DSH-Current-v0.1.2-LegacySigned-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
