@@ -6136,6 +6136,33 @@ class MainActivity : ComponentActivity() {
           .show()
       }
     }
+    val recoveryHistory = Button(this).apply {
+      text = "历史会话诊断与重连（不删除数据）"
+      setOnClickListener {
+        Thread {
+          val report = engineManager.sessionRecoveryStatus()
+          runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            android.app.AlertDialog.Builder(this@MainActivity)
+              .setTitle("历史会话诊断")
+              .setMessage(report.take(14000))
+              .setNegativeButton("关闭", null)
+              .setPositiveButton("尝试重新连接已有会话") { _, _ ->
+                Thread {
+                  val result = runCatching { engineManager.reconnectExistingSessionData() }
+                  runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                      .setTitle(if (result.isSuccess) "重连完成" else "无法自动重连")
+                      .setMessage(result.getOrElse { it.message ?: "重连失败，原文件未修改" })
+                      .setPositiveButton("确定", null).show()
+                  }
+                }.start()
+              }.show()
+          }
+        }.start()
+      }
+    }
     val copyDiagnostics = Button(this).apply {
       text = "复制诊断"
       setOnClickListener {
@@ -6146,7 +6173,7 @@ class MainActivity : ComponentActivity() {
       }
     }
     recoveryControls.clear()
-    recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, copyDiagnostics)
+    recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, recoveryHistory, copyDiagnostics)
     recoveryControls.forEach { it.visibility = View.GONE }
     guide.addView(engineStatus)
     guide.addView(progressText)
@@ -6154,6 +6181,7 @@ class MainActivity : ComponentActivity() {
     guide.addView(retry)
     guide.addView(safeMode)
     guide.addView(resetConfig)
+    guide.addView(recoveryHistory)
     guide.addView(copyDiagnostics)
     return guide
   }
