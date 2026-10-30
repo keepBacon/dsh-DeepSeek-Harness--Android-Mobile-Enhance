@@ -5902,11 +5902,15 @@ class MainActivity : ComponentActivity() {
             webView.visibility = View.GONE
             engineStatus.text = "正在修复并解压内置运行时…"
           }
+          var lastProgressMb = -1L
           val ok = engineManager.extractSnapshot { done, _ ->
-            runOnUiThread {
-              engineStatus.text = "正在解压运行时… " + done / 1024 / 1024 + " MB"
-              // Keep the explanation visible, not the old /usr error list.
-              progressText.text = "正在写入临时目录，完成后才会核验并启用新版运行时。请保留当前应用及用户数据。"
+            val progressMb = done / (4L * 1024 * 1024)
+            if (progressMb != lastProgressMb) {
+              lastProgressMb = progressMb
+              runOnUiThread {
+                engineStatus.text = "正在解压运行时… " + done / 1024 / 1024 + " MB"
+                progressText.text = "正在写入临时目录，完成后才会核验并启用新版运行时。请保留当前应用及用户数据。"
+              }
             }
           }
           if (!ok) {
