@@ -1266,7 +1266,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val dshData = dshDataDir
     val privateDsh = File(homeDir, ".dsh")
     val marker = File(dshData, ".migrated-from")
-    if (privateDsh.isDirectory && !marker.exists()) {
+    // Never stamp a completed migration for a freshly created empty profile.
+    // Doing so would make later recovery mistake a first install for lost data.
+    val hasLegacyUserData = listOf("sessions", "storages", "attachments", "settings.yaml",
+      "profiles/web/cordis.yml", "profiles/web/cordis.patch.yml").any { relative ->
+      File(privateDsh, relative).exists()
+    }
+    if (privateDsh.isDirectory && !marker.exists() && hasLegacyUserData) {
       try {
         dshData.mkdirs()
         // settings.yaml is copied, never moved: settings-file is configured to
@@ -1307,7 +1313,131 @@ class EngineManager(private val context: Context, private val pickToken: String?
         Log.e(TAG, "dshdata migration failed", t)
       }
     }
+    // An APK reinstall, permission change, or interrupted upgrade may have
+    // removed the private symlinks while the original session files remain in
+    // Documents/dshdata. Reattach those files; never replace nonempty sources.
+    recoverExternalDataLinks(privateDsh, dshData, marker)
     return privateDsh
+  }
+
+  /**
+   * Recover an existing public DSH store after app-private HOME was recreated.
+   * This is intentionally narrower than a migration: do not move, merge or
+   * overwrite any nonempty user directory. A stale/dangling symlink is a hard
+   * error rather than a reason to boot a new empty session database.
+   */
+  private fun recoverExternalDataLinks(privateDsh: File, publicDsh: File, marker: File) {
+    val dirs = listOf("sessions", "storages", "attachments")
+    val profileFiles = listOf("web", "headless").flatMap { profile ->
+      listOf("cordis.yml", "cordis.patch.yml").map { "profiles/$profile/$it" }
+    }
+    val paths = dirs + profileFiles
+    val hasPublicData = marker.isFile || paths.any { relative ->
+      val file = File(publicDsh, relative)
+      if (relative in dirs) file.isDirectory else file.isFile
+    }
+    val hasPrivateLinks = paths.any { relative ->
+      java.nio.file.Files.isSymbolicLink(File(privateDsh, relative).toPath())
+    }
+    if (!hasPublicData && !hasPrivateLinks) return
+
+    if (!publicDsh.isDirectory) {
+      throw java.io.IOException(
+        "检测到旧 DSH 公共数据目录不可访问：${publicDsh.absolutePath}。请先恢复本应用的「所有文件访问权限」，不要清除数据或重新安装。",
+      )
+    }
+    if (!privateDsh.exists() && !privateDsh.mkdirs()) {
+      throw java.io.IOException("无法创建 DSH 私有配置目录：${privateDsh.absolutePath}")
+    }
+
+    for (relative in paths) {
+      val src = File(privateDsh, relative)
+      val dst = File(publicDsh, relative)
+      val expected = if (relative in dirs) dst.isDirectory else dst.isFile
+      val linked = java.nio.file.Files.isSymbolicLink(src.toPath())
+      if (linked) {
+        // Do not rewrite links pointing to a different user-selected location.
+        // A dangling link would otherwise make the sidebar show "暂无会话".
+        if (!src.exists()) throw java.io.IOException(
+          "DSH 数据链接失效：${src.absolutePath}。原文件可能仍位于 Documents/dshdata；请检查存储权限及目录是否被移动。",
+        )
+        if (symlinkPointsTo(src, dst)) continue
+        Log.w(TAG, "preserving nonstandard DSH data symlink: ${src.absolutePath}")
+        continue
+      }
+      if (!expected) {
+        // A migrated profile may legitimately have zero sessions. Keep both
+        // paths untouched and surface the missing source in diagnostics;
+        // absence alone cannot prove deletion or justify synthesizing history.
+        if (relative == "sessions" && marker.isFile && !src.isDirectory) {
+          Log.w(TAG, "migrated profile has no readable session directory: ${dst.absolutePath}")
+        }
+        continue
+      }
+      if (src.exists()) {
+        if (relative in dirs && src.isDirectory && src.listFiles()?.isEmpty() == true &&
+            dst.listFiles()?.isNotEmpty() == true) {
+          // A new runtime may have recreated a *physically empty* private
+          // directory. Save it next to its source before reconnecting the
+          // populated public directory. Never discard or overwrite it.
+          val saved = File(src.parentFile, ".${src.name}.recovery-empty-${System.nanoTime()}")
+          if (!src.renameTo(saved)) throw java.io.IOException("无法保存空目录：${src.absolutePath}")
+          try {
+            java.nio.file.Files.createSymbolicLink(src.toPath(), dst.toPath())
+          } catch (failure: Throwable) {
+            saved.renameTo(src)
+            throw java.io.IOException("恢复 DSH 数据链接失败：${src.absolutePath}", failure)
+          }
+          Log.i(TAG, "relinked existing DSH data; empty private directory preserved at ${saved.absolutePath}")
+        } else if (relative == "sessions" && src.isDirectory && dst.isDirectory &&
+                   src.listFiles()?.isNotEmpty() == true && dst.listFiles()?.isNotEmpty() == true) {
+          // Two independently populated session stores. Never select one or
+          // merge conflicting IDs automatically; make the issue diagnosable.
+          Log.w(TAG, "both private and public session trees contain data; not modifying either")
+        }
+        continue
+      }
+      // A prior migration may have copied the public tree but lost the link
+      // when Android reset application-private files. Recreate only the link.
+      src.parentFile?.mkdirs()
+      try {
+        java.nio.file.Files.createSymbolicLink(src.toPath(), dst.toPath())
+      } catch (failure: Throwable) {
+        throw java.io.IOException("无法重新连接 DSH 数据：${relative}", failure)
+      }
+      Log.i(TAG, "restored DSH data link: ${relative}")
+    }
+    val sessions = File(privateDsh, "sessions")
+    if (java.nio.file.Files.isSymbolicLink(sessions.toPath()) &&
+        (!sessions.isDirectory || sessions.listFiles() == null)) {
+      throw java.io.IOException("会话存储不可读取；请检查 Documents/dshdata 权限，原文件未被删除。")
+    }
+  }
+
+  /** Read-only local recovery report; never includes session contents or credentials. */
+  fun sessionRecoveryStatus(): String {
+    val publicDsh = dshDataDir
+    val privateDsh = File(homeDir, ".dsh")
+    return buildString {
+      append("公共目录：").append(publicDsh.absolutePath)
+      append("\\n公共目录可读取：").append(publicDsh.isDirectory && publicDsh.listFiles() != null)
+      if (android.os.Build.VERSION.SDK_INT >= 30) {
+        append("\\n所有文件访问权限：").append(Environment.isExternalStorageManager())
+      }
+      append("\\n迁移标记：").append(File(publicDsh, ".migrated-from").isFile)
+      for (relative in listOf("sessions", "storages", "attachments")) {
+        val privateFile = File(privateDsh, relative)
+        val publicFile = File(publicDsh, relative)
+        val symlink = java.nio.file.Files.isSymbolicLink(privateFile.toPath())
+        append("\\n").append(relative)
+          .append("：私有路径=").append(if (symlink) "链接" else if (privateFile.isDirectory) "目录" else "缺失")
+          .append("；链接有效=").append(if (symlink) privateFile.isDirectory else "不适用")
+          .append("；公共目录=").append(publicFile.isDirectory)
+          .append("；公共条目=").append(publicFile.listFiles()?.size ?: -1)
+          .append("；私有条目=").append(privateFile.listFiles()?.size ?: -1)
+      }
+      append("\\n注意：条目数是目录第一层文件数，不等于会话总数；此检查不读取或删除聊天内容。")
+    }
   }
 
   /** Copy one file only when present. Source remains untouched. */

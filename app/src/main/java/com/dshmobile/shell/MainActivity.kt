@@ -875,6 +875,18 @@ class MainActivity : ComponentActivity() {
         }.start()
       }
     })
+    wrap.addView(Button(this).apply {
+      text = "会话数据恢复诊断（只读）"
+      setOnClickListener {
+        Thread {
+          val result = runCatching { engineManager.sessionRecoveryStatus() }
+            .getOrElse { "诊断失败：${it.message ?: it.javaClass.simpleName}" }
+          runOnUiThread {
+            if (!isFinishing && !isDestroyed) showSimpleMessage("会话恢复诊断", result)
+          }
+        }.start()
+      }
+    })
     wrap.addView(TextView(this).apply {
       text = "只保存工具状态和可重建索引元数据；不接管或修改 DSH 的会话、插件及 Skill 文件。备份仅包含应用私有元数据。"
       textSize = 12f
