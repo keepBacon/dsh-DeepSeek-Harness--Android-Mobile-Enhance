@@ -1,0 +1,139 @@
+name: Build DSH on GitHub (Android ARM64, no Termux)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-arm64-dsh.yml'
+      - 'scripts/ci-assemble-github-runtime.py'
+      - 'scripts/ci-restore-legacy-keystore.py'
+      - 'scripts/ci-verify-current-apk.py'
+      # Build the actual APK after Android UI / WebView / data-layer changes,
+      # not only when the build scripts themselves change.
+      - 'app/src/main/**'
+      - 'app/build.gradle.kts'
+      - 'gradle.properties'
+      - 'scripts/ci-validate-runtime.py'
+      - 'scripts/dsh-release-family-lock.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  signing-key-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify original keystore Secret before expensive native build
+        shell: bash
+        env:
+          DSH_LEGACY_DEBUG_KEYSTORE_B64: ${{ secrets.DSH_LEGACY_DEBUG_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-restore-legacy-keystore.py --self-test --expected-sha256 0dfb924793215056c19d413987c9858b8aa9d90604ffb18d60cfd75be0697792
+          python3 scripts/ci-restore-legacy-keystore.py --check-only --expected-sha256 0dfb924793215056c19d413987c9858b8aa9d90604ffb18d60cfd75be0697792
+  native-runtime:
+    needs: signing-key-preflight
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Android ARM64 runtime on GitHub runner (no Termux)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3 dpkg-dev nodejs npm xz-utils
+          mkdir -p "$RUNNER_TEMP/dsh-seed" app/src/main/assets
+          gh release download "1" -R "$GITHUB_REPOSITORY" -p "Dsh.Mobile.Pro.V0.1.apk" -D "$RUNNER_TEMP/dsh-seed"
+          unzip -p "$RUNNER_TEMP/dsh-seed/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > "$RUNNER_TEMP/dsh-seed/seed.tar.xz"
+          python3 scripts/ci-assemble-github-runtime.py \
+            --repo . \
+            --seed "$RUNNER_TEMP/dsh-seed/seed.tar.xz" \
+            --output app/src/main/assets/snapshot.tar.xz \
+            --audit runtime-build-audit.json
+      - name: Validate ARM64 runtime (no placeholder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output runtime-audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-android-arm64-runtime-${{ github.run_number }}
+          path: |
+            app/src/main/assets/snapshot.tar.xz
+            runtime-audit.json
+            runtime-build-audit.json
+          if-no-files-found: error
+          retention-days: 7
+  assemble-legacy-signed:
+    needs: native-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: actions/download-artifact@v4
+        with:
+          name: dsh-android-arm64-runtime-${{ github.run_number }}
+          path: .
+      - name: Verify runtime and write provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output runtime-audit.json
+          python3 - <<'PY'
+          import json, pathlib
+          d=json.loads(pathlib.Path('runtime-audit.json').read_text())
+          pathlib.Path('app/src/main/assets/runtime-version.txt').write_text('app=0.1.2\ndsh='+d['dsh_version']+'\nsha256='+d['runtime_sha256']+'\n')
+          PY
+      - name: Restore original DSH signing key (validated and never logged)
+        shell: bash
+        env:
+          DSH_LEGACY_DEBUG_KEYSTORE_B64: ${{ secrets.DSH_LEGACY_DEBUG_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-restore-legacy-keystore.py --expected-sha256 0dfb924793215056c19d413987c9858b8aa9d90604ffb18d60cfd75be0697792
+      - name: Build signed upgrade APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+          echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=40
+      - name: Explicitly sign APK with verified original key
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          "$tools/apksigner" sign --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey --ks-pass pass:android \
+            --key-pass pass:android --out "$RUNNER_TEMP/original-signed.apk" "$apk"
+          mv "$RUNNER_TEMP/original-signed.apk" "$apk"
+      - name: Verify signed APK, package ID, version and Runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-verify-current-apk.py \
+            --apk app/build/outputs/apk/debug/app-debug.apk \
+            --snapshot app/src/main/assets/snapshot.tar.xz \
+            --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
+            --version-code 40
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DSH-ARM64-Signed-Upgrade-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          if-no-files-found: error
