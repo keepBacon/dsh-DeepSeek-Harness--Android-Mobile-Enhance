@@ -1,0 +1,116 @@
+name: Build DSH from Android ARM64 Termux Runtime
+on:
+  push:
+    branches: [feature/actions-full-apk-legacy-signing]
+    paths:
+      - '.github/workflows/build-arm64-dsh.yml'
+      - 'build-termux.sh'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-runtime:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate complete Android ARM64 runtime within Termux Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --security-opt seccomp=unconfined \
+            -v "$PWD:/work" -w /work \
+            -e DSH_RUNTIME_ONLY=1 \
+            -e DSH_REFRESH_RUNTIME=1 \
+            -e DSH_NATIVE_COMPAT=1 \
+            -e DSH_ALLOW_DEGRADED=0 \
+            --platform linux/arm64 \
+            termux/termux-docker:aarch64 bash -lc '
+              set -e
+              echo "OS and architecture: $(uname -sm)"
+              echo "Termux prefix: $PREFIX"
+              node -e "console.log(process.platform,process.arch)" || true
+              bash build-termux.sh
+            '
+          test -s app/src/main/assets/snapshot.tar.xz
+      - name: Validate ARM64 runtime (no placeholder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output runtime-audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-android-arm64-runtime-${{ github.run_number }}
+          path: |
+            app/src/main/assets/snapshot.tar.xz
+            runtime-audit.json
+          if-no-files-found: error
+          retention-days: 7
+  assemble-legacy-signed:
+    needs: native-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: actions/download-artifact@v4
+        with:
+          name: dsh-android-arm64-runtime-${{ github.run_number }}
+          path: .
+      - name: Verify runtime and write provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output runtime-audit.json
+          python3 - <<'PY'
+          import json, pathlib
+          d=json.loads(pathlib.Path('runtime-audit.json').read_text())
+          pathlib.Path('app/src/main/assets/runtime-version.txt').write_text('app=0.1.2\ndsh='+d['dsh_version']+'\nsha256='+d['runtime_sha256']+'\n')
+          PY
+      - name: Restore ORIGINAL Termux signing key
+        shell: bash
+        env:
+          KEY_B64: ${{ secrets.DSH_LEGACY_DEBUG_KEYSTORE_B64 }}
+          CERT_SHA256: 0dfb924793215056c19d413987c9858b8aa9d90604ffb18d60cfd75be0697792
+        run: |
+          set -euo pipefail
+          test -n "$KEY_B64" || { echo 'Original signing key Secret missing' >&2; exit 12; }
+          umask 077
+          mkdir -p "$HOME/.android"
+          printf '%s' "$KEY_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          actual="$(keytool -exportcert -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey 2>/dev/null | sha256sum | cut -d' ' -f1)"
+          test "$actual" = "$CERT_SHA256" || { echo 'The original signing certificate does not match installed DSH' >&2; exit 13; }
+      - name: Build signed upgrade APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "$ANDROID_HOME/platforms;android-36" || sdkmanager 'platforms;android-36'
+          echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=38
+      - name: Verify signed APK, package ID, version and Runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" > signer.txt
+          grep -F 'Signer #1 certificate SHA-256 digest: 0dfb924793215056c19d413987c9858b8aa9d90604ffb18d60cfd75be0697792' signer.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | grep "^package: name='com.dshmobile.shell' versionCode='38'"
+          python3 - "$apk" <<'PY'
+          import hashlib,sys,zipfile,pathlib
+          data=pathlib.Path('app/src/main/assets/snapshot.tar.xz').read_bytes()
+          digest=hashlib.sha256(data).hexdigest()
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              if hashlib.sha256(archive.read('assets/snapshot.tar.xz')).hexdigest()!=digest: raise SystemExit('runtime content mismatch')
+              if 'sha256='+digest not in archive.read('assets/runtime-version.txt').decode(): raise SystemExit('runtime marker mismatch')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DSH-ARM64-Signed-Upgrade-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          if-no-files-found: error
