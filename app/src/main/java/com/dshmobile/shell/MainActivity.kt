@@ -728,8 +728,196 @@ class MainActivity : ComponentActivity() {
     dialog.show()
   }
 
-  /** App-only settings opened from the gear icon in the top navigation bar. */
+  /**
+   * Full-screen HTML settings. This is a separate, local-asset-only WebView:
+   * the privileged DSH Host bridge is never installed here.
+   */
+  private val settingsDatabaseBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
   private fun showAppSettings() {
+    val panel = WebView(this)
+    val dialog = android.app.Dialog(this)
+    try {
+      dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+      panel.settings.apply {
+        javaScriptEnabled = true
+        domStorageEnabled = false
+        allowFileAccess = true // Needed only for file:///android_asset/ui/app-settings.html
+        allowContentAccess = false
+        allowFileAccessFromFileURLs = false
+        allowUniversalAccessFromFileURLs = false
+        blockNetworkLoads = true
+        javaScriptCanOpenWindowsAutomatically = false
+        setSupportMultipleWindows(false)
+        setSupportZoom(false)
+      }
+      panel.addJavascriptInterface(SettingsHtmlBridge(panel, dialog), "DSHSettings")
+      panel.webViewClient = object : WebViewClient() {
+        // No navigation is permitted from this trusted, offline settings asset.
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
+      }
+      dialog.setContentView(panel, ViewGroup.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+      dialog.setOnDismissListener {
+        panel.stopLoading()
+        panel.removeJavascriptInterface("DSHSettings")
+        panel.destroy()
+      }
+      dialog.show()
+      dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+      panel.loadUrl("file:///android_asset/ui/app-settings.html")
+    } catch (failure: Throwable) {
+      Log.e("DSH-Settings", "HTML settings failed; using native fallback", failure)
+      try { dialog.dismiss() } catch (_: Throwable) {}
+      showLegacyAppSettings()
+    }
+  }
+
+  /**
+   * Two explicitly named bridge methods. The untrusted DSH Host webpage has
+   * no reference to this bridge; it exists only in the isolated HTML asset.
+   * All UI mutations are marshalled to Android's main thread.
+   */
+  inner class SettingsHtmlBridge(
+    private val panel: WebView,
+    private val dialog: android.app.Dialog,
+  ) {
+    @android.webkit.JavascriptInterface
+    fun state(): String = org.json.JSONObject().apply {
+      put("safeMode", ShellState.safeModeEnabled(this@MainActivity))
+      put("interfaceMode", ShellState.interfaceMode(this@MainActivity))
+      put("workspace", currentWritableWorkspacePath() ?: "")
+      put("mcpSummary", engineManager.mcpRuntimeSummary())
+      put("engineName", "DSH " + engineManager.dshVersion())
+      put("engineStatus", if (EngineProbe.check(250).optBoolean("running", false)) "running" else "idle")
+      put("version", "0.1.2")
+    }.toString()
+
+    @android.webkit.JavascriptInterface
+    fun action(name: String, payload: String) {
+      // Limit both accepted operations and payload size. No generic command,
+      // file access, SQL, script evaluation or arbitrary URL bridge is exposed.
+      if (name.length > 36 || payload.length > 2048) return
+      val options = try { org.json.JSONObject(payload) } catch (_: Throwable) { org.json.JSONObject() }
+      runOnUiThread {
+        if (isFinishing || isDestroyed || !dialog.isShowing) return@runOnUiThread
+        when (name) {
+          "close" -> dialog.dismiss()
+          "dbOverview", "dbCheck", "dbBackup", "sessionDiagnosis" ->
+            executeHtmlDatabaseAction(panel, dialog, name)
+          "apply" -> {
+            val requestedMode = options.optString("interfaceMode")
+            if (requestedMode != ShellState.UI_MODE_NATIVE && requestedMode != ShellState.UI_MODE_MOBILE) {
+              panel.evaluateJavascript("window.DSHSettingsUI?.message('无效的界面模式')", null)
+              return@runOnUiThread
+            }
+            val wasSafe = ShellState.safeModeEnabled(this@MainActivity)
+            val nowSafe = options.optBoolean("safeMode", wasSafe)
+            val oldMode = ShellState.interfaceMode(this@MainActivity)
+            dialog.dismiss()
+            if (requestedMode != oldMode) {
+              ShellState.setInterfaceMode(this@MainActivity, requestedMode)
+              applyInterfaceModeSettings()
+            }
+            if (nowSafe != wasSafe) {
+              runProfileMutation(
+                if (nowSafe) "正在进入安全模式…" else "正在关闭安全模式并重启 DSH…",
+                rollbackOnBootFailure = { ShellState.setSafeModeEnabled(this@MainActivity, wasSafe) },
+              ) {
+                if (!ShellState.setSafeModeEnabled(this@MainActivity, nowSafe))
+                  PluginCommandResult(false, -3, "无法保存安全模式设置")
+                else PluginCommandResult(true, 0,
+                  if (nowSafe) "安全模式已启用。会话与所有插件文件已保留。"
+                  else "安全模式已关闭，原有配置已保留。")
+              }
+            } else if (requestedMode != oldMode) {
+              showStartingState("正在应用界面设置…")
+              startEngineFlow()
+            }
+          }
+          "plugins" -> { dialog.dismiss(); showPluginManager() }
+          "importSkill" -> {
+            dialog.dismiss()
+            skillPackagePicker.launch(arrayOf("application/zip", "text/markdown", "text/plain", "application/octet-stream"))
+          }
+          "skills" -> { dialog.dismiss(); showNativeSkillManager() }
+          "importFiles" -> { dialog.dismiss(); showWorkspaceImportDialog() }
+          "importFolder" -> { dialog.dismiss(); showWorkspaceBulkImportPicker() }
+          "mcp" -> { dialog.dismiss(); showMcpManager() }
+          "spatial" -> { dialog.dismiss(); showSpatialTestLab() }
+          "luau" -> { dialog.dismiss(); showLuauTestLab() }
+          "github" -> { dialog.dismiss(); openExternalUrl(GITHUB_REPOSITORY_URL) }
+          else -> Log.w("DSH-Settings", "Unrecognized settings action: " + name.take(40))
+        }
+      }
+    }
+  }
+
+  /** All SQLite scans and backups run off the UI thread. No raw DSH session
+   * contents are modified or transferred to the HTML settings interface. */
+  private fun executeHtmlDatabaseAction(panel: WebView, dialog: android.app.Dialog, action: String) {
+    if (!settingsDatabaseBusy.compareAndSet(false, true)) {
+      panel.evaluateJavascript("window.DSHSettingsUI?.message('已有数据库任务正在执行')", null)
+      return
+    }
+    panel.evaluateJavascript(
+      "window.DSHSettingsUI?.databaseBusy(" + org.json.JSONObject.quote(action) + ")", null)
+    Thread {
+      val result = runCatching {
+        when (action) {
+          "sessionDiagnosis" -> engineManager.sessionRecoveryStatus()
+          "dbOverview" -> {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val counts = db.counts()
+            "SQLite 快速完整性检查：" + db.quickCheck() +
+              "\n已索引会话文件：" + (counts["sessions"] ?: 0) +
+              "\n扩展索引：" + (counts["extensions"] ?: 0) +
+              "\n工具注册快照：" + (counts["snapshots"] ?: 0) +
+              "\n工具调用观察：" + (counts["observations"] ?: 0) +
+              "\n无效参数记录：" + (counts["invalidArguments"] ?: 0) +
+              "\n\n以上为可重建的元数据索引数量，不代表实际聊天总数。"
+          }
+          "dbCheck" -> {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val integrity = db.quickCheck()
+            check(integrity == "ok") { "数据库完整性异常：" + integrity }
+            val indexed = com.dshmobile.shell.database.MobileIndexService(engineManager, db).refresh()
+            val counts = db.counts()
+            "完整性：" + integrity +
+              "\n本轮发现会话文件：" + indexed.indexedSessions +
+              "\n本轮发现扩展：" + indexed.indexedExtensions +
+              "\n内置工具声明：" + indexed.bundledTools +
+              "\n会话目录扫描完整：" + indexed.sessionScanComplete +
+              "\n已记录工具观察：" + (counts["observations"] ?: 0) +
+              "\n\n会话扫描不完整时保留旧索引，不会删除原始聊天文件。"
+          }
+          "dbBackup" -> {
+            val db = com.dshmobile.shell.database.MobileDatabase.get(applicationContext)
+            val saved = com.dshmobile.shell.database.DatabaseBackup.create(applicationContext, db)
+            "SQLite 一致性备份已创建。" +
+              "\n文件：" + saved.absolutePath +
+              "\n大小：" + saved.length() + " 字节" +
+              "\n校验文件：" + saved.name + ".sha256" +
+              "\n\n仅包含本应用元数据，不包含原始会话内容。"
+          }
+          else -> error("unsupported database action")
+        }
+      }
+      runOnUiThread {
+        settingsDatabaseBusy.set(false)
+        if (isFinishing || isDestroyed || !dialog.isShowing) return@runOnUiThread
+        val report = result.getOrElse { "操作失败：" + (it.message ?: it.javaClass.simpleName) }
+        val js = "window.DSHSettingsUI?.finishDatabaseAction(" +
+          org.json.JSONObject.quote(action) + "," +
+          org.json.JSONObject.quote(report.take(16000)) + "," +
+          result.isSuccess + ")"
+        panel.evaluateJavascript(js, null)
+      }
+    }.start()
+  }
+
+  /** Legacy fallback retained for older WebView providers. */
+  private fun showLegacyAppSettings() {
     val density = resources.displayMetrics.density
     val wrap = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
