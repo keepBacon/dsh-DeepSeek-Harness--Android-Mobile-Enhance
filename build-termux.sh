@@ -238,10 +238,14 @@ dsh_ensure_android_sdk_platform() {
 
 dsh_configure_git_build_context
 dsh_bootstrap_host_build_prerequisites
-dsh_select_gradle_jdk17
-dsh_ensure_android_sdk_platform
-# Run syntax/contract checks only after the bootstrap has guaranteed Node and
-# the other host-side prerequisites. This keeps first-run auto-repair reachable.
+# GitHub Actions uses official Termux ARM64 Docker only for constructing the
+# Android-native runtime. SDK/Gradle belong to its separate Ubuntu APK job.
+# Keep native addons, tool catalog and runtime acceptance fully enabled.
+if [ "${DSH_RUNTIME_ONLY:-0}" != "1" ]; then
+  dsh_select_gradle_jdk17
+  dsh_ensure_android_sdk_platform
+fi
+# Run syntax/contract checks only after the bootstrap has guaranteed Node.
 dsh_static_build_preflight
 
 printf '[DSH] Java: '
@@ -277,7 +281,11 @@ dsh_gradle_source_preflight() {
   echo '[DSH] Fast Android source preflight: OK'
 }
 
-dsh_gradle_source_preflight
+if [ "${DSH_RUNTIME_ONLY:-0}" != "1" ]; then
+  dsh_gradle_source_preflight
+else
+  echo '[DSH] Android native Runtime-only mode: Gradle source validation delegated to Ubuntu APK job.'
+fi
 
 if [ "${DSH_PREFLIGHT_ONLY:-0}" = "1" ]; then
   echo '[DSH] PREFLIGHT OK: host prerequisites + Android SDK + Gradle/Kotlin/Manifest/resources passed.'
@@ -2048,6 +2056,10 @@ RUNTIME_DSH_VERSION="$(snapshot_dsh_version || true)"
 RUNTIME_SHA256="$(sha256sum "$SNAPSHOT" | awk '{print $1}')"
 printf 'app=0.1.2\ndsh=%s\nsha256=%s\n' "$RUNTIME_DSH_VERSION" "$RUNTIME_SHA256" > "$ROOT/app/src/main/assets/runtime-version.txt"
 echo "[DSH] Runtime ID: DSH ${RUNTIME_DSH_VERSION:-unknown} / ${RUNTIME_SHA256:0:12}"
+if [ "${DSH_RUNTIME_ONLY:-0}" = "1" ]; then
+  echo "[DSH] Verified native Android ARM64 snapshot generated: $SNAPSHOT"
+  exit 0
+fi
 
 AAPT2_BIN="$(command -v aapt2)"
 echo "[DSH] aapt2: $AAPT2_BIN"
