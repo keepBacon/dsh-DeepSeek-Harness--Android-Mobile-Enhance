@@ -1307,7 +1307,84 @@ class EngineManager(private val context: Context, private val pickToken: String?
         Log.e(TAG, "dshdata migration failed", t)
       }
     }
+    // Existing public session data is authoritative even when the migration
+    // marker survived but its private link did not (APK data repair/reinstall).
+    // This is strictly additive: never overwrite a real private directory,
+    // replace an existing symlink, or move/delete the public data.
+    repairMissingDataLinks(privateDsh, dshData)
     return privateDsh
+  }
+
+  /**
+   * Recover visibility of already-migrated user files after a missing private
+   * symlink, including the case where .migrated-from survived reinstall.
+   * Unlike migration, this operation never copies, renames or deletes files.
+   */
+  private fun repairMissingDataLinks(privateDsh: File, publicDsh: File) {
+    if (!publicDsh.isDirectory) return
+    fun linkMissing(relativePath: String, directory: Boolean) {
+      val dst = File(publicDsh, relativePath)
+      if (if (directory) !dst.isDirectory else !dst.isFile) return
+      val src = File(privateDsh, relativePath)
+      if (symlinkPointsTo(src, dst)) return
+      // NOFOLLOW_LINKS differentiates a genuinely absent link from a dangling
+      // or conflicting link. Both conflicts must be preserved for inspection.
+      if (java.nio.file.Files.exists(src.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        Log.w(TAG, "data recovery preserved conflicting private entry: " + src.absolutePath)
+        return
+      }
+      try {
+        if (src.parentFile?.isDirectory != true && src.parentFile?.mkdirs() != true) {
+          throw java.io.IOException("cannot create private parent for " + relativePath)
+        }
+        java.nio.file.Files.createSymbolicLink(src.toPath(), dst.toPath())
+        Log.i(TAG, "reconnected existing DSH data: " + relativePath)
+      } catch (t: Throwable) {
+        Log.w(TAG, "cannot reconnect DSH data " + relativePath + "; original is untouched", t)
+      }
+    }
+    linkMissing("sessions", true)
+    linkMissing("storages", true)
+    linkMissing("attachments", true)
+    for (profile in listOf("web", "headless")) {
+      linkMissing("profiles/$profile/cordis.yml", false)
+      linkMissing("profiles/$profile/cordis.patch.yml", false)
+    }
+  }
+
+  /** Read-only user-data inventory to distinguish invisible archives from
+   * genuinely absent files. No message contents, tokens or paths are exported. */
+  fun sessionDataDiagnostics(): String {
+    val privateDsh = File(homeDir, ".dsh")
+    val publicDsh = dshDataDir
+    fun describe(root: File, label: String): String = buildString {
+      append(label).append(": ")
+      append(if (root.isDirectory) "目录存在" else "目录不可用")
+      for (name in listOf("sessions", "storages", "attachments")) {
+        val entry = File(root, name)
+        val symlink = runCatching { java.nio.file.Files.isSymbolicLink(entry.toPath()) }.getOrDefault(false)
+        val accessible = entry.isDirectory
+        val count = if (accessible) runCatching { entry.list()?.size ?: -1 }.getOrDefault(-1) else -1
+        append("\n  ").append(name).append(": ")
+        append(when {
+          symlink && !accessible -> "链接已损坏或目标不可访问"
+          symlink -> "链接可访问"
+          accessible -> "实体目录存在"
+          else -> "未找到"
+        })
+        if (count >= 0) append("，直接子项 ").append(count)
+      }
+    }
+    val backups = privateDsh.listFiles()?.filter {
+      it.name.startsWith(".sessions.migration-backup-") && it.isDirectory
+    }?.size ?: 0
+    return buildString {
+      append("公共迁移标记：").append(File(publicDsh, ".migrated-from").isFile)
+      append("\n").append(describe(publicDsh, "Documents/dshdata"))
+      append("\n").append(describe(privateDsh, "应用私有 DSH_HOME"))
+      append("\n私有会话迁移备份目录数量：").append(backups)
+      append("\n此检查只读取目录状态，不修改、删除或重建会话。")
+    }
   }
 
   /** Copy one file only when present. Source remains untouched. */
