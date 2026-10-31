@@ -12,6 +12,13 @@ const bridge=read('app/src/main/java/com/dshmobile/shell/AndroidBridge.kt');
 const activity=read('app/src/main/java/com/dshmobile/shell/MainActivity.kt');
 const engine=read('app/src/main/java/com/dshmobile/shell/EngineManager.kt');
 const monitor=read('app/src/main/assets/dsh-tool-call-monitor.js');
+const runtimePatch=read('scripts/android-runtime-patch.mjs');
+assert.match(runtimePatch,/patchPtcMcpStartupBarrier/);
+assert.match(runtimePatch,/MCP tool binding not registered/);
+assert.match(runtimePatch,/Date\.now\(\) \+ 4000/);
+assert.match(runtimePatch,/runController\.signal\.throwIfAborted/);
+assert.match(runtimePatch,/tools\.schemas\(exec\.agent, exec\.toolSet\)/);
+
 const classifier=read('app/src/main/java/com/dshmobile/shell/database/ToolErrorClassifier.kt');
 const dispatcher=read('app/src/main/java/com/dshmobile/shell/database/ToolObservationDispatcher.kt');
 execFileSync(process.execPath,['--check',new URL('../app/src/main/assets/dsh-tool-call-monitor.js',import.meta.url).pathname]);
