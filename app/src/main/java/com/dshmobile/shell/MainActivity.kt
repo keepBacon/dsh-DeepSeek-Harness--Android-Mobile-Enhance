@@ -887,8 +887,12 @@ class MainActivity : ComponentActivity() {
         if (!::webView.isInitialized || !isEngineSource(webView.url ?: "")) {
           showSimpleMessage("会话侧边栏", "DSH 页面尚未打开，无法同步。")
         } else {
-          webView.reload()
-          showSimpleMessage("会话侧边栏", "已重新加载界面并重新建立工作区订阅。不会修改会话、工作区或配置文件。")
+          android.app.AlertDialog.Builder(this)
+            .setTitle("重新同步会话侧边栏")
+            .setMessage("这会重新加载 WebView，可能中断当前正在运行的模型请求、工具流或 subagent 输出。请先等待任务结束。不会删除会话或工作区数据。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("重新加载") { _, _ -> webView.reload() }
+            .show()
         }
       }
     })
@@ -3579,10 +3583,17 @@ class MainActivity : ComponentActivity() {
     sessionUiRecoveryAttempts++
     lastSessionUiRecoveryAt = now
     lastSessionUiRecoveryHostCount = hostCount
-    Log.w("DSH-Workspace", "Host reports $hostCount sessions but Workspace sidebar remains empty; rehydrate $sessionUiRecoveryAttempts/2")
-    // No Host restart, Profile switch or Workspace storage mutations. Recreating
-    // the browser view allows the Workspace follow stream to resubscribe.
-    webView.reload()
+    Log.w("DSH-Workspace", "Host reports $hostCount sessions but Workspace sidebar remains empty; mismatch $sessionUiRecoveryAttempts/2")
+    // Never reload while the browser may own an active prompt or subagent.
+    // A blank sidebar can occur concurrently with a running conversation.
+    // Browser reload cancels in-flight fetch/stream requests, producing the
+    // session/prompt gateway/internal failure seen during live tool execution.
+    // Keep the page and draft intact; offer explicit user-directed resync.
+    android.widget.Toast.makeText(
+      this,
+      "会话列表同步异常（Host 有 $hostCount 条记录）。可在应用设置中手动同步。",
+      android.widget.Toast.LENGTH_LONG,
+    ).show()
   }
 
   private fun installSessionUiRecoveryWatch(view: WebView) {
