@@ -20,6 +20,7 @@ import android.webkit.JsResult
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceError
 import android.webkit.WebResourceResponse
 import android.webkit.CookieManager
 import android.webkit.MimeTypeMap
@@ -465,11 +466,12 @@ class MainActivity : ComponentActivity() {
         return true
       }
 
-      override fun onReceivedError(view: WebView, errorCode: Int, description: String, failingUrl: String) {
-        if (isEngineSource(failingUrl)) {
-          showStartingState("正在重新连接 DSH…", description)
-          startEngineFlow()
-        }
+      // API 26+ reports errors for subresources too. A failed avatar, tool
+      // image or chunk must not restart the Host or discard the current session.
+      override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+        if (!request.isForMainFrame || !isEngineSource(request.url.toString())) return
+        showStartingState("正在重新连接 DSH…", error.description?.toString().orEmpty())
+        startEngineFlow()
       }
 
       override fun onReceivedHttpError(
@@ -4956,8 +4958,12 @@ class MainActivity : ComponentActivity() {
       var running = false
       try {
         try { stopService(Intent(this, EngineService::class.java)) } catch (_: Throwable) {}
-        engineManager.stopEngine()
-        Thread.sleep(500)
+        // Do not mutate the active profile until the previous Host is gone.
+        // Otherwise a slow exit can race against the next Host's workspace IO.
+        if (!engineManager.stopEngine()) {
+          throw java.io.IOException("旧 DSH 进程未能完全退出；已取消 Profile 切换，原设置未修改")
+        }
+        Thread.sleep(200)
         result = try {
           operation()
         } catch (t: Throwable) {
@@ -4966,7 +4972,13 @@ class MainActivity : ComponentActivity() {
 
         var started = engineManager.startEngine()
         if (started) running = waitForEngineReady()
-        if (!running) {
+        // Capture the FIRST failure before any runtime repair/restart clears
+        // engine.log. This is the only reliable diagnosis of safe-mode boot.
+        val firstFailure = if (!running) engineManager.engineDiagnostics(8000) else ""
+        if (!running && rollbackOnBootFailure == null) {
+          // Only explicit non-mode profile mutations use generic recovery.
+          // During safe-mode toggles it may modify unrelated user configuration,
+          // and it destroys the original failure log before rollback.
           val recovery = engineManager.recoverFromBootFailure()
           if (recovery.ok) {
             result = result.copy(
@@ -4980,22 +4992,23 @@ class MainActivity : ComponentActivity() {
           }
         }
         if (!running && rollbackOnBootFailure != null && result.ok) {
-          // A broken isolated profile must not permanently lock the app.
-          // Restore the persisted prior mode and retry once.
+          // A failed isolated Profile must not replace or reset the normal
+          // Profile. Restore only the persisted mode choice and restart once.
           val restored = runCatching { rollbackOnBootFailure() }.getOrDefault(false)
           if (restored) {
             engineManager.stopEngine()
             started = engineManager.startEngine(runtimeAlreadyChecked = true)
             running = started && waitForEngineReady(45_000L)
           }
-          val recoveryDiagnostics = engineManager.engineDiagnostics(8000)
+          val rollbackFailure = if (!running) engineManager.engineDiagnostics(4000) else ""
           result = PluginCommandResult(false, -3, buildString {
             append(if (running)
-              "安全模式切换启动失败；已恢复切换前设置并重新启动 DSH。"
-              else if (restored) "已恢复切换前设置，但 DSH 仍无法启动。"
+              "安全模式切换失败；已恢复原模式，DSH 现在可以运行。"
+              else if (restored) "安全模式切换失败；已恢复原模式设置，但 DSH 仍无法启动。"
               else "安全模式启动失败，回滚设置失败。")
             append("\n-3 是 Android 操作失败标记，不是 DSH 进程实际退出码。")
-            if (recoveryDiagnostics.isNotBlank()) append("\n\n").append(recoveryDiagnostics)
+            if (firstFailure.isNotBlank()) append("\n\n--- 首次失败（回滚前）---\n").append(firstFailure)
+            if (rollbackFailure.isNotBlank()) append("\n\n--- 回滚后失败 ---\n").append(rollbackFailure)
           })
         }
         if (running) {
