@@ -21,7 +21,7 @@ try{
  assert.equal(deps.scan.complete,true)
  const depthLimited=await codeV4Call('code_dependencies',{root,maxDepth:1})
  assert.equal(depthLimited.scan.complete,false,'maxDepth must report truncated traversal')
- assert.ok(!depthLimited.files.some(x=>x.startsWith('lib/')),'maxDepth must be enforced')
+ assert.equal(depthLimited.scan.files,5,'maxDepth must exclude nested source files')
  assert.ok(!deps.files?.some(x=>x.startsWith('.dsh/')||x.startsWith('node_modules/')),'metadata must not be indexed')
  const impact=await codeV4Call('code_impact',{root,changedFiles:['lib/leaf.ts']})
  assert.deepEqual(impact.affectedFiles,['app.ts','service.ts'])
