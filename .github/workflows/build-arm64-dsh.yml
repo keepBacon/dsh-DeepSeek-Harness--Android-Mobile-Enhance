@@ -5,6 +5,10 @@ on:
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
+      - 'scripts/dsh-mobile-toolbox-mcp.mjs'
+      - 'scripts/dsh-basic-toolbox-mcp.mjs'
+      - 'scripts/dsh-code-engine*.mjs'
+      - 'scripts/test-android-mcp-wire.mjs'
       - 'scripts/ci-restore-legacy-keystore.py'
       - 'scripts/ci-verify-current-apk.py'
       # Build the actual APK after Android UI / WebView / data-layer changes,
