@@ -67,8 +67,8 @@ function resolveImport(from,spec,files,root){
  for(const ext of RESOLVE_EXT)if(ext)candidates.push(join(target,'index'+ext))
  return candidates.find(x=>files.has(x))||null
 }
-async function graph(root,maxFiles){
- const scan=await collect(root,maxFiles),paths=new Set(scan.paths)
+async function graph(root,maxFiles,maxDepth){
+ const scan=await collect(root,maxFiles,maxDepth),paths=new Set(scan.paths)
  const edges=[],unresolved=[]
  let complete=scan.complete,skipped=scan.skipped
  for(const path of scan.paths){
@@ -118,7 +118,7 @@ async function analyzeDependencies(a){
 async function impact(a){
  const root=resolve(a.root||'.'),maxFiles=validNum(a.maxFiles,1200,1,4000),maxDepth=validNum(a.maxDepth,12,1,32)
  if(!Array.isArray(a.changedFiles)||!a.changedFiles.length||a.changedFiles.length>32)throw Error('changedFiles must contain 1..32 paths')
- const g=await graph(root,maxFiles),reverse=new Map()
+ const g=await graph(root,maxFiles,maxDepth),reverse=new Map()
  for(const edge of g.edges){if(!reverse.has(edge.to))reverse.set(edge.to,[]);reverse.get(edge.to).push(edge.from)}
  const seeds=[...new Set(a.changedFiles.map(file=>{
   const full=isAbsolute(file)?resolve(file):resolve(root,file)
