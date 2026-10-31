@@ -25,6 +25,19 @@ REPOS = {
     "root": "https://packages-cf.termux.dev/apt/termux-root",
 }
 SEEDS = ("proot", "python", "python-pip", "apt", "dpkg", "termux-tools", "termux-keyring")
+# The previous GitHub build stopped at SEEDS and packaged no tool-suite
+# dependencies, despite the full Termux catalog declaring them. Keep the
+# first ARM64 expansion deliberately focused on the tested missing binaries.
+TOOL_SEEDS = (
+    "jq", "yq", "7zip", "openssl-tool", "file", "git", "binutils",
+    "dnsutils", "aapt2", "android-tools", "poppler", "ffmpeg",
+    "imagemagick", "gdb", "rizin",
+)
+TOOL_COMMANDS = (
+    "jq", "yq", "7z", "openssl", "file", "git", "objdump", "nm",
+    "dig", "aapt2", "adb", "pdfinfo", "ffmpeg", "ffprobe",
+    "magick", "gdb", "rizin",
+)
 SCRIPT_MAP = {
     "dsh-mobile-toolbox-mcp.mjs": "toolbox-mcp.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
@@ -144,10 +157,10 @@ def fetch_packages(stage, workspace):
         info = packages[name][1]
         for dep in dependency_names(info.get("Pre-Depends", "") + "," + info.get("Depends", ""), packages):
             include(dep)
-    for item in SEEDS:
+    for item in (*SEEDS, *TOOL_SEEDS):
         include(item)
-    if len(needed) > 160:
-        raise ValueError("unexpectedly large dependency closure")
+    if len(needed) > 220:
+        raise ValueError("unexpectedly large dependency closure (>220 packages)")
     print("[native] dependency closure", len(needed), "packages")
     manifest = []
     for name in needed:
@@ -194,6 +207,13 @@ def fetch_packages(stage, workspace):
         manifest.append({"package": name, "version": package.get("Version"), "sha256": digest})
         downloaded.unlink()
         shutil.rmtree(extracted)
+    # No more silent success when a package was downloaded but its executable
+    # was missing from the merged runtime. Check both new and inherited files.
+    missing = [command for command in TOOL_COMMANDS
+               if not (stage / "usr/bin" / command).exists()]
+    if missing:
+        raise ValueError("Android tool package closure lacks executable(s): " + ", ".join(missing))
+    print("[native] verified", len(TOOL_COMMANDS), "critical tool executable paths")
     return manifest
 
 def overlay_sources(stage, source):
