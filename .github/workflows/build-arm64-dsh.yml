@@ -175,4 +175,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "DSH Android signed upgrade #${{ github.run_number }}" \
             --notes "APK and ZIP verified with CRC and SHA256. Use direct APK download on Android; install over existing application. Keep backup." \
-            --draft
+            --latest=false
