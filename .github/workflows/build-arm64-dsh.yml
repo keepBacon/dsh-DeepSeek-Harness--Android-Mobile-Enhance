@@ -11,6 +11,7 @@ on:
       - 'scripts/test-android-mcp-wire.mjs'
       - 'scripts/ci-restore-legacy-keystore.py'
       - 'scripts/ci-verify-current-apk.py'
+      - 'scripts/ci-package-signed-apk.py'
       # Build the actual APK after Android UI / WebView / data-layer changes,
       # not only when the build scripts themselves change.
       - 'app/src/main/**'
@@ -20,7 +21,7 @@ on:
       - 'scripts/dsh-release-family-lock.json'
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   signing-key-preflight:
     runs-on: ubuntu-latest
@@ -135,9 +136,43 @@ jobs:
             --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
             --version-code 40
+      - name: Create and verify direct APK / distribution ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-package-signed-apk.py \
+            --apk app/build/outputs/apk/debug/app-debug.apk \
+            --output dist \
+            --basename DSH-ARM64-Signed-Upgrade-${{ github.run_number }}
+          ( cd dist && sha256sum -c SHA256SUMS.txt )
       - uses: actions/upload-artifact@v4
         with:
-          name: DSH-ARM64-Signed-Upgrade-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: DSH-ARM64-APK-${{ github.run_number }}
+          path: |
+            dist/*.apk
+            dist/SHA256SUMS.txt
+          compression-level: 0
           retention-days: 30
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DSH-ARM64-ZIP-${{ github.run_number }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publish direct-download APK, ZIP and checksums as draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="dsh-android-build-${{ github.run_number }}"
+          gh release create "$tag" dist/*.apk dist/*.zip dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "DSH Android signed upgrade #${{ github.run_number }}" \
+            --notes "APK and ZIP verified with CRC and SHA256. Use direct APK download on Android; install over existing application. Keep backup." \
+            --draft
