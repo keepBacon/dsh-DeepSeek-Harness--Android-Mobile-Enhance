@@ -315,6 +315,61 @@ function patchCodeModeGuidance(indexFile) {
   return 'anchor-missing'
 }
 
+// PTC snapshots model-visible tool functions at the instant run_code starts.
+// MCP reconnection may publish a newly ready generation just after that
+// snapshot. In that case a program raises "tools.<name> is not a function"
+// even though the tool becomes available a moment later.
+// Only delay runs that REFER to an absent MCP name. No global sleep, no fake
+// binding, and no stale definition is copied across agent tool scopes.
+function patchPtcMcpStartupBarrier(indexFile) {
+  const marker = 'DSH Android compat: wait for referenced MCP bindings'
+  const dir = path.resolve(path.dirname(indexFile), '..')
+  const files = walkJavaScriptFiles(path.join(dir, 'lib'))
+  let changed = 0
+  let already = 0
+  const anchor = /for\s*\(\s*const\s+schema\s+of\s+tools\.schemas\(\s*exec\.agent\s*,\s*exec\.toolSet\s*\)\s*\)\s*\{/
+  const injected = [
+    '// ' + marker,
+    'const androidMcpReferences = [...new Set(String(args.code).match(/\\bmcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+\\b/g) || [])];',
+    'if (androidMcpReferences.length) {',
+    '  const androidMissing = () => {',
+    '    const registered = new Set(Array.from(tools.schemas(exec.agent, exec.toolSet), schema => schema.name));',
+    '    return androidMcpReferences.filter(name => !registered.has(name));',
+    '  };',
+    '  let missing = androidMissing();',
+    '  const deadline = Date.now() + 4000;',
+    '  while (missing.length && Date.now() < deadline) {',
+    '    runController.signal.throwIfAborted();',
+    '    await new Promise(resolve => setTimeout(resolve, 100));',
+    '    missing = androidMissing();',
+    '  }',
+    '  if (missing.length) throw new Error("MCP tool binding not registered: " + missing.join(", ") + ". Check MCP connection or retry when initialized.");',
+    '}',
+  ].join('\n')
+  for (const file of files) {
+    let source = read(file)
+    if (!source || !source.includes('tools.schemas') || !source.includes('exec.toolSet')) continue
+    if (source.includes(marker)) { already++; continue }
+    const matches = source.match(new RegExp(anchor.source, 'g')) || []
+    if (!matches.length) continue
+    if (matches.length !== 1 || !source.includes('runController.signal')) {
+      warn('PTC binding seam ambiguous: ' + file)
+      return 'anchor-missing'
+    }
+    source = source.replace(anchor, injected + '\n' + matches[0])
+    write(file, source)
+    checkPatchedJavaScript(file)
+    changed++
+  }
+  if (changed === 1) return 'patched'
+  if (changed === 0 && already === 1) return 'already'
+  warn('PTC binding seam not located uniquely in ' + dir)
+  return 'anchor-missing'
+}
+eachPackage('@deepseek-ai/dsh-tool-executor-ptc', 'lib/index.js', patchPtcMcpStartupBarrier, {
+  requiredIfPresent: androidStableStorageMandatory,
+})
+
 // Android-specific hardening for Code Mode syntax failures. The runtime first
 // accepts accidental outer Markdown fences, then repairs only the narrow,
 // parser-verified case where a long text/template literal contains Markdown
