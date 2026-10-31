@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import android.util.Log
 
 /**
  * Foreground service owning the embedded Host lifecycle. The Activity may be
@@ -56,6 +57,7 @@ class EngineService : Service() {
   private fun ensureEngine() {
     if (EngineManager.isMaintenanceMode()) return
     if (EngineProbe.check(350).optBoolean("running", false)) return
+    if (engineManager.isEngineProcessAlive()) return
     if (engineManager.engineReady) engineManager.startEngine(runtimeAlreadyChecked = true)
   }
 
@@ -69,10 +71,19 @@ class EngineService : Service() {
     watchdog = Executors.newSingleThreadScheduledExecutor().also { exec ->
       exec.scheduleWithFixedDelay({
         try {
-          if (!EngineManager.isMaintenanceMode() &&
-            !EngineProbe.check(500).optBoolean("running", false) && engineManager.engineReady) {
-            engineManager.startEngine(runtimeAlreadyChecked = true)
+          if (EngineManager.isMaintenanceMode()) return@scheduleWithFixedDelay
+          val probe = EngineProbe.check(650)
+          if (probe.optBoolean("running", false)) return@scheduleWithFixedDelay
+          if (!engineManager.engineReady) return@scheduleWithFixedDelay
+          // A living Node process can be temporarily blocked by expensive
+          // tool execution or an overloaded Gateway. Do not spawn a duplicate
+          // Host or kill active sessions simply because HTTP timed out.
+          if (engineManager.isEngineProcessAlive()) {
+            Log.w("DSH-Watchdog", "Host process alive but HTTP probe unavailable: " +
+              probe.optString("error", "HTTP " + probe.optInt("httpCode")))
+            return@scheduleWithFixedDelay
           }
+          engineManager.startEngine(runtimeAlreadyChecked = true)
         } catch (_: Throwable) {
         }
       }, 5, 5, TimeUnit.SECONDS)
