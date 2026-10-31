@@ -53,6 +53,12 @@ assert.match(activity,/onRecordToolObservation =/);
 assert.match(activity,/databaseWriter\.offer/);
 assert.match(activity,/databaseWriter\.close\(\)/);
 assert.match(activity,/DatabaseBackup\.create/);
+assert.match(activity,/probeHostSessionsReadOnly\(\)/);
+assert.match(activity,/reportHostSessionDiagnostic/);
+assert.match(bridge,/fun reportHostSessionDiagnostic\(/);
+assert.match(engine,/Preserved migration rollback generation/);
+assert.match(engine,/无法完整读取源目录，禁止继续迁移/);
+
 assert.match(activity,/MobileIndexService\(engineManager, db\)\.refresh/);
 assert.match(activity,/script\.replace\(marker, "const MONITOR_CAP = "/);
 assert.match(monitor,/\/\*__DSH_MONITOR_CAP__\*\//);
