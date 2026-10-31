@@ -82,5 +82,10 @@ for(const key of ['protocolTools','reverseTools','cliProtocol','cliReverse','bas
 assert.match(engine,/JSONObject\(mobileToolCatalogJson\(\)\)/);
 assert.match(engine,/declaredTools\("toolbox-mcp\.mjs"/);
 assert.match(engine,/declaredTools\("basic-toolbox-mcp\.mjs"/);
+const mcpConfig=read('app/src/main/java/com/dshmobile/shell/McpConfigManager.kt');
+assert.match(mcpConfig,/externalStdioLaunchIssue\(server\)/);
+assert.match(mcpConfig,/File\(path\)\.isFile/);
+assert.match(mcpConfig,/Skipping unavailable MCP/);
+assert.match(mcpConfig,/fun unavailableExternalServers\(/);
 assert.match(activity,/engineManager\.runMobileToolRequest\("terminal"/);
 console.log('[DSH] Database integration source-contract regression: OK');
