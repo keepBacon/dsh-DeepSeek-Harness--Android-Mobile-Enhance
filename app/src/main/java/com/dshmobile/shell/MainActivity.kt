@@ -629,6 +629,9 @@ class MainActivity : ComponentActivity() {
           engineManager.runMobileToolRequest(category, command, currentWritableWorkspacePath())
         },
         onOpenLocalUrl = { url -> openLocalPreviewUrl(url) },
+        onHostSessionDiagnostic = { summary ->
+          runOnUiThread { if (!isFinishing && !isDestroyed) showSimpleMessage("Host 会话读取诊断", summary) }
+        },
         onRecordToolObservation = { session, call, tool, status, code ->
           databaseWriter.offer(session, call, tool, status, code)
         },
@@ -872,6 +875,10 @@ class MainActivity : ComponentActivity() {
       }
     })
 
+    wrap.addView(Button(this).apply {
+      text = "检查 DSH Host 实际识别的会话（只读）"
+      setOnClickListener { probeHostSessionsReadOnly() }
+    })
     wrap.addView(TextView(this).apply {
       text = "数据库与诊断"
       textSize = 16f
@@ -5010,6 +5017,43 @@ class MainActivity : ComponentActivity() {
         if (onResult != null) onResult(result, running) else showProfileMutationResult(result, running)
       }
     }.start()
+  }
+
+  /** Read-only authenticated Host RPC, separate from the Android file index. */
+  private fun probeHostSessionsReadOnly() {
+    if (!::webView.isInitialized || !isEngineSource(webView.url ?: "")) {
+      showSimpleMessage("Host 会话读取诊断", "没有已加载的 DSH Host 页面；无法判断会话是否存在。")
+      return
+    }
+    val cap = jsString(bridgeCapability)
+    val script = """
+      (async () => {
+        const report = (msg) => {
+          try { window.androidBridge.reportHostSessionDiagnostic($cap, String(msg).slice(0, 2048)); } catch (_) {}
+        };
+        try {
+          const response = await fetch(new URL('api/session/list', document.baseURI).href, {
+            method: 'POST', credentials: 'include',
+            headers: {'content-type': 'application/json'},
+            body: JSON.stringify({
+              type: 'client-request',
+              rpcId: 'android-readonly-' + Date.now().toString(36),
+              method: 'session/list', payload: {args: {_request: {}}}
+            })
+          });
+          if (!response.ok) return report('会话接口 HTTP ' + response.status);
+          const envelope = await response.json();
+          if (!envelope?.result?.ok) return report('Host 返回失败：' +
+            JSON.stringify(envelope?.result?.error || 'unknown').slice(0, 700));
+          const value = envelope.result.value || {};
+          const items = Array.isArray(value.items) ? value.items : null;
+          report('Host 当前页会话数：' + (items ? items.length : '响应结构不同') +
+            '\\n可能存在后续分页：' + Boolean(value.nextCursor || value.hasMore) +
+            '\\n此结果不读取消息正文、不修改会话或工作区。');
+        } catch (e) { report('Host 读取异常：' + String(e?.message || e).slice(0, 700)); }
+      })();
+    """.trimIndent()
+    webView.evaluateJavascript(script, null)
   }
 
   /** Offline recovery remains available if the embedded DSH Host is broken. */
