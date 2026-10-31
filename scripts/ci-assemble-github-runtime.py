@@ -33,7 +33,7 @@ TOOL_SEEDS = (
     "binutils", "dnsutils", "aapt2",
 )
 TOOL_COMMANDS = (
-    "jq", "yq", "7z", "openssl", "file", "objdump", "nm",
+    "jq", "yq", "7z", "openssl", "file",
     "dig", "aapt2",
 )
 
