@@ -7,7 +7,7 @@ import { codeV3Call } from './dsh-code-engine-v3.mjs'
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
 const EXT=new Set(['.js','.jsx','.mjs','.cjs','.ts','.tsx','.json'])
-const EXCLUDE=new Set(['node_modules','.git','.next','dist','build','coverage','.gradle','vendor'])
+const EXCLUDE=new Set(['node_modules','.git','.next','dist','build','coverage','.gradle','vendor','.dsh','.cache','.local','.npm','.pnpm-store'])
 const RESOLVE_EXT=['','.ts','.tsx','.js','.jsx','.mjs','.cjs','.json']
 export const codeV4Tools=[
  {name:'code_dependencies',description:'Scan static relative JS/TS imports and exports to return a bounded dependency graph, unresolved imports and transitive dependencies. Heuristic, not AST.',inputSchema:obj({root:str,entry:str,maxFiles:{type:'integer',minimum:1,maximum:4000},maxDepth:{type:'integer',minimum:1,maximum:32}},[])},
