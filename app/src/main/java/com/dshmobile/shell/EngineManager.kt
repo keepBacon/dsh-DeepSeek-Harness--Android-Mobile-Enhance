@@ -1654,7 +1654,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
       val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode)
       val args = if (safeProfile != null) arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
-        "web", "--profile", safeProfile.first,
+        // DSH's launcher stops parsing its own options at the first app
+        // argument. 'web --profile ...' forwards --profile to the Web
+        // commander and fails with "unknown option --profile". The named
+        // safe profile must be selected before app arguments like --port.
+        "--profile", safeProfile.first,
         "--patch", mcpPatch.absolutePath,
         "--patch", safeProfile.second.absolutePath,
         "--port", port.toString(), "--no-open",
