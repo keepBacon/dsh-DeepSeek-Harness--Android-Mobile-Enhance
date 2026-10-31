@@ -73,6 +73,18 @@ async function test(kind,dir){
       await call('fs_write',{path:file,content:text});
       assert.equal(await readFile(file,'utf8'),text);
       assert.equal((await call('fs_read',{path:file})).content,text);
+      // The target GDB executable can be absent on trimmed Android builds.
+      // Failure must be a normal MCP tool result, never a connection drop.
+      const debug=await service.request('tools/call',{name:'debug_session_start',arguments:{}});
+      if(debug.isError){
+        assert.match(JSON.stringify(debug),/GDB unavailable|gdb|debug/i);
+      }else{
+        const sid=debug.structuredContent?.sessionId;
+        assert.ok(sid,'successful debug start must return a sessionId');
+        await service.request('tools/call',{name:'debug_session_close',arguments:{sessionId:sid}});
+      }
+      const afterDebug=await service.request('tools/list',{});
+      assert.equal(afterDebug.tools.length,names.length,'GDB probe must not disconnect MCP');
       await call('fs_patch',{path:file,oldText:'中文',newText:'修复'});
       assert.equal(await readFile(file,'utf8'),text.replace('中文','修复'));
     }else{
