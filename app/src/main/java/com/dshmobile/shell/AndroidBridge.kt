@@ -36,6 +36,7 @@ class AndroidBridge(
   },
   private val onOpenLocalUrl: (String) -> Boolean = { false },
   private val onRecordToolObservation: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
+  private val onHostSessionDiagnostic: (String) -> Unit = {},
   private val pickToken: String? = null,
 ) {
 
@@ -158,6 +159,13 @@ class AndroidBridge(
       onRecordToolObservation(sessionKey, callId, toolName, status, errorCode)
       true
     }.getOrDefault(false)
+  }
+
+  /** Counts/status only; the browser sends no session IDs, prompts, tokens or bodies. */
+  @JavascriptInterface
+  fun reportHostSessionDiagnostic(capability: String, summary: String) {
+    if (!authorized(capability) || summary.length !in 1..2048) return
+    onHostSessionDiagnostic(summary)
   }
 
   @JavascriptInterface
