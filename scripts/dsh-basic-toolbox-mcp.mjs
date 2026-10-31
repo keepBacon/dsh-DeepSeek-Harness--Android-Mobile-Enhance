@@ -189,6 +189,7 @@ async function call(name,a={}){
    await mkdir(dirname(d),{recursive:true});
    const target=await lstat(d).catch(e=>{if(e.code==='ENOENT')return null;throw e});
    if(target&&!bool(a.overwrite,false))throw new Error('destination exists');
+   if(target&&(!sourceStat.isFile()||!target.isFile()))throw new Error('overwrite move requires regular-file source and destination');
    if(!target){await rename(s,d);return{source:s,destination:d}}
    // Preserve the old destination until the source move has succeeded.
    const backup=d+'.dsh-move-backup-'+process.pid+'-'+randomBytes(8).toString('hex');
