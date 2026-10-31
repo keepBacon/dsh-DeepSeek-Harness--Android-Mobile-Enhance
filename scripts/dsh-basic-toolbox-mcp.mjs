@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { createHash, createPublicKey, X509Certificate } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { lookup, resolve4, resolve6, resolveMx, resolveTxt, resolveCname } from 'node:dns/promises'
+import { resolve4, resolve6, resolveMx, resolveTxt, resolveCname } from 'node:dns/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
 import { connect as netConnect } from 'node:net'
@@ -92,7 +92,8 @@ function readOnlySqlite(path,sql){
  try{
   // sqlite3_prepare rejects multiple statements, and read-only mode prevents writes.
   const stmt=db.prepare(sql)
-  if(!stmt.readOnly)throw new Error('SQLite query must be read-only')
+  // The connection itself is opened read-only. Node 24 StatementSync has no
+  // portable readOnly property; SQLite rejects changes at execution time.
   return stmt.all().map(row=>Object.fromEntries(Object.entries(row).map(([k,v])=>[k,typeof v==='bigint'?v.toString():v])))
  }finally{db.close()}
 }
