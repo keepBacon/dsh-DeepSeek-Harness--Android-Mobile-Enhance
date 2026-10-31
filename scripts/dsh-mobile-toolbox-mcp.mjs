@@ -276,12 +276,119 @@ async function closeFrida(session){
 
 const DEBUG_SESSIONS=new Map()
 let DEBUG_SEQ=0
-function debugSession(id){const s=DEBUG_SESSIONS.get(text(id,'sessionId',128));if(!s||s.closed)throw new Error('unknown or closed debug session');return s}
-function debugLine(session,line){session.lines.push(line);if(session.lines.length>2000)session.lines.splice(0,session.lines.length-2000);for(const pending of session.pending.values())pending.lines.push(line);for(const waiter of [...session.stopWaiters]){if(line.startsWith('*stopped')){session.stopWaiters.delete(waiter);clearTimeout(waiter.timer);waiter.resolve(line)}}for(const [token,pending] of session.pending){if(line.startsWith(token+'^')){session.pending.delete(token);clearTimeout(pending.timer);if(line.startsWith(token+'^error'))pending.reject(new Error('gdb: '+line));else pending.resolve({result:line,lines:pending.lines.slice(-200)})}}}
-async function startDebugSession(){const id='gdb-'+Date.now().toString(36)+'-'+(++DEBUG_SEQ).toString(36),bin=toolDirect('gdb'),args=['--interpreter=mi2','-q','-nx','--data-directory='+resolve(PREFIX,'share/gdb')],child=spawn(bin,args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']});const session={id,child,closed:false,buffer:'',lines:[],pending:new Map(),stopWaiters:new Set(),token:0,attachedPid:null};DEBUG_SESSIONS.set(id,session);const feed=chunk=>{session.buffer+=chunk.toString('utf8');while(true){const i=session.buffer.indexOf('\n');if(i<0)break;const line=session.buffer.slice(0,i).replace(/\r$/,'');session.buffer=session.buffer.slice(i+1);if(line)debugLine(session,line)}};child.stdout.on('data',feed);child.stderr.on('data',chunk=>feed(Buffer.from('&stderr:'+chunk.toString('utf8'))));child.on('close',()=>{session.closed=true;for(const p of session.pending.values()){clearTimeout(p.timer);p.reject(new Error('gdb session exited'))}session.pending.clear();for(const w of session.stopWaiters){clearTimeout(w.timer);w.reject(new Error('gdb session exited'))}session.stopWaiters.clear()});await miCommand(session,'-gdb-set pagination off',5000);return session}
-function miCommand(session,command,timeoutMs=5000){if(session.closed)throw new Error('debug session is closed');const token=String(++session.token);return new Promise((resolvePromise,reject)=>{const pending={lines:[],resolve:resolvePromise,reject,timer:null};pending.timer=setTimeout(()=>{session.pending.delete(token);reject(new Error('gdb command timed out: '+command))},timeoutMs);session.pending.set(token,pending);session.child.stdin.write(token+command+'\n')})}
-function waitDebugStop(session,timeoutMs){for(let i=session.lines.length-1;i>=0&&i>=session.lines.length-20;i--){if(session.lines[i].startsWith('*stopped'))return Promise.resolve(session.lines[i])}return new Promise((resolvePromise,reject)=>{const waiter={resolve:resolvePromise,reject,timer:null};waiter.timer=setTimeout(()=>{session.stopWaiters.delete(waiter);resolvePromise(null)},timeoutMs);session.stopWaiters.add(waiter)})}
-async function closeDebug(session){if(session.closed)return;try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}try{await miCommand(session,'-gdb-exit',3000)}catch{}try{session.child.kill('SIGKILL')}catch{}session.closed=true;DEBUG_SESSIONS.delete(session.id)}
+function debugSession(id){
+ const s=DEBUG_SESSIONS.get(text(id,'sessionId',128))
+ if(!s||s.closed)throw new Error('unknown or closed debug session')
+ return s
+}
+function failDebugSession(session,reason){
+ if(session.closed)return
+ session.closed=true
+ session.failure=reason instanceof Error?reason:new Error(String(reason))
+ DEBUG_SESSIONS.delete(session.id)
+ for(const pending of session.pending.values()){
+  clearTimeout(pending.timer)
+  pending.reject(session.failure)
+ }
+ session.pending.clear()
+ for(const waiter of session.stopWaiters){
+  clearTimeout(waiter.timer)
+  waiter.reject(session.failure)
+ }
+ session.stopWaiters.clear()
+}
+function debugLine(session,line){
+ session.lines.push(line)
+ if(session.lines.length>2000)session.lines.splice(0,session.lines.length-2000)
+ for(const pending of session.pending.values())pending.lines.push(line)
+ for(const waiter of [...session.stopWaiters]){
+  if(line.startsWith('*stopped')){
+   session.stopWaiters.delete(waiter)
+   clearTimeout(waiter.timer)
+   waiter.resolve(line)
+  }
+ }
+ for(const [token,pending] of session.pending){
+  if(line.startsWith(token+'^')){
+   session.pending.delete(token)
+   clearTimeout(pending.timer)
+   if(line.startsWith(token+'^error'))pending.reject(new Error('gdb: '+line))
+   else pending.resolve({result:line,lines:pending.lines.slice(-200)})
+  }
+ }
+}
+async function startDebugSession(){
+ const bin=toolDirect('gdb')
+ if(!await executableAvailable(bin)){
+  throw new Error('GDB unavailable: '+bin+' (install the embedded gdb package before debug_session_start)')
+ }
+ const id='gdb-'+Date.now().toString(36)+'-'+(++DEBUG_SEQ).toString(36)
+ const args=['--interpreter=mi2','-q','-nx','--data-directory='+resolve(PREFIX,'share/gdb')]
+ // A child can fail after spawn() returns, emitting an asynchronous 'error'.
+ // Without a listener Node terminates the entire stdio MCP server (connection closed).
+ const child=spawn(bin,args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
+ const session={id,child,closed:false,failure:null,buffer:'',lines:[],pending:new Map(),stopWaiters:new Set(),token:0,attachedPid:null}
+ DEBUG_SESSIONS.set(id,session)
+ const feed=chunk=>{
+  session.buffer+=chunk.toString('utf8')
+  while(true){
+   const i=session.buffer.indexOf('\n')
+   if(i<0)break
+   const line=session.buffer.slice(0,i).replace(/\r$/,'')
+   session.buffer=session.buffer.slice(i+1)
+   if(line)debugLine(session,line)
+  }
+ }
+ child.on('error',error=>failDebugSession(session,new Error('gdb process error: '+error.message)))
+ child.on('close',(code,signal)=>failDebugSession(session,new Error('gdb session exited: '+(signal||code))))
+ child.stdout.on('data',feed)
+ child.stderr.on('data',chunk=>feed(Buffer.from('&stderr:'+chunk.toString('utf8'))))
+ try{
+  await miCommand(session,'-gdb-set pagination off',5000)
+  return session
+ }catch(error){
+  failDebugSession(session,error)
+  try{child.kill('SIGKILL')}catch{}
+  throw error
+ }
+}
+function miCommand(session,command,timeoutMs=5000){
+ if(session.closed)throw (session.failure||new Error('debug session is closed'))
+ const token=String(++session.token)
+ return new Promise((resolvePromise,reject)=>{
+  const pending={lines:[],resolve:resolvePromise,reject,timer:null}
+  const fail=error=>{
+   if(session.pending.delete(token)){
+    clearTimeout(pending.timer)
+    reject(error)
+   }
+  }
+  pending.timer=setTimeout(()=>fail(new Error('gdb command timed out: '+command)),timeoutMs)
+  session.pending.set(token,pending)
+  try{
+   session.child.stdin.write(token+command+'\n',error=>{
+    if(error)fail(new Error('gdb stdin write failed: '+error.message))
+   })
+  }catch(error){fail(error)}
+ })
+}
+function waitDebugStop(session,timeoutMs){
+ for(let i=session.lines.length-1;i>=0&&i>=session.lines.length-20;i--){
+  if(session.lines[i].startsWith('*stopped'))return Promise.resolve(session.lines[i])
+ }
+ return new Promise((resolvePromise,reject)=>{
+  const waiter={resolve:resolvePromise,reject,timer:null}
+  waiter.timer=setTimeout(()=>{session.stopWaiters.delete(waiter);resolvePromise(null)},timeoutMs)
+  session.stopWaiters.add(waiter)
+ })
+}
+async function closeDebug(session){
+ if(session.closed)return
+ try{if(session.attachedPid)await miCommand(session,'-target-detach',3000)}catch{}
+ try{await miCommand(session,'-gdb-exit',3000)}catch{}
+ try{session.child.kill('SIGKILL')}catch{}
+ failDebugSession(session,new Error('debug session closed'))
+}
 
 async function call(name,a={}){
  if(codeTools.some(x=>x.name===name))return codeCall(name,a)
@@ -585,7 +692,7 @@ async function call(name,a={}){
    const args=[...fridaDeviceArgs(a),'-p',String(pidValue(a.pid)),'-i',text(a.include,'include',4096)],r=await runProcess(toolWrapped('frida-trace'),args,{timeoutMs:int(a.durationMs,5000,500,15000),maxOutputBytes:MAX_COMMAND_OUTPUT});return{pid:a.pid,include:a.include,...trimLines((r.stdout+(r.stderr?'\n[stderr]\n'+r.stderr:'')),int(a.maxLines,1200,1,4000)),endedByTimeout:r.timedOut,exitCode:r.exitCode}
   }
   case 'debug_session_start': {
-   const session=await startDebugSession();if(a.pid!=null){await miCommand(session,'-target-attach '+pidValue(a.pid),8000);session.attachedPid=a.pid}return{sessionId:session.id,pid:session.attachedPid,recent:session.lines.slice(-20)}
+   const session=await startDebugSession();try{if(a.pid!=null){await miCommand(session,'-target-attach '+pidValue(a.pid),8000);session.attachedPid=a.pid}return{sessionId:session.id,pid:session.attachedPid,recent:session.lines.slice(-20)}}catch(error){await closeDebug(session);throw error}
   }
   case 'debug_attach': {
    const session=debugSession(a.sessionId),pid=pidValue(a.pid),result=await miCommand(session,'-target-attach '+pid,8000);session.attachedPid=pid;return{sessionId:session.id,pid,result}
