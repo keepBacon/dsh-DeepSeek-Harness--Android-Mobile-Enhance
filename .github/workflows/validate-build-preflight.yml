@@ -48,6 +48,7 @@ jobs:
           node scripts/validate-agent-preset-parity.mjs --self-test
           node --check app/src/main/assets/dsh-tool-call-monitor.js
           node scripts/test-mobile-database-contract.mjs
+          node scripts/test-basic-toolbox-operations.mjs
           node scripts/test-code-engine.mjs
           node scripts/test-code-engine-v3.mjs
           node scripts/test-code-engine-v4.mjs
