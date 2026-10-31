@@ -29,15 +29,14 @@ SEEDS = ("proot", "python", "python-pip", "apt", "dpkg", "termux-tools", "termux
 # dependencies, despite the full Termux catalog declaring them. Keep the
 # first ARM64 expansion deliberately focused on the tested missing binaries.
 TOOL_SEEDS = (
-    "jq", "yq", "7zip", "openssl-tool", "file", "git", "binutils",
-    "dnsutils", "aapt2", "android-tools", "poppler", "ffmpeg",
-    "imagemagick", "gdb", "rizin",
+    "jq", "yq", "7zip", "openssl-tool", "file",
+    "binutils", "dnsutils", "aapt2",
 )
 TOOL_COMMANDS = (
-    "jq", "yq", "7z", "openssl", "file", "git", "objdump", "nm",
-    "dig", "aapt2", "adb", "pdfinfo", "ffmpeg", "ffprobe",
-    "magick", "gdb", "rizin",
+    "jq", "yq", "7z", "openssl", "file", "objdump", "nm",
+    "dig", "aapt2",
 )
+
 SCRIPT_MAP = {
     "dsh-mobile-toolbox-mcp.mjs": "toolbox-mcp.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
