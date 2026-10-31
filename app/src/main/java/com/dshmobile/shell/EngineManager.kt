@@ -1457,7 +1457,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
         dst.deleteRecursively()
         throw linkError
       }
-      backup.deleteRecursively()
+      // Preserve the previous physical generation until a separately verified
+      // user-initiated cleanup. It is the only fallback if shared storage goes
+      // missing after the link has been published.
+      Log.i(TAG, "Preserved migration rollback generation: " + backup.absolutePath)
       true
     } catch (t: Throwable) {
       stage.deleteRecursively()
@@ -1522,7 +1525,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   /** Recursively copy physical directory content without following symlinks. */
   private fun copyTree(src: File, dst: File, skip: Set<String>, overwrite: Boolean) {
-    src.listFiles()?.forEach { f ->
+    val children = src.listFiles()
+      ?: throw java.io.IOException("无法完整读取源目录，禁止继续迁移：" + src.absolutePath)
+    children.forEach { f ->
       if (f.name in skip) return@forEach
       val target = File(dst, f.name)
       if (java.nio.file.Files.isSymbolicLink(f.toPath())) {
