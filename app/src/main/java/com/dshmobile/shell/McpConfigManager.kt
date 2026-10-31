@@ -94,7 +94,16 @@ class McpConfigManager(
         rows += toolboxRow()
         rows += basicToolboxRow()
       }
-      readServersForRuntime(root).filter { it.enabled }.forEach { rows += serverRow(it) }
+      readServersForRuntime(root).filter { it.enabled }.forEach { server ->
+        val issue = externalStdioLaunchIssue(server)
+        if (issue == null) {
+          rows += serverRow(server)
+        } else {
+          // A stale external Android/Termux path must not poison DSH startup.
+          // Keep the persisted server definition untouched for later repair.
+          Log.w(tag, "Skipping unavailable MCP ${server.serverName}: $issue")
+        }
+      }
     }
     val text = if (rows.isEmpty()) {
       "[]\n"
@@ -110,6 +119,38 @@ class McpConfigManager(
     return patchFile
   }
 
+  /**
+   * Never rewrite/delete legacy MCP definitions as part of a Host boot.
+   * Stdio entrypoints with missing absolute local files cannot be executed
+   * by the embedded Android Host; silently retrying them crashes or floods
+   * the log with MODULE_NOT_FOUND on every restart.
+   */
+  private fun externalStdioLaunchIssue(server: McpServerConfig): String? {
+    if (server.transport != STDIO || !server.enabled) return null
+    val paths = mutableListOf(server.command)
+    // Only examine executable-like script arguments, not arbitrary positional
+    // arguments such as output locations or URLs.
+    paths += server.args.filter { arg ->
+      arg.startsWith("/") &&
+        (arg.endsWith(".js") || arg.endsWith(".mjs") ||
+         arg.endsWith(".cjs") || arg.endsWith(".ts"))
+    }
+    for (path in paths) {
+      if (!path.startsWith("/")) continue
+      if (!File(path).isFile) return "missing/unreadable executable or script"
+    }
+    if (server.cwd.isNotBlank() && server.cwd.startsWith("/") && !File(server.cwd).isDirectory)
+      return "missing/unreadable working directory"
+    return null
+  }
+
+  /** Read-only report: active choices remain in mcp-servers.json. */
+  fun unavailableExternalServers(): List<String> =
+    readServersForRuntime(readRootSafe()).filter { it.enabled }
+      .mapNotNull { server ->
+        externalStdioLaunchIssue(server)?.let { server.serverName + ": " + it }
+      }
+
   fun runtimeSummary(): String {
     // Read once: settings rendering must not parse the same JSON repeatedly.
     val root = readRootSafe()
@@ -123,7 +164,9 @@ class McpConfigManager(
       else -> "入口缺失（mobile=" + mobilePresent + ", basic=" + basicPresent + "）"
     }
     val binary = if (File(usrDir, "libexec/dsh/wrappers/readelf").exists() && File(usrDir, "libexec/dsh/wrappers/objdump").exists()) " · Binutils" else ""
-    val diagnostic = if (configurationIssue() == null) "" else " · MCP 配置异常（查看诊断）"
+    val skipped = unavailableExternalServers().size
+    val diagnostic = (if (configurationIssue() == null) "" else " · MCP 配置异常（查看诊断）") +
+      (if (skipped == 0) "" else " · 启动时跳过失效外部入口 $skipped 个（原配置保留）")
     return "内置 MCP " + builtIn + " · 外部 " + servers.count { it.enabled } + "/" + servers.size + binary + diagnostic
   }
 
