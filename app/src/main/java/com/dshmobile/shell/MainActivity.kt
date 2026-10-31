@@ -3554,15 +3554,23 @@ class MainActivity : ComponentActivity() {
     try { view.evaluateJavascript(script, null) } catch (_: Throwable) {}
   }
 
-  private var sessionUiRecoveryAttempted = false
+  private var sessionUiRecoveryAttempts = 0
+  private var lastSessionUiRecoveryAt = 0L
+  private var lastSessionUiRecoveryHostCount = 0
 
   private fun handleSessionUiMismatch(hostCount: Int) {
-    if (isFinishing || isDestroyed || sessionUiRecoveryAttempted || hostCount <= 0) return
-    if (!isEngineSource(webView.url ?: "")) return
-    sessionUiRecoveryAttempted = true
-    Log.w("DSH-Workspace", "Host reports $hostCount sessions but Workspace sidebar is empty")
-    // One isolated WebView reload. Do not restart the Host, switch Profiles,
-    // create Workspaces, or alter Session/Workspace persistence.
+    if (isFinishing || isDestroyed || hostCount <= 0) return
+    if (!isEngineSource(webView.url ?: "") || profileMutationRunning.get()) return
+    val now = android.os.SystemClock.elapsedRealtime()
+    // Bounded across a single Activity, including repeated WebView reloads.
+    // Preserve user edits: no recovery when the composer holds a draft.
+    if (sessionUiRecoveryAttempts >= 2 || now - lastSessionUiRecoveryAt < 120_000L) return
+    sessionUiRecoveryAttempts++
+    lastSessionUiRecoveryAt = now
+    lastSessionUiRecoveryHostCount = hostCount
+    Log.w("DSH-Workspace", "Host reports $hostCount sessions but Workspace sidebar remains empty; rehydrate $sessionUiRecoveryAttempts/2")
+    // No Host restart, Profile switch or Workspace storage mutations. Recreating
+    // the browser view allows the Workspace follow stream to resubscribe.
     webView.reload()
   }
 
