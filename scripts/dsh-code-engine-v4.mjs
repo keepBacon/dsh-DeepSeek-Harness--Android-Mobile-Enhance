@@ -17,7 +17,7 @@ export const codeV4Tools=[
 const validNum=(v,fallback,min,max)=>Number.isInteger(v)?Math.min(max,Math.max(min,v)):fallback
 const inRoot=(root,path)=>path===root||path.startsWith(root+sep)
 const display=(root,path)=>relative(root,path).split(sep).join('/')
-async function collect(root,maxFiles){
+async function collect(root,maxFiles,maxDepth){
  const output=[],stack=[{dir:root,depth:0}]
  let complete=true,skipped=0
  while(stack.length){
@@ -30,8 +30,8 @@ async function collect(root,maxFiles){
    const path=join(dir,entry.name)
    if(entry.isSymbolicLink()){complete=false;skipped++;continue}
    if(entry.isDirectory()){
-    if(!EXCLUDE.has(entry.name)&&depth<25)stack.push({dir:path,depth:depth+1})
-    else {skipped++;if(depth>=25)complete=false}
+    if(!EXCLUDE.has(entry.name)&&depth<maxDepth)stack.push({dir:path,depth:depth+1})
+    else {skipped++;if(depth>=maxDepth)complete=false}
    }else if(entry.isFile()&&EXT.has(extname(entry.name).toLowerCase())){
     if(output.length>=maxFiles){complete=false;skipped++;continue}
     output.push(path)
@@ -102,7 +102,7 @@ function closure(seed,neighbors,maxDepth){
 }
 async function analyzeDependencies(a){
  const root=resolve(a.root||'.'),maxFiles=validNum(a.maxFiles,1200,1,4000),maxDepth=validNum(a.maxDepth,12,1,32)
- const g=await graph(root,maxFiles)
+ const g=await graph(root,maxFiles,maxDepth)
  const outgoing=new Map()
  for(const edge of g.edges){if(!outgoing.has(edge.from))outgoing.set(edge.from,[]);outgoing.get(edge.from).push(edge.to)}
  if(a.entry){
