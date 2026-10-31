@@ -372,8 +372,11 @@ function miCommand(session,command,timeoutMs=5000){
   }catch(error){fail(error)}
  })
 }
-function waitDebugStop(session,timeoutMs){
- for(let i=session.lines.length-1;i>=0&&i>=session.lines.length-20;i--){
+function waitDebugStop(session,timeoutMs,fromLine=session.lines.length){
+ if(session.closed)throw (session.failure||new Error('debug session is closed'))
+ // Only accept stop events emitted after the caller started its command.
+ // Older *stopped events must not make a fresh continue appear completed.
+ for(let i=fromLine;i<session.lines.length;i++){
   if(session.lines[i].startsWith('*stopped'))return Promise.resolve(session.lines[i])
  }
  return new Promise((resolvePromise,reject)=>{
@@ -701,7 +704,7 @@ async function call(name,a={}){
    const session=debugSession(a.sessionId),hasAddr=a.address!=null,hasSymbol=a.symbol!=null;if(hasAddr===hasSymbol)throw new Error('provide exactly one of address or symbol');const location=hasAddr?'*'+addr(a.address):text(a.symbol,'symbol',4096),cmd='-break-insert '+(bool(a.temporary,false)?'-t ':'')+location;return{sessionId:session.id,...await miCommand(session,cmd,5000)}
   }
   case 'debug_continue': {
-   const session=debugSession(a.sessionId),before=session.lines.length,result=await miCommand(session,'-exec-continue',5000),waitMs=int(a.waitMs,1500,0,15000);let stopped=session.lines.slice(before).find(x=>x.startsWith('*stopped'))||null;if(!stopped&&waitMs>0)stopped=await waitDebugStop(session,waitMs);return{sessionId:session.id,result,stopped,running:stopped==null,recent:session.lines.slice(-40)}
+   const session=debugSession(a.sessionId),before=session.lines.length,result=await miCommand(session,'-exec-continue',5000),waitMs=int(a.waitMs,1500,0,15000);let stopped=session.lines.slice(before).find(x=>x.startsWith('*stopped'))||null;if(!stopped&&waitMs>0)stopped=await waitDebugStop(session,waitMs,before);return{sessionId:session.id,result,stopped,running:stopped==null,recent:session.lines.slice(-40)}
   }
   case 'debug_registers': {
    const session=debugSession(a.sessionId);return{sessionId:session.id,...await miCommand(session,'-data-list-register-values x',5000)}
