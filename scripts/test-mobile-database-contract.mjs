@@ -61,6 +61,12 @@ assert.match(activity,/databaseWriter\.offer/);
 assert.match(activity,/databaseWriter\.close\(\)/);
 assert.match(activity,/DatabaseBackup\.create/);
 assert.match(activity,/probeHostSessionsReadOnly\(\)/);
+assert.match(activity,/request\.isForMainFrame/);
+assert.match(activity,/首次失败（回滚前）/);
+assert.match(activity,/rollbackOnBootFailure == null/);
+assert.match(activity,/旧 DSH 进程未能完全退出/);
+assert.ok(!activity.includes('override fun onReceivedError(view: WebView, errorCode: Int'),
+  'legacy WebView error callback must not restart on subresource failure');
 assert.match(activity,/reportHostSessionDiagnostic/);
 assert.match(bridge,/fun reportHostSessionDiagnostic\(/);
 assert.match(engine,/Preserved migration rollback generation/);
