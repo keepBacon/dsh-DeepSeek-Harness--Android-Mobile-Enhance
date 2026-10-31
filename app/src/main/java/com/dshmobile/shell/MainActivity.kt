@@ -887,7 +887,7 @@ class MainActivity : ComponentActivity() {
         if (!::webView.isInitialized || !isEngineSource(webView.url ?: "")) {
           showSimpleMessage("会话侧边栏", "DSH 页面尚未打开，无法同步。")
         } else {
-          android.app.AlertDialog.Builder(this)
+          android.app.AlertDialog.Builder(this@MainActivity)
             .setTitle("重新同步会话侧边栏")
             .setMessage("这会重新加载 WebView，可能中断当前正在运行的模型请求、工具流或 subagent 输出。请先等待任务结束。不会删除会话或工作区数据。")
             .setNegativeButton("取消", null)
