@@ -38,6 +38,7 @@ class AndroidBridge(
   private val onRecordToolObservation: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
   private val onHostSessionDiagnostic: (String) -> Unit = {},
   private val onSessionUiMismatch: (Int) -> Unit = {},
+  private val onWorkspaceStreamDiagnostic: (String) -> Unit = {},
   private val pickToken: String? = null,
 ) {
 
@@ -167,6 +168,12 @@ class AndroidBridge(
   fun reportHostSessionDiagnostic(capability: String, summary: String) {
     if (!authorized(capability) || summary.length !in 1..2048) return
     onHostSessionDiagnostic(summary)
+  }
+
+  @JavascriptInterface
+  fun reportWorkspaceStreamDiagnostic(capability: String, result: String) {
+    if (!authorized(capability) || result.isEmpty() || result.length > 1100) return
+    onWorkspaceStreamDiagnostic(result)
   }
 
   @JavascriptInterface
