@@ -2,6 +2,8 @@
 // DSH host-side MCP wire regression. Runs against bundled servers, not plugins.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -91,6 +93,18 @@ async function test(kind,dir){
       const src=join(dir,'src.txt'),dst=join(dir,'dst.txt'),moved=join(dir,'moved.txt');
       const text='中文🚀\n{"nested":[1,true,null]}\n';
       await writeFile(src,text);
+      assert.equal((await call('file_hash',{path:src,algorithm:'sha256'})).digest,
+        createHash('sha256').update(text).digest('hex'));
+      const dbPath=join(dir,'fixture.db');
+      const db=new DatabaseSync(dbPath);
+      db.exec("CREATE TABLE sample (id INTEGER PRIMARY KEY, label TEXT); INSERT INTO sample (label) VALUES ('ok')");
+      db.close();
+      assert.equal((await call('sqlite_query',{path:dbPath,sql:'SELECT label FROM sample'})).rows[0].label,'ok');
+      assert.ok((await call('sqlite_schema',{path:dbPath})).objects.some(x=>x.name==='sample'));
+      const denied=await service.request('tools/call',{name:'sqlite_query',arguments:{
+        path:dbPath,sql:"DELETE FROM sample"
+      }});
+      assert.equal(denied.isError,true,'sqlite_query must reject writes');
       await call('file_copy',{source:src,destination:dst});
       assert.equal(await readFile(dst,'utf8'),text);
       await call('file_move',{source:dst,destination:moved});
