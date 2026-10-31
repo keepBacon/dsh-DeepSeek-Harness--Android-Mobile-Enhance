@@ -897,6 +897,25 @@ class MainActivity : ComponentActivity() {
       }
     })
     wrap.addView(Button(this).apply {
+      text = "检查 DSH Host / Gateway 连接（只读）"
+      setOnClickListener {
+        Thread {
+          val processAlive = engineManager.isEngineProcessAlive()
+          val probe = EngineProbe.check(1200)
+          val diagnosis = buildString {
+            append("DSH 本地进程：").append(if (processAlive) "运行中" else "未运行或无法确认")
+            append("\nHTTP 身份探测：").append(if (probe.optBoolean("running")) "正常" else "失败")
+            append("\nHTTP 状态码：").append(probe.optInt("httpCode", -1))
+            append("\n耗时：").append(probe.optLong("latencyMs", -1)).append(" ms")
+            append("\n错误：").append(probe.optString("error", "无"))
+            append("\n\n如果进程仍在、HTTP 失败，可能是 Gateway 无响应，切勿在生成中强制重启。")
+            append("\n此检查不会清理会话、重启服务或更改认证。")
+          }
+          runOnUiThread { if (!isFinishing && !isDestroyed) showSimpleMessage("Host / Gateway 诊断", diagnosis) }
+        }.start()
+      }
+    })
+    wrap.addView(Button(this).apply {
       text = "检查 DSH Host 实际识别的会话（只读）"
       setOnClickListener { probeHostSessionsReadOnly() }
     })
