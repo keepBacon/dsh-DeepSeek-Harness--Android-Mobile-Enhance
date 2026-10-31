@@ -166,7 +166,10 @@ forbid "$BG" 'snapshot-x86_64.tar.xz'
 must "$BG" 'snapshot-arm64.tar.xz'
 
 # V0.1.2 identity and settings repository entry.
-must "$BG" 'versionCode = 37'
+# Keep default app version for Termux, while GitHub signed-upgrade builds
+# may supply an explicit higher code without changing the package identity.
+must "$BG" '?: 37'
+must "$BG" 'dshUpgradeVersionCode'
 must "$BG" 'versionName = "0.1.2"'
 must "$MA" 'DSH-Android/0.1.2'
 must "$BT" '"app": "0.1.2"'
