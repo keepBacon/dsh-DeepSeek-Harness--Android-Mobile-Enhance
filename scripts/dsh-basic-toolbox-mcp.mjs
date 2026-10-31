@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto'
+import { createHash, createPublicKey, X509Certificate } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import { lookup, resolve4, resolve6, resolveMx, resolveTxt, resolveCname } from 'node:dns/promises'
+import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
 import { connect as netConnect } from 'node:net'
 import { createRequire } from 'node:module'
@@ -79,7 +82,20 @@ async function exists(p){try{await lstat(p);return true}catch(e){if(e?.code==='E
 function trim(s,n=1200){const a=String(s).split(/\r?\n/);return{output:a.slice(0,n).join('\n').slice(0,MAX_OUTPUT),truncated:a.length>n,totalLines:a.length}}
 async function run(cmd,args=[],opts={}){return await new Promise(done=>{let out='',err='',finished=false;const child=spawn(cmd,args,{cwd:opts.cwd||process.cwd(),env:process.env,shell:false});const cap=MAX_OUTPUT;child.stdout?.on('data',b=>{if(out.length<cap)out=(out+b.toString()).slice(0,cap)});child.stderr?.on('data',b=>{if(err.length<cap)err=(err+b.toString()).slice(0,cap)});const timer=setTimeout(()=>{try{child.kill('SIGKILL')}catch{}},opts.timeout||30000);child.on('close',code=>{clearTimeout(timer);if(!finished){finished=true;done({exitCode:code,stdout:out,stderr:err})}});child.on('error',e=>{clearTimeout(timer);if(!finished){finished=true;done({exitCode:null,stdout:out,stderr:String(e)})}})})}
 async function strict(cmd,args=[],opts={}){const r=await run(cmd,args,opts);if(r.exitCode!==0)throw new Error(cmd+' failed: '+(r.stderr||r.stdout));return r.stdout}
-async function sha(path,alg='sha256'){const o=await strict('openssl',['dgst','-'+alg,path]);const m=o.match(/=\s*([0-9a-fA-F]+)\s*$/);if(!m)throw new Error('digest parse failed');return m[1].toLowerCase()}
+async function sha(path,alg='sha256'){
+ const hash=createHash(alg)
+ for await(const chunk of createReadStream(path))hash.update(chunk)
+ return hash.digest('hex')
+}
+function readOnlySqlite(path,sql){
+ const db=new DatabaseSync(path,{readOnly:true,allowExtension:false})
+ try{
+  // sqlite3_prepare rejects multiple statements, and read-only mode prevents writes.
+  const stmt=db.prepare(sql)
+  if(!stmt.readOnly)throw new Error('SQLite query must be read-only')
+  return stmt.all().map(row=>Object.fromEntries(Object.entries(row).map(([k,v])=>[k,typeof v==='bigint'?v.toString():v])))
+ }finally{db.close()}
+}
 function decode(data,enc='utf8'){if(enc==='utf8')return Buffer.from(data);if(enc==='base64url')return Buffer.from(data,'base64url');return Buffer.from(data,enc)}
 async function tree(root,maxDepth,maxEntries,showHidden,sizeOnly=false){const rows=[];let bytes=0,files=0,dirs=0;async function walk(d,depth){if(depth>maxDepth)return;for(const e of await readdir(d,{withFileTypes:true})){if(!showHidden&&e.name.startsWith('.'))continue;if((sizeOnly?files+dirs:rows.length)>=maxEntries)return;const p=resolve(d,e.name),s=await lstat(p),type=s.isSymbolicLink()?'symlink':s.isDirectory()?'directory':s.isFile()?'file':'other';if(type==='file'){bytes+=s.size;files++}else if(type==='directory')dirs++;if(!sizeOnly)rows.push({path:relative(root,p),type,size:type==='file'?s.size:0});if(type==='directory')await walk(p,depth+1)}}await walk(root,0);return{rows,bytes,files,dirs}}
 
@@ -98,8 +114,8 @@ async function call(name,a={}){
   case 'xml_query':{const f=await checkedPath(a.path);return{path:f.path,output:(await strict('yq',['-p=xml','-o=json',a.expression||'.',f.path])).trim()}}
   case 'toml_query':{const f=await checkedPath(a.path),q=a.query||'',s="import json,sys,tomllib\nd=tomllib.load(open(sys.argv[1],'rb'))\nfor p in filter(None,sys.argv[2].split('.')):d=d[p] if isinstance(d,dict) else d[int(p)]\nprint(json.dumps(d,ensure_ascii=False,default=str))";return{path:f.path,value:JSON.parse(await strict('python3',['-c',s,f.path,q]))}}
   case 'csv_query':{const f=await checkedPath(a.path),s="import csv,json,sys\nwith open(sys.argv[1],encoding='utf-8-sig',newline='') as h:r=csv.DictReader(h);print(json.dumps([x for _,x in zip(range(int(sys.argv[2])),r)],ensure_ascii=False))";return{path:f.path,rows:JSON.parse(await strict('python3',['-c',s,f.path,String(int(a.limit,200,1,10000))]))}}
-  case 'sqlite_query':{const f=await checkedPath(a.path),o=await strict('sqlite3',['-readonly','-json',f.path,text(a.sql,'sql')]);return{path:f.path,rows:o.trim()?JSON.parse(o):[]}}
-  case 'sqlite_schema':{const f=await checkedPath(a.path),o=await strict('sqlite3',['-readonly','-json',f.path,"SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name;"]);return{path:f.path,objects:o.trim()?JSON.parse(o):[]}}
+  case 'sqlite_query':{const f=await checkedPath(a.path);return{path:f.path,rows:readOnlySqlite(f.path,text(a.sql,'sql'))}}
+  case 'sqlite_schema':{const f=await checkedPath(a.path);return{path:f.path,objects:readOnlySqlite(f.path,"SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")}}
   case 'text_diff':{const l=await checkedPath(a.left),r=await checkedPath(a.right),x=await run('git',['diff','--no-index','--no-color','--',l.path,r.path]);if(x.exitCode!==0&&x.exitCode!==1)throw new Error(x.stderr);return{different:x.exitCode===1,...trim(x.stdout)}}
   case 'text_replace':{const paths=a.paths||[],old=text(a.oldText),neu=text(a.newText),expected=int(a.expectedOccurrences,1,1,1000),dry=bool(a.dryRun,false),result=[];for(const p of paths){const f=await checkedPath(p),src=await readFile(f.path,'utf8'),count=src.split(old).length-1;if(count!==expected)throw new Error(f.path+': expected '+expected+', found '+count);if(!dry)await writeFile(f.path,src.split(old).join(neu));result.push({path:f.path,occurrences:count})}return{dryRun:dry,files:result}}
   case 'regex_test':{const p=text(a.pattern),flags=a.flags||'g',input=text(a.text),max=int(a.maxMatches,50,1,200),s="const[p,f,b,m]=process.argv.slice(1);let z=f.includes('g')?f:f+'g',r=new RegExp(p,z),t=Buffer.from(b,'base64').toString(),o=[],x;while((x=r.exec(t))&&o.length<+m){o.push({match:x[0],index:x.index,groups:x.slice(1)});if(!x[0])r.lastIndex++}console.log(JSON.stringify(o))";return{matches:JSON.parse(await strict('node',['-e',s,p,flags,Buffer.from(input).toString('base64'),String(max)],{timeout:2000}))}}
@@ -107,7 +123,12 @@ async function call(name,a={}){
   case 'disk_info':{const p=await realpath(userPath(a.path||'.')),o=await strict('df',['-Pk',p]),c=o.trim().split(/\r?\n/).at(-1).trim().split(/\s+/);return{path:p,totalKiB:+c[1],usedKiB:+c[2],availableKiB:+c[3],usePercent:c[4],mount:c.slice(5).join(' ')}}
   case 'port_list':return trim(await strict('ss',['-H','-l','-n','-t','-u']),1000)
   case 'tcp_probe':{const host=text(a.host),port=int(a.port,0,1,65535),start=Date.now();return await new Promise(done=>{let finished=false;const s=netConnect({host,port});const finish=(ok,error=null)=>{if(finished)return;finished=true;s.destroy();done({host,port,ok,latencyMs:Date.now()-start,error})};s.setTimeout(int(a.timeoutMs,3000,100,15000),()=>finish(false,'timeout'));s.once('connect',()=>finish(true));s.once('error',e=>finish(false,e.code||e.message))})}
-  case 'dns_lookup':return{name:a.name,type:a.type||'A',answers:(await strict('dig',['+short',text(a.name),a.type||'A'])).split(/\r?\n/).filter(Boolean)}
+  case 'dns_lookup':{
+ const name=text(a.name),type=a.type||'A'
+ const resolver={A:resolve4,AAAA:resolve6,MX:resolveMx,TXT:resolveTxt,CNAME:resolveCname}[type]
+ if(!resolver)throw new Error('unsupported DNS record type')
+ return{name,type,answers:await resolver(name)}
+}
   case 'base_convert':{const b=decode(text(a.data),a.from||'utf8'),to=a.to||'hex';return{value:to==='utf8'?b.toString():b.toString(to)}}
   case 'encoding_detect':{const f=await checkedPath(a.path);return{path:f.path,mime:(await strict('file',['-b','--mime',f.path])).trim()}}
   case 'permissions_info':{const p=userPath(a.path),s=await lstat(p);return{path:p,mode:'0'+(s.mode&0o7777).toString(8),uid:s.uid,gid:s.gid}}
