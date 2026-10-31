@@ -25,7 +25,13 @@ try{
  const dir=join(root,'directory')
  await mkdir(dir)
  await assert.rejects(call('file_move',{source:dir,destination:join(dir,'nested'),overwrite:true}),/ancestor/)
- await assert.rejects(call('file_move',{source,destination:join(root,'missing','target'),overwrite:true}),/ENOENT|no such file|rename/)
+ // A failed replacement of an existing directory by a file must preserve both paths.
+ const occupied=join(root,'occupied')
+ await mkdir(occupied)
+ await writeFile(join(occupied,'child.txt'),'keep')
+ await assert.rejects(call('file_move',{source,destination:occupied,overwrite:true}))
+ assert.equal(await readFile(source,'utf8'),'new content')
+ assert.equal(await readFile(join(occupied,'child.txt'),'utf8'),'keep')
  // A failed multi-file validation must leave every file unchanged.
  await writeFile(source,'old text')
  await writeFile(dest,'does not match')
