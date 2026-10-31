@@ -93,6 +93,8 @@ assert.match(activity,/检查 DSH Host \/ Gateway 连接（只读）/);
 assert.match(activity,/会话列表同步异常/);
 assert.match(activity,/可能中断当前正在运行的模型请求/);
 assert.ok(!activity.includes('sessionUiRecoveryAttempted = true'));
+assert.match(engine,/"--profile", safeProfile\.first/);
+assert.ok(!engine.includes('"web", "--profile", safeProfile.first'), 'safe mode must not forward --profile to the Web commander');
 assert.match(activity,/probeHostSessionsReadOnly\(\)/);
 assert.match(activity,/request\.isForMainFrame/);
 assert.match(activity,/首次失败（回滚前）/);
