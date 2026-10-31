@@ -498,6 +498,7 @@ class MainActivity : ComponentActivity() {
         pushSystemDark(view)
         installMobileUiBridge(view)
         installPassiveToolCallMonitor(view)
+        installSessionUiRecoveryWatch(view)
       }
     }
     // WebView 下载：会话日志导出（/api/session.export）与其余引擎源下载
@@ -633,6 +634,9 @@ class MainActivity : ComponentActivity() {
         onOpenLocalUrl = { url -> openLocalPreviewUrl(url) },
         onHostSessionDiagnostic = { summary ->
           runOnUiThread { if (!isFinishing && !isDestroyed) showSimpleMessage("Host 会话读取诊断", summary) }
+        },
+        onSessionUiMismatch = { count ->
+          runOnUiThread { handleSessionUiMismatch(count) }
         },
         onRecordToolObservation = { session, call, tool, status, code ->
           databaseWriter.offer(session, call, tool, status, code)
@@ -3548,6 +3552,32 @@ class MainActivity : ComponentActivity() {
       })();
     """.trimIndent()
     try { view.evaluateJavascript(script, null) } catch (_: Throwable) {}
+  }
+
+  private var sessionUiRecoveryAttempted = false
+
+  private fun handleSessionUiMismatch(hostCount: Int) {
+    if (isFinishing || isDestroyed || sessionUiRecoveryAttempted || hostCount <= 0) return
+    if (!isEngineSource(webView.url ?: "")) return
+    sessionUiRecoveryAttempted = true
+    Log.w("DSH-Workspace", "Host reports $hostCount sessions but Workspace sidebar is empty")
+    // One isolated WebView reload. Do not restart the Host, switch Profiles,
+    // create Workspaces, or alter Session/Workspace persistence.
+    webView.reload()
+  }
+
+  private fun installSessionUiRecoveryWatch(view: WebView) {
+    if (!isEngineSource(view.url ?: "")) return
+    val code = try {
+      assets.open("dsh-session-ui-recovery.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+    } catch (t: Throwable) {
+      Log.w("DSH-Workspace", "Session UI watchdog unavailable", t)
+      return
+    }
+    val marker = "/*__DSH_SESSION_UI_CAP__*/"
+    if (!code.contains(marker)) return
+    val script = code.replace(marker, jsString(bridgeCapability))
+    view.evaluateJavascript(script, null)
   }
 
   /** Side-channel UI observation only: does not send model requests or mutate DSH prompts. */
