@@ -37,6 +37,7 @@ class AndroidBridge(
   private val onOpenLocalUrl: (String) -> Boolean = { false },
   private val onRecordToolObservation: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
   private val onHostSessionDiagnostic: (String) -> Unit = {},
+  private val onSessionUiMismatch: (Int) -> Unit = {},
   private val pickToken: String? = null,
 ) {
 
@@ -166,6 +167,12 @@ class AndroidBridge(
   fun reportHostSessionDiagnostic(capability: String, summary: String) {
     if (!authorized(capability) || summary.length !in 1..2048) return
     onHostSessionDiagnostic(summary)
+  }
+
+  @JavascriptInterface
+  fun reportSessionUiMismatch(capability: String, hostSessionCount: Int) {
+    if (!authorized(capability) || hostSessionCount !in 1..100_000) return
+    onSessionUiMismatch(hostSessionCount)
   }
 
   @JavascriptInterface
