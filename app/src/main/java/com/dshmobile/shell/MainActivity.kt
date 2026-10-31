@@ -638,6 +638,11 @@ class MainActivity : ComponentActivity() {
         onSessionUiMismatch = { count ->
           runOnUiThread { handleSessionUiMismatch(count) }
         },
+        onWorkspaceStreamDiagnostic = { report ->
+          runOnUiThread {
+            if (!isFinishing && !isDestroyed) showSimpleMessage("工作区数据流诊断", report)
+          }
+        },
         onRecordToolObservation = { session, call, tool, status, code ->
           databaseWriter.offer(session, call, tool, status, code)
         },
@@ -914,6 +919,10 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { if (!isFinishing && !isDestroyed) showSimpleMessage("Host / Gateway 诊断", diagnosis) }
         }.start()
       }
+    })
+    wrap.addView(Button(this).apply {
+      text = "检查工作区数据流 / baseline（只读）"
+      setOnClickListener { probeWorkspaceStreamReadOnly() }
     })
     wrap.addView(Button(this).apply {
       text = "检查 DSH Host 实际识别的会话（只读）"
@@ -5109,6 +5118,22 @@ class MainActivity : ComponentActivity() {
         if (onResult != null) onResult(result, running) else showProfileMutationResult(result, running)
       }
     }.start()
+  }
+
+  private fun probeWorkspaceStreamReadOnly() {
+    if (!::webView.isInitialized || !isEngineSource(webView.url ?: "")) {
+      showSimpleMessage("工作区数据流诊断", "DSH Host 页面未打开，不能执行数据流检查。")
+      return
+    }
+    val source = runCatching {
+      assets.open("dsh-workspace-stream-probe.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+    }.getOrElse {
+      showSimpleMessage("工作区数据流诊断", "诊断脚本不可用：" + (it.message ?: "unknown"))
+      return
+    }
+    val token = "/*__DSH_WORKSPACE_PROBE_CAP__*/"
+    if (!source.contains(token)) return
+    webView.evaluateJavascript(source.replace(token, jsString(bridgeCapability)), null)
   }
 
   /** Read-only authenticated Host RPC, separate from the Android file index. */
