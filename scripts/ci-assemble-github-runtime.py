@@ -30,11 +30,11 @@ SEEDS = ("proot", "python", "python-pip", "apt", "dpkg", "termux-tools", "termux
 # first ARM64 expansion deliberately focused on the tested missing binaries.
 TOOL_SEEDS = (
     "jq", "yq", "7zip", "openssl-tool", "file",
-    "binutils", "dnsutils", "aapt2",
+    "binutils", "dnsutils", "aapt2", "gzip",
 )
 TOOL_COMMANDS = (
-    "jq", "yq", "7z", "openssl", "file",
-    "dig", "aapt2",
+    "jq", "yq", "7zz", "openssl", "file",
+    "dig", "aapt2", "gzip",
 )
 
 SCRIPT_MAP = {
@@ -212,7 +212,21 @@ def fetch_packages(stage, workspace):
                if not (stage / "usr/bin" / command).exists()]
     if missing:
         raise ValueError("Android tool package closure lacks executable(s): " + ", ".join(missing))
-    print("[native] verified", len(TOOL_COMMANDS), "critical tool executable paths")
+    # The 'file' command is unusable without its compiled magic database.
+    # The package may install under share/misc or share/file depending on
+    # its Termux release. Verify a real resource, not only the ELF launcher.
+    magic_candidates = (
+        stage / "usr/share/misc/magic.mgc",
+        stage / "usr/share/file/magic.mgc",
+    )
+    if not any(candidate.is_file() for candidate in magic_candidates):
+        raise ValueError("file is packaged without the magic.mgc database")
+    # New Termux 7zip ships a standalone 7zz; unlike 7z it doesn't dlopen
+    # a 7z.so relative to the caller's working directory.
+    standalone_7zz = stage / "usr/bin/7zz"
+    if not standalone_7zz.is_file():
+        raise ValueError("7zip standalone archive codec 7zz missing")
+    print("[native] verified", len(TOOL_COMMANDS), "critical tool executable paths and magic data")
     return manifest
 
 def overlay_sources(stage, source):
