@@ -882,6 +882,17 @@ class MainActivity : ComponentActivity() {
     })
 
     wrap.addView(Button(this).apply {
+      text = "重新同步会话侧边栏（不重启引擎）"
+      setOnClickListener {
+        if (!::webView.isInitialized || !isEngineSource(webView.url ?: "")) {
+          showSimpleMessage("会话侧边栏", "DSH 页面尚未打开，无法同步。")
+        } else {
+          webView.reload()
+          showSimpleMessage("会话侧边栏", "已重新加载界面并重新建立工作区订阅。不会修改会话、工作区或配置文件。")
+        }
+      }
+    })
+    wrap.addView(Button(this).apply {
       text = "检查 DSH Host 实际识别的会话（只读）"
       setOnClickListener { probeHostSessionsReadOnly() }
     })
