@@ -613,7 +613,7 @@ function locateEntryGroupUpdate(source, targetFile) {
   // Cordis loader 1.0.3 rejects duplicates. 1.0.6 folds config rows
   // through Object.fromEntries, silently keeping the final matching ID.
   // Recognize only verified algorithms; unknown future layouts fail closed.
-  const strictGuard = after.includes('duplicate loader entry id')
+  const strictGuard = /throw\s+new\s+(?:TypeError|Error)\s*\(\s*([`"'])duplicate loader entry id\b/.test(after)
   const foldMap = /Object\.fromEntries\s*\(\s*config\.map\s*\(/.test(after)
   if (!strictGuard && !foldMap) {
     throw new Error('EntryGroup.update has an unrecognized duplicate-id algorithm in ' + targetFile)
