@@ -475,7 +475,7 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
     : /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
   const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
   if (matches.length !== 1) {
-    const candidates = [...txt.matchAll(/\bconfine\s*\([^)]{0,120}\)/g)].slice(0,8).map(m=>m[0]);
+    const candidates = [...txt.matchAll(/\bconfine\s*\([^)]{0,120}\)/g)].slice(0,8).map(m=>JSON.stringify(txt.slice(m.index-24,m.index+240)));
     throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}; candidates=${JSON.stringify(candidates)}`)
   }
   const formal = /\bconfine\s*\(\s*([A-Za-z_$][\w$]*)\s*,\s*([A-Za-z_$][\w$]*)/.exec(matches[0])
