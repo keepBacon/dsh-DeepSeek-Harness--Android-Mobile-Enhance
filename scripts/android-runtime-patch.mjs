@@ -630,7 +630,8 @@ function checkAndroidGeneratedLoaderCompatibility(source, targetFile) {
   const injection = duplicateMode === 'fold'
     ? androidDuplicateLoaderInjection.replace(
         'const androidId = this.tree.ensureId(androidEntry);',
-        'const androidId = androidEntry?.id;\\n      if (androidId == null) { androidUnique.push(androidEntry); continue; }')
+        `const androidId = androidEntry?.id;
+      if (androidId == null) { androidUnique.push(androidEntry); continue; }`)
     : androidDuplicateLoaderInjection
   const candidate = source.slice(0, offset) + '\n' + injection + '\n' + source.slice(offset)
   const syntax = spawnSync(process.execPath, ['--input-type=module', '--check', '-'], {
