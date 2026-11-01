@@ -221,6 +221,13 @@ for (const dir of dirs) {
 }
 
 function eachPackage(name, relFile, fn, { mandatory = false, requiredIfPresent = false } = {}) {
+  // CI's published-package fixture contains only its three target packages.
+  // In production this filter is absent and all mandatory patches stay strict.
+  const isolated = process.env.DSH_COMPAT_ISOLATED_PACKAGES
+  if (isolated) {
+    const targets=new Set(isolated.split(',').filter(Boolean))
+    if (!targets.has(name)) return
+  }
   // Preflight inspects only the actual loader. Other mandatory patches must
   // not execute against an incomplete test fixture or mutate the runtime.
   if (process.env.DSH_COMPAT_PREFLIGHT_ONLY === '1') return
