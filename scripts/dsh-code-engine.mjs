@@ -54,7 +54,11 @@ async function commit(rows,dryRun){
   for(const {row,tmp} of staged){await rename(tmp,row.path);committed.push(row)}
  }catch(error){
   const failures=[]
-  for(const row of committed.reverse())try{await replaceAtomic({...row,after:row.original})}catch(e){failures.push(row.path+': '+e.message)}
+  for(const row of committed.reverse())try{
+   const current=await read(row.path)
+   if(hash(current.text)!==hash(row.after))throw Error('rollback conflict: file changed after edit')
+   await replaceAtomic({...row,after:row.original})
+  }catch(e){failures.push(row.path+': '+e.message)}
   throw Error('code_multi_edit failed: '+error.message+(failures.length?'; rollback failed: '+failures.join('; '):''))
  }finally{for(const {tmp} of staged)await unlink(tmp).catch(()=>{})}
  return {dryRun:false,files:summary}
