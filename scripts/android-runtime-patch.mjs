@@ -468,7 +468,9 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: partial app-UID sandbox runner'
   if (txt.includes(marker)) return 'already'
-  const anchor = /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
+  const anchor = versionAtLeast(targetVersion, '0.2.0-alpha.0')
+    ? /async\s+confine\s*\(\s*argv\s*,\s*policy\s*,\s*signal\s*\)\s*\{/
+    : /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
   const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
   if (matches.length !== 1) throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}`)
   const injection = `${matches[0]}
@@ -479,7 +481,7 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
         throw new Error("DSH Android sandbox runner path is missing");
       }
       return {
-        argv: [runner, policy.mode, policy.workspaceRoot, "--", ...argv],
+        argv: [runner, policy.mode, canonicalPath(policy.workspaceRoot), "--", ...argv],
         enforcement: "partial",
         denialSignatures: ["permission denied", "read-only file system", "operation not permitted"],
         runnerFailureRules: [{
