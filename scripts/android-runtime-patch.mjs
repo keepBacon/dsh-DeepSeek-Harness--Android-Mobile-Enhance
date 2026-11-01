@@ -581,7 +581,7 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
 
     write(file, txt.replace(assignment, replacement))
     return 'patched'
-  }, { mandatory: androidPermissionPresetGuardMandatory })
+  }, { mandatory: androidPermissionPresetGuardMandatory && !versionAtLeast(targetVersion, '0.2.0-alpha.0'), requiredIfPresent: true })
 
 // Cordis keeps rejecting conflicting duplicate loader IDs, but older profile
 // patches can repeat exactly the same bundle declaration. Collapse only these
