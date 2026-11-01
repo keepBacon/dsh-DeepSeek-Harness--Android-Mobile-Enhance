@@ -478,6 +478,9 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
     const candidates = [...txt.matchAll(/\bconfine\s*\([^)]{0,120}\)/g)].slice(0,8).map(m=>m[0]);
     throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}; candidates=${JSON.stringify(candidates)}`)
   }
+  const formal = /\bconfine\s*\(\s*([A-Za-z_$][\w$]*)\s*,\s*([A-Za-z_$][\w$]*)/.exec(matches[0])
+  if (!formal) throw new Error('sandbox-local confine parameters changed; review required: '+matches[0])
+  const argVar=formal[1],policyVar=formal[2]
   const injection = `${matches[0]}
     // ${marker}.
     if (process.env.DSH_ANDROID_STANDALONE === "1") {
@@ -495,7 +498,7 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
         }]
       };
     }`
-  txt = txt.replace(anchor, injection)
+  txt = txt.replace(anchor, injection.replaceAll('...argv','...'+argVar).replaceAll('policy.mode',policyVar+'.mode').replaceAll('policy.workspaceRoot',policyVar+'.workspaceRoot'))
   write(file, txt)
   checkPatchedJavaScript(file)
   return 'patched'
