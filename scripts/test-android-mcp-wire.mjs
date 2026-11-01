@@ -63,13 +63,26 @@ async function test(kind,dir){
     const listing=await service.request('tools/list',{});
     const names=listing.tools.map(x=>x.name);
     assert.equal(names.length,new Set(names).size,'duplicate tool names');
-    assert.ok(names.length>=(kind==='mobile'?60:50),'tool registry incomplete: '+names.length);
+    assert.ok(names.length>=(kind==='mobile'?100:50),'tool registry incomplete: '+names.length);
+    if(kind==='mobile'){
+      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start']){
+        assert.ok(names.includes(tool),'missing mobile MCP tool: '+tool);
+      }
+    }else{
+      for(const tool of ['file_copy','file_move','text_replace','sqlite_query','base_convert']){
+        assert.ok(names.includes(tool),'missing basic MCP tool: '+tool);
+      }
+    }
     async function call(name,args){
       assert.ok(names.includes(name),'missing tool '+name);
       return payload(await service.request('tools/call',{name,arguments:args}))
     }
     const unknown=await service.request('tools/call',{name:'__dsh_missing_wire_tool__',arguments:{}});
     assert.equal(unknown.isError,true,'unknown tool must return isError');
+    const invalid=await service.request('tools/call',{name:kind==='mobile'?'fs_read':'file_hash',arguments:{path:join(dir,'__missing__')}});
+    assert.equal(invalid.isError,true,'missing input file must fail without breaking MCP transport');
+    assert.equal(typeof invalid.structuredContent?.error,'string','error result must include a structured reason');
+    assert.equal((await service.request('tools/list',{})).tools.length,names.length,'MCP must remain usable after tool failure');
     if(kind==='mobile'){
       const file=join(dir,'mobile-write.txt'),text='中文🚀\n{"nested":[1,true,null],"escaped":"\\u2603"}\n';
       await call('fs_write',{path:file,content:text});
@@ -87,6 +100,12 @@ async function test(kind,dir){
       }
       const afterDebug=await service.request('tools/list',{});
       assert.equal(afterDebug.tools.length,names.length,'GDB probe must not disconnect MCP');
+      const httpBody='first line\r\n\r\nsecond line\n\nthird line';
+      const http=await call('protocol_parse_http',{message:'POST /mcp HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n'+httpBody});
+      assert.equal(http.bodyBytes,Buffer.byteLength(httpBody));
+      assert.equal(http.bodyPreview,httpBody);
+      const context=await call('code_context',{path:file});
+      assert.equal(context.sha256,createHash('sha256').update(text).digest('hex'));
       await call('fs_patch',{path:file,oldText:'中文',newText:'修复'});
       assert.equal(await readFile(file,'utf8'),text.replace('中文','修复'));
     }else{
@@ -105,11 +124,22 @@ async function test(kind,dir){
         path:dbPath,sql:"DELETE FROM sample"
       }});
       assert.equal(denied.isError,true,'sqlite_query must reject writes');
+      const malformed=join(dir,'invalid-utf8.bin');
+      await writeFile(malformed,Buffer.from([0xff,0xfe]));
+      const rejected=await service.request('tools/call',{name:'text_replace',arguments:{paths:[src,malformed],oldText:'中文',newText:'更新'}});
+      assert.equal(rejected.isError,true,'invalid UTF-8 must fail without writing earlier files');
+      assert.equal(await readFile(src,'utf8'),text,'failed multi-file replacement must preserve source');
       await call('file_copy',{source:src,destination:dst});
       assert.equal(await readFile(dst,'utf8'),text);
       await call('file_move',{source:dst,destination:moved});
       assert.equal(await readFile(moved,'utf8'),text);
-      assert.equal((await call('file_delete',{path:moved})).deleted,true);
+      await writeFile(dst,'existing-target');
+      await call('file_move',{source:moved,destination:dst,overwrite:true});
+      assert.equal(await readFile(dst,'utf8'),text,'overwrite move must preserve source content');
+      await call('text_replace',{paths:[src,dst],oldText:'中文',newText:'修复'});
+      assert.equal(await readFile(src,'utf8'),text.replace('中文','修复'));
+      assert.equal(await readFile(dst,'utf8'),text.replace('中文','修复'));
+      assert.equal((await call('file_delete',{path:dst})).deleted,true);
       assert.equal((await call('base_convert',{data:text,to:'base64'})).value,Buffer.from(text).toString('base64'));
     }
     console.log('[DSH] '+kind+' MCP wire passed, tools='+names.length);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto'
-import { createReadStream, existsSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
+import { TextDecoder } from 'node:util'
+import { createReadStream, existsSync, constants as fsConstants } from 'node:fs'
 import { resolve4, resolve6, resolveMx, resolveTxt, resolveCname } from 'node:dns/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
@@ -8,7 +9,7 @@ import { connect as netConnect } from 'node:net'
 import { createRequire } from 'node:module'
 import { dirname, resolve, relative, isAbsolute, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { chmod, copyFile, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, link, lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 
 const HERE=dirname(fileURLToPath(import.meta.url))
 const PREFIX=process.env.TERMUX__PREFIX||process.env.PREFIX||resolve(HERE,'../..')
@@ -107,12 +108,108 @@ function readOnlySqlite(path,sql){
 function decode(data,enc='utf8'){if(enc==='utf8')return Buffer.from(data);if(enc==='base64url')return Buffer.from(data,'base64url');return Buffer.from(data,enc)}
 async function tree(root,maxDepth,maxEntries,showHidden,sizeOnly=false){const rows=[];let bytes=0,files=0,dirs=0;async function walk(d,depth){if(depth>maxDepth)return;for(const e of await readdir(d,{withFileTypes:true})){if(!showHidden&&e.name.startsWith('.'))continue;if((sizeOnly?files+dirs:rows.length)>=maxEntries)return;const p=resolve(d,e.name),s=await lstat(p),type=s.isSymbolicLink()?'symlink':s.isDirectory()?'directory':s.isFile()?'file':'other';if(type==='file'){bytes+=s.size;files++}else if(type==='directory')dirs++;if(!sizeOnly)rows.push({path:relative(root,p),type,size:type==='file'?s.size:0});if(type==='directory')await walk(p,depth+1)}}await walk(root,0);return{rows,bytes,files,dirs}}
 
+const replacementDecoder=new TextDecoder('utf-8',{fatal:true})
+async function readReplaceSource(path){
+ const bytes=await readFile(path)
+ if(bytes.length>16*1024*1024)throw new Error('text replacement file exceeds 16 MiB: '+path)
+ if(bytes.includes(0))throw new Error('refusing binary text replacement: '+path)
+ try{return replacementDecoder.decode(bytes)}catch{throw new Error('text replacement requires valid UTF-8: '+path)}
+}
+function replacementTemp(path){return path+'.dsh-replace-'+process.pid+'-'+randomBytes(8).toString('hex')}
+async function textReplace(a){
+ const paths=a.paths||[],old=text(a.oldText,'oldText'),neu=text(a.newText,'newText'),expected=int(a.expectedOccurrences,1,1,1000),dry=bool(a.dryRun,false);
+ if(!Array.isArray(paths)||paths.length<1||paths.length>100)throw new Error('paths must contain 1..100 files');
+ if(!old)throw new Error('oldText must not be empty');
+ const planned=[],seen=new Set();
+ // Validate every source before making any changes.
+ for(const p of paths){
+   const f=await checkedPath(p);
+   if(seen.has(f.path))throw new Error('duplicate replacement path: '+f.path);
+   seen.add(f.path);
+   const before=await readReplaceSource(f.path),count=before.split(old).length-1;
+   if(count!==expected)throw new Error(f.path+': expected '+expected+', found '+count);
+   planned.push({path:f.path,before,after:before.split(old).join(neu),mode:f.stat.mode&0o777,occurrences:count});
+ }
+ const result=planned.map(({path,occurrences})=>({path,occurrences}));
+ if(dry)return{dryRun:true,files:result};
+ const staged=[],committed=[],recoveryErrors=[];
+ try{
+   for(const row of planned){
+     const tmp=replacementTemp(row.path);
+     await writeFile(tmp,row.after,{flag:'wx',mode:row.mode});
+     staged.push({...row,tmp});
+   }
+   for(const row of staged){
+     if((await readReplaceSource(row.path))!==row.before)throw new Error('source changed during replacement: '+row.path);
+     await rename(row.tmp,row.path);
+     committed.push(row);
+   }
+ }catch(error){
+   for(const row of committed.reverse()){
+     let restore=null;
+     try{
+       if((await readReplaceSource(row.path))!==row.after)throw new Error('source changed since replacement');
+       restore=replacementTemp(row.path);
+       await writeFile(restore,row.before,{flag:'wx',mode:row.mode});
+       await rename(restore,row.path);
+     }catch(e){recoveryErrors.push(row.path+': '+e.message)}
+     finally{if(restore)await rm(restore,{force:true}).catch(()=>{})}
+   }
+   throw new Error('text_replace failed: '+error.message+(recoveryErrors.length?'; rollback incomplete: '+recoveryErrors.join('; '):'; earlier changes restored'));
+ }finally{for(const row of staged)await rm(row.tmp,{force:true}).catch(()=>{})}
+ return{dryRun:false,files:result};
+}
+
 async function call(name,a={}){
  switch(name){
   case 'file_info':{const p=userPath(a.path),s=await lstat(p);return{path:p,type:s.isSymbolicLink()?'symlink':s.isDirectory()?'directory':s.isFile()?'file':'other',size:s.size,mode:'0'+(s.mode&0o7777).toString(8),uid:s.uid,gid:s.gid,mtime:s.mtime.toISOString(),realpath:await realpath(p).catch(()=>null),target:s.isSymbolicLink()?await readlink(p):null}}
   case 'file_hash':{const f=await checkedPath(a.path);return{path:f.path,algorithm:a.algorithm||'sha256',digest:await sha(f.path,a.algorithm||'sha256')}}
-  case 'file_copy':{const s=await checkedPath(a.source),d=userPath(a.destination);if(await exists(d)&&!bool(a.overwrite,false))throw new Error('destination exists');await mkdir(dirname(d),{recursive:true});await copyFile(s.path,d);await chmod(d,s.stat.mode&0o777);return{source:s.path,destination:d}}
-  case 'file_move':{const s=userPath(a.source),d=userPath(a.destination);if((await lstat(s)).isSymbolicLink())throw new Error('refusing symlink source');if(await exists(d)){if(!bool(a.overwrite,false))throw new Error('destination exists');await rm(d,{recursive:true,force:true})}await mkdir(dirname(d),{recursive:true});await rename(s,d);return{source:s,destination:d}}
+  case 'file_copy':{
+   const s=await checkedPath(a.source),d=userPath(a.destination),overwrite=bool(a.overwrite,false);
+   if(s.path===d||(await realpath(d).catch(()=>null))===s.path)throw new Error('source and destination must differ');
+   await mkdir(dirname(d),{recursive:true});
+   const target=await lstat(d).catch(e=>{if(e.code==='ENOENT')return null;throw e});
+   if(target?.isSymbolicLink())throw new Error('refusing symlink destination');
+   if(target&&!target.isFile())throw new Error('destination is not a regular file');
+   if(target&&!overwrite)throw new Error('destination exists');
+   const tmp=d+'.dsh-copy-'+process.pid+'-'+randomBytes(8).toString('hex');
+   try{
+     await copyFile(s.path,tmp,fsConstants.COPYFILE_EXCL);
+     await chmod(tmp,s.stat.mode&0o777);
+     if(overwrite){
+       const latest=await lstat(d).catch(e=>{if(e.code==='ENOENT')return null;throw e});
+       if(latest?.isSymbolicLink())throw new Error('refusing symlink destination');
+       if(latest&&!latest.isFile())throw new Error('destination is not a regular file');
+       await rename(tmp,d);
+     }else{
+       // Hard-link publishing is exclusive: concurrent creations cannot be overwritten.
+       await link(tmp,d);
+     }
+   }finally{await rm(tmp,{force:true}).catch(()=>{})}
+   return{source:s.path,destination:d};
+  }
+  case 'file_move':{
+   const s=userPath(a.source),d=userPath(a.destination),sourceStat=await lstat(s);
+   if(sourceStat.isSymbolicLink())throw new Error('refusing symlink source');
+   const sourceReal=await realpath(s),destReal=await realpath(d).catch(()=>null);
+   if(s===d||sourceReal===destReal)throw new Error('source and destination must differ');
+   if(sourceStat.isDirectory()&&(d.startsWith(s+sep)||s.startsWith(d+sep)))throw new Error('cannot move a directory into or over its own ancestor');
+   await mkdir(dirname(d),{recursive:true});
+   const target=await lstat(d).catch(e=>{if(e.code==='ENOENT')return null;throw e});
+   if(target&&!bool(a.overwrite,false))throw new Error('destination exists');
+   if(target&&(!sourceStat.isFile()||!target.isFile()))throw new Error('overwrite move requires regular-file source and destination');
+   if(!target){await rename(s,d);return{source:s,destination:d}}
+   // Preserve the old destination until the source move has succeeded.
+   const backup=d+'.dsh-move-backup-'+process.pid+'-'+randomBytes(8).toString('hex');
+   await rename(d,backup);
+   try{await rename(s,d)}
+   catch(error){
+     try{await rename(backup,d)}catch(restore){throw new Error('move failed: '+error.message+'; destination recovery failed: '+restore.message+'; backup='+backup)}
+     throw error;
+   }
+   await rm(backup,{recursive:true,force:true});
+   return{source:s,destination:d};
+  }
   case 'file_delete':{const p=userPath(a.path),rp=await realpath(p).catch(()=>p),cwd=await realpath(process.cwd()),s=await lstat(p);if(rp==='/'||rp===cwd)throw new Error('refusing root/current directory');if(s.isDirectory()&&!bool(a.recursive,false))throw new Error('recursive=true required');await rm(p,{recursive:bool(a.recursive,false)});return{deleted:true,path:p}}
   case 'directory_tree':{const d=(await checkedDir(a.path||'.')).path;return{path:d,...await tree(d,int(a.maxDepth,4,0,20),int(a.maxEntries,2000,1,20000),bool(a.showHidden,false))}}
   case 'directory_size':{const d=(await checkedDir(a.path||'.')).path,x=await tree(d,1000,int(a.maxEntries,100000,1,200000),true,true);return{path:d,totalBytes:x.bytes,totalFiles:x.files,totalDirectories:x.dirs}}
@@ -125,7 +222,7 @@ async function call(name,a={}){
   case 'sqlite_query':{const f=await checkedPath(a.path);return{path:f.path,rows:readOnlySqlite(f.path,text(a.sql,'sql'))}}
   case 'sqlite_schema':{const f=await checkedPath(a.path);return{path:f.path,objects:readOnlySqlite(f.path,"SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")}}
   case 'text_diff':{const l=await checkedPath(a.left),r=await checkedPath(a.right),x=await run('git',['diff','--no-index','--no-color','--',l.path,r.path]);if(x.exitCode!==0&&x.exitCode!==1)throw new Error(x.stderr);return{different:x.exitCode===1,...trim(x.stdout)}}
-  case 'text_replace':{const paths=a.paths||[],old=text(a.oldText),neu=text(a.newText),expected=int(a.expectedOccurrences,1,1,1000),dry=bool(a.dryRun,false),result=[];for(const p of paths){const f=await checkedPath(p),src=await readFile(f.path,'utf8'),count=src.split(old).length-1;if(count!==expected)throw new Error(f.path+': expected '+expected+', found '+count);if(!dry)await writeFile(f.path,src.split(old).join(neu));result.push({path:f.path,occurrences:count})}return{dryRun:dry,files:result}}
+  case 'text_replace':return textReplace(a)
   case 'regex_test':{const p=text(a.pattern),flags=a.flags||'g',input=text(a.text),max=int(a.maxMatches,50,1,200),s="const[p,f,b,m]=process.argv.slice(1);let z=f.includes('g')?f:f+'g',r=new RegExp(p,z),t=Buffer.from(b,'base64').toString(),o=[],x;while((x=r.exec(t))&&o.length<+m){o.push({match:x[0],index:x.index,groups:x.slice(1)});if(!x[0])r.lastIndex++}console.log(JSON.stringify(o))";return{matches:JSON.parse(await strict('node',['-e',s,p,flags,Buffer.from(input).toString('base64'),String(max)],{timeout:2000}))}}
   case 'env_info':return{cwd:process.cwd(),platform:process.platform,arch:process.arch,node:process.version,pid:process.pid,env:{HOME:process.env.HOME||null,TMPDIR:process.env.TMPDIR||null,PREFIX:process.env.PREFIX||null,PATH:bool(a.includePath,true)?process.env.PATH:null}}
   case 'disk_info':{const p=await realpath(userPath(a.path||'.')),o=await strict('df',['-Pk',p]),c=o.trim().split(/\r?\n/).at(-1).trim().split(/\s+/);return{path:p,totalKiB:+c[1],usedKiB:+c[2],availableKiB:+c[3],usePercent:c[4],mount:c.slice(5).join(' ')}}
@@ -198,4 +295,6 @@ async function selfTest(){
  process.stdout.write('[DSH] Basic MCP toolbox self-test: OK ('+tools.length+' tools)\n')
 }
 async function main(){if(process.argv.includes('--self-test'))return selfTest();const{Server,StdioServerTransport,ListToolsRequestSchema,CallToolRequestSchema}=await sdk();const server=new Server({name:'dsh-basic-toolbox',version:'1.0.0'},{capabilities:{tools:{}}});server.setRequestHandler(ListToolsRequestSchema,async()=>({tools}));server.setRequestHandler(CallToolRequestSchema,async req=>dispatchToolCall(req.params));await server.connect(new StdioServerTransport())}
-main().catch(e=>{process.stderr.write('[dsh-basic-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})
+export {call as basicToolCall}
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))
+  main().catch(e=>{process.stderr.write('[dsh-basic-toolbox] '+(e?.stack||e?.message||String(e))+'\n');process.exitCode=1})

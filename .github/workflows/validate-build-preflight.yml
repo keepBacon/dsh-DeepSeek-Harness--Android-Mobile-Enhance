@@ -48,6 +48,8 @@ jobs:
           node scripts/validate-agent-preset-parity.mjs --self-test
           node --check app/src/main/assets/dsh-tool-call-monitor.js
           node scripts/test-mobile-database-contract.mjs
+          node scripts/test-basic-toolbox-operations.mjs
+          node scripts/test-mobile-toolbox-dispatch.mjs
           node scripts/test-code-engine.mjs
           node scripts/test-code-engine-v3.mjs
           node scripts/test-code-engine-v4.mjs
@@ -68,6 +70,19 @@ jobs:
             echo 'Passive monitor must not fetch, upload or persist tool data' >&2
             exit 1
           fi
+
+      - name: Live MCP stdio wire regression (host fixture)
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/dsh-mcp-wire-stage/usr"
+          mkdir -p "$stage/bin" "$stage/libexec/dsh-mobile" "$stage/lib/node_modules/@deepseek-ai/dsh"
+          ln -s "$(command -v node)" "$stage/bin/node"
+          cp scripts/dsh-mobile-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/toolbox-mcp.mjs"
+          cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
+          cp scripts/dsh-code-engine*.mjs "$stage/libexec/dsh-mobile/"
+          npm install --prefix "$stage/lib/node_modules/@deepseek-ai/dsh" --no-save --ignore-scripts --no-audit --no-fund @modelcontextprotocol/sdk@1.25.3
+          node scripts/test-android-mcp-wire.mjs "$stage"
 
       - name: Build contract regression guards
         shell: bash
