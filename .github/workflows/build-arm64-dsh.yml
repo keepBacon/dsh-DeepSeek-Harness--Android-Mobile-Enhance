@@ -57,9 +57,17 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dsh-seed" app/src/main/assets
           gh release download "1" -R "$GITHUB_REPOSITORY" -p "Dsh.Mobile.Pro.V0.1.apk" -D "$RUNNER_TEMP/dsh-seed"
           unzip -p "$RUNNER_TEMP/dsh-seed/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > "$RUNNER_TEMP/dsh-seed/seed.tar.xz"
+          core="$RUNNER_TEMP/dsh-core-upgrade"
+          mkdir -p "$core"
+          node scripts/dsh-runtime-family.mjs manifest scripts/dsh-release-family-lock.json 0.2.1-rc.5 11.28.5 > "$core/package.json"
+          npm install --prefix "$core" --ignore-scripts --no-audit --no-fund --legacy-peer-deps --no-package-lock=false
+          node scripts/dsh-runtime-family.mjs verify-lock scripts/dsh-release-family-lock.json "$core/package-lock.json" 0.2.1-rc.5
+          node scripts/dsh-runtime-family.mjs verify-installed scripts/dsh-release-family-lock.json "$core/node_modules" 0.2.1-rc.5
           python3 scripts/ci-assemble-github-runtime.py \
             --repo . \
             --seed "$RUNNER_TEMP/dsh-seed/seed.tar.xz" \
+            --core-overlay "$RUNNER_TEMP/dsh-core-upgrade" \
+            --core-version 0.2.1-rc.5 \
             --output app/src/main/assets/snapshot.tar.xz \
             --audit runtime-build-audit.json
       - name: Validate ARM64 runtime (no placeholder)
