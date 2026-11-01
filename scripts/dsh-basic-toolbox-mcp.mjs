@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomBytes } from 'node:crypto'
+import { TextDecoder } from 'node:util'
 import { createReadStream, existsSync, constants as fsConstants } from 'node:fs'
 import { resolve4, resolve6, resolveMx, resolveTxt, resolveCname } from 'node:dns/promises'
 import { DatabaseSync } from 'node:sqlite'
@@ -107,6 +108,13 @@ function readOnlySqlite(path,sql){
 function decode(data,enc='utf8'){if(enc==='utf8')return Buffer.from(data);if(enc==='base64url')return Buffer.from(data,'base64url');return Buffer.from(data,enc)}
 async function tree(root,maxDepth,maxEntries,showHidden,sizeOnly=false){const rows=[];let bytes=0,files=0,dirs=0;async function walk(d,depth){if(depth>maxDepth)return;for(const e of await readdir(d,{withFileTypes:true})){if(!showHidden&&e.name.startsWith('.'))continue;if((sizeOnly?files+dirs:rows.length)>=maxEntries)return;const p=resolve(d,e.name),s=await lstat(p),type=s.isSymbolicLink()?'symlink':s.isDirectory()?'directory':s.isFile()?'file':'other';if(type==='file'){bytes+=s.size;files++}else if(type==='directory')dirs++;if(!sizeOnly)rows.push({path:relative(root,p),type,size:type==='file'?s.size:0});if(type==='directory')await walk(p,depth+1)}}await walk(root,0);return{rows,bytes,files,dirs}}
 
+const replacementDecoder=new TextDecoder('utf-8',{fatal:true})
+async function readReplaceSource(path){
+ const bytes=await readFile(path)
+ if(bytes.length>16*1024*1024)throw new Error('text replacement file exceeds 16 MiB: '+path)
+ if(bytes.includes(0))throw new Error('refusing binary text replacement: '+path)
+ try{return replacementDecoder.decode(bytes)}catch{throw new Error('text replacement requires valid UTF-8: '+path)}
+}
 function replacementTemp(path){return path+'.dsh-replace-'+process.pid+'-'+randomBytes(8).toString('hex')}
 async function textReplace(a){
  const paths=a.paths||[],old=text(a.oldText,'oldText'),neu=text(a.newText,'newText'),expected=int(a.expectedOccurrences,1,1,1000),dry=bool(a.dryRun,false);
@@ -118,7 +126,7 @@ async function textReplace(a){
    const f=await checkedPath(p);
    if(seen.has(f.path))throw new Error('duplicate replacement path: '+f.path);
    seen.add(f.path);
-   const before=await readFile(f.path,'utf8'),count=before.split(old).length-1;
+   const before=await readReplaceSource(f.path),count=before.split(old).length-1;
    if(count!==expected)throw new Error(f.path+': expected '+expected+', found '+count);
    planned.push({path:f.path,before,after:before.split(old).join(neu),mode:f.stat.mode&0o777,occurrences:count});
  }
@@ -132,7 +140,7 @@ async function textReplace(a){
      staged.push({...row,tmp});
    }
    for(const row of staged){
-     if((await readFile(row.path,'utf8'))!==row.before)throw new Error('source changed during replacement: '+row.path);
+     if((await readReplaceSource(row.path))!==row.before)throw new Error('source changed during replacement: '+row.path);
      await rename(row.tmp,row.path);
      committed.push(row);
    }
@@ -140,7 +148,7 @@ async function textReplace(a){
    for(const row of committed.reverse()){
      let restore=null;
      try{
-       if((await readFile(row.path,'utf8'))!==row.after)throw new Error('source changed since replacement');
+       if((await readReplaceSource(row.path))!==row.after)throw new Error('source changed since replacement');
        restore=replacementTemp(row.path);
        await writeFile(restore,row.before,{flag:'wx',mode:row.mode});
        await rename(restore,row.path);
