@@ -14,7 +14,7 @@ const readJson = (file) => {
 
 function family(file, expected) {
   const value = readJson(file)
-  if (value?.schema !== 2 || typeof value.version !== 'string' || !Array.isArray(value.packages)
+  if (![2,3].includes(value?.schema) || typeof value.version !== 'string' || !Array.isArray(value.packages)
     || value.vendorPackages === null || typeof value.vendorPackages !== 'object' || Array.isArray(value.vendorPackages)) {
     fail('invalid release-family lock')
   }
@@ -22,7 +22,7 @@ function family(file, expected) {
     fail('family lock ' + value.version + ' does not match requested ' + expected)
   }
   value.packages = [...new Set(value.packages)]
-  if (!value.packages.includes('@deepseek-ai/dsh') || value.packages.length < 200) {
+  if (!value.packages.includes('@deepseek-ai/dsh') || (value.schema === 2 && value.packages.length < 200)) {
     fail('incomplete DSH release-family lock')
   }
   for (const required of [
@@ -49,7 +49,7 @@ function lockName(key, entry) {
 
 function checkPackage(name, version, f, where, problems) {
   if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) {
-    if (!f.packages.includes(name)) problems.push(where + ': unknown DSH-family package ' + name + '@' + String(version))
+    if (f.schema === 2 && !f.packages.includes(name)) problems.push(where + ': unknown DSH-family package ' + name + '@' + String(version))
     else if (version !== f.version) problems.push(where + ': version skew ' + name + '@' + String(version) + '; expected ' + f.version)
     return 'dsh'
   }
@@ -82,6 +82,7 @@ function verifyLock(f, file) {
     }
   }
   if (!rootSeen) problems.push('package-lock does not contain @deepseek-ai/dsh')
+  if (f.schema === 3 && dshCount < f.minFamilyPackages) problems.push('incomplete DSH release graph: '+dshCount+' entries; required '+f.minFamilyPackages)
   for (const name of Object.keys(f.vendorPackages)) {
     if ((vendorCounts.get(name) ?? 0) < 1) problems.push('package-lock does not contain locked vendor package ' + name)
   }
@@ -136,6 +137,7 @@ function verifyInstalled(f, root) {
   }
 
   if (!rootSeen) problems.push('installed tree does not contain @deepseek-ai/dsh')
+  if (f.schema === 3 && dshCount < f.minFamilyPackages) problems.push('incomplete installed DSH family: '+dshCount+' entries; required '+f.minFamilyPackages)
   for (const name of Object.keys(f.vendorPackages)) {
     if ((vendorSeen.get(name) ?? 0) < 1) problems.push('installed tree does not contain locked vendor package ' + name)
   }
@@ -156,6 +158,8 @@ if (mode === 'manifest') {
   const f = family(file, a)
   const dependencies = { '@deepseek-ai/dsh': f.version, pnpm: b, ...f.vendorPackages }
   const overrides = {}
+  // Schema 3 resolves the published transitive family rather than inventing
+  // a stale package-name list. Strict post-resolution checks reject version skew.
   for (const name of f.packages) if (name !== '@deepseek-ai/dsh') overrides[name] = f.version
   for (const [name, version] of Object.entries(f.vendorPackages)) overrides[name] = version
   process.stdout.write(JSON.stringify({
