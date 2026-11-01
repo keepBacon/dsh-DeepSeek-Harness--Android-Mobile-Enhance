@@ -221,6 +221,13 @@ for (const dir of dirs) {
 }
 
 function eachPackage(name, relFile, fn, { mandatory = false, requiredIfPresent = false } = {}) {
+  // CI's published-package fixture contains only its three target packages.
+  // In production this filter is absent and all mandatory patches stay strict.
+  const isolated = process.env.DSH_COMPAT_ISOLATED_PACKAGES
+  if (isolated) {
+    const targets=new Set(isolated.split(',').filter(Boolean))
+    if (!targets.has(name)) return
+  }
   // Preflight inspects only the actual loader. Other mandatory patches must
   // not execute against an incomplete test fixture or mutate the runtime.
   if (process.env.DSH_COMPAT_PREFLIGHT_ONLY === '1') return
@@ -468,9 +475,19 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: partial app-UID sandbox runner'
   if (txt.includes(marker)) return 'already'
-  const anchor = /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
+  // Build tooling may rename emitted parameters or retain the async keyword.
+  // Anchor the method name and signature, not the old parameter spellings.
+  const anchor = versionAtLeast(targetVersion, '0.2.0-alpha.0')
+    ? /(?:async\s+)?confine\s*\([^)]*\)\s*\{/
+    : /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
   const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
-  if (matches.length !== 1) throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}`)
+  if (matches.length !== 1) {
+    const candidates = [...txt.matchAll(/\bconfine\s*\([^)]{0,120}\)/g)].slice(0,8).map(m=>JSON.stringify(txt.slice(m.index-24,m.index+240)));
+    throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}; candidates=${JSON.stringify(candidates)}`)
+  }
+  const formal = /\bconfine\s*\(\s*([A-Za-z_$][\w$]*)\s*,\s*([A-Za-z_$][\w$]*)/.exec(matches[0])
+  if (!formal) throw new Error('sandbox-local confine parameters changed; review required: '+matches[0])
+  const argVar=formal[1],policyVar=formal[2]
   const injection = `${matches[0]}
     // ${marker}.
     if (process.env.DSH_ANDROID_STANDALONE === "1") {
@@ -488,7 +505,7 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
         }]
       };
     }`
-  txt = txt.replace(anchor, injection)
+  txt = txt.replace(anchor, injection.replaceAll('...argv','...'+argVar).replaceAll('policy.mode',policyVar+'.mode').replaceAll('policy.workspaceRoot',policyVar+'.workspaceRoot'))
   write(file, txt)
   checkPatchedJavaScript(file)
   return 'patched'
@@ -571,7 +588,7 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
 
     write(file, txt.replace(assignment, replacement))
     return 'patched'
-  }, { mandatory: androidPermissionPresetGuardMandatory })
+  }, { mandatory: androidPermissionPresetGuardMandatory && !versionAtLeast(targetVersion, '0.2.0-alpha.0'), requiredIfPresent: true })
 
 // Cordis keeps rejecting conflicting duplicate loader IDs, but older profile
 // patches can repeat exactly the same bundle declaration. Collapse only these
@@ -593,17 +610,30 @@ function locateEntryGroupUpdate(source, targetFile) {
     throw new Error('EntryGroup.update(config) not found inside EntryGroup: ' + targetFile)
   }
   const after = suffix.slice(first.index, first.index + 8000)
-  if (!after.includes('duplicate loader entry id')) {
-    throw new Error('EntryGroup.update missing expected duplicate guard in ' + targetFile)
+  // Cordis loader 1.0.3 rejects duplicates. 1.0.6 folds config rows
+  // through Object.fromEntries, silently keeping the final matching ID.
+  // Recognize only verified algorithms; unknown future layouts fail closed.
+  const strictGuard = /throw\s+new\s+(?:TypeError|Error)\s*\(\s*([`"'])duplicate loader entry id\b/.test(after)
+  const foldMap = /Object\.fromEntries\s*\(\s*config\.map\s*\(/.test(after)
+  if (!strictGuard && !foldMap) {
+    throw new Error('EntryGroup.update has an unrecognized duplicate-id algorithm in ' + targetFile)
   }
-  return from + first.index + first[0].length
+  return { offset: from + first.index + first[0].length, duplicateMode: strictGuard ? 'strict' : 'fold' }
 }
 
 const androidDuplicateLoaderInjection = "// DSH Android compat: identical duplicate loader entry collapse\n    // Reject ambiguous duplicates. The upstream guard remains in place.\n    const androidEntryCanonical = (value, trail = new WeakSet()) => {\n      if (value === null) return \"null\";\n      const kind = typeof value;\n      if (kind === \"undefined\") return \"undefined\";\n      if (kind === \"bigint\" || kind === \"symbol\" || kind === \"function\") return kind + \":\" + String(value);\n      if (kind !== \"object\") return JSON.stringify(value);\n      if (trail.has(value)) throw new TypeError(\"circular loader entry cannot be compared safely\");\n      trail.add(value);\n      let result;\n      if (Array.isArray(value)) {\n        result = \"[\" + value.map((entry) => androidEntryCanonical(entry, trail)).join(\",\") + \"]\";\n      } else {\n        result = \"{\" + Object.keys(value).sort().map((key) =>\n          JSON.stringify(key) + \":\" + androidEntryCanonical(value[key], trail)).join(\",\") + \"}\";\n      }\n      trail.delete(value);\n      return result;\n    };\n    const androidSeen = new Map();\n    const androidUnique = [];\n    for (const androidEntry of config) {\n      const androidId = this.tree.ensureId(androidEntry);\n      if (androidSeen.has(androidId)) {\n        if (androidEntryCanonical(androidSeen.get(androidId)) !== androidEntryCanonical(androidEntry)) {\n          throw new TypeError(\"duplicate loader entry id: \" + androidId);\n        }\n        this.ctx.logger?.warn?.(\"[DSH Android compat] collapsed identical loader entry: \" + androidId);\n        continue;\n      }\n      androidSeen.set(androidId, androidEntry);\n      androidUnique.push(androidEntry);\n    }\n    config = androidUnique;"
 
 function checkAndroidGeneratedLoaderCompatibility(source, targetFile) {
-  const offset = locateEntryGroupUpdate(source, targetFile)
-  const candidate = source.slice(0, offset) + '\n' + androidDuplicateLoaderInjection + '\n' + source.slice(offset)
+  const { offset, duplicateMode } = locateEntryGroupUpdate(source, targetFile)
+  // The map-fold loader uses options.id instead of requiring tree.ensureId.
+  // Anonymous entries remain separate, as in upstream 1.0.6.
+  const injection = duplicateMode === 'fold'
+    ? androidDuplicateLoaderInjection.replace(
+        'const androidId = this.tree.ensureId(androidEntry);',
+        `const androidId = androidEntry?.id;
+      if (androidId == null) { androidUnique.push(androidEntry); continue; }`)
+    : androidDuplicateLoaderInjection
+  const candidate = source.slice(0, offset) + '\n' + injection + '\n' + source.slice(offset)
   const syntax = spawnSync(process.execPath, ['--input-type=module', '--check', '-'], {
     input: candidate,
     encoding: 'utf8',

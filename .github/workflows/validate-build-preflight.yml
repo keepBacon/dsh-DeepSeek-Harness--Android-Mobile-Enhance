@@ -71,6 +71,9 @@ jobs:
             exit 1
           fi
 
+      - name: Versioned Android core overlay regression
+        run: python3 scripts/test-ci-core-overlay.py
+
       - name: Live MCP stdio wire regression (host fixture)
         shell: bash
         run: |
@@ -484,16 +487,18 @@ jobs:
           done
           test -x "$stage/usr/bin/perl"
 
-      - name: Validate Android patches against published DSH 0.1.5-rc.2
+      - name: Validate Android patches against published DSH 0.2.1-rc.5
         shell: bash
         run: |
           set -euo pipefail
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           npm install --prefix "$tmp/lib" --ignore-scripts --no-audit --no-fund --loglevel=error \
-            @deepseek-ai/dsh-sandbox-local@0.1.5-rc.2 \
-            @deepseek-ai/dsh-subprocess-local@0.1.5-rc.2 \
-            @deepseek-ai/dsh-terminal-bash@0.1.5-rc.2
+            @deepseek-ai/dsh-sandbox-local@0.2.1-rc.5 \
+            @deepseek-ai/dsh-subprocess-local@0.2.1-rc.5 \
+            @deepseek-ai/dsh-terminal-bash@0.2.1-rc.5
+          DSH_TARGET_VERSION=0.2.1-rc.5 \
+          DSH_COMPAT_ISOLATED_PACKAGES='@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash' \
           node scripts/android-runtime-patch.mjs "$tmp"
           sandbox="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-sandbox-local/lib/index.js' -type f -print -quit)"
           subprocess="$(find "$tmp/lib/node_modules" -path '*/@deepseek-ai/dsh-subprocess-local/lib/index.js' -type f -print -quit)"
@@ -505,14 +510,12 @@ jobs:
           node --check "$subprocess"
           node --check "$terminal"
 
-          # Validate the exact published preset payload without asking npm to
-          # resolve its open peer ranges against newer rc.3/Cordis releases.
-          preset_tgz="$(npm pack @deepseek-ai/dsh-agent-presets@0.1.5-rc.2 --silent --pack-destination "$tmp")"
-          preset_root="$tmp/lib/node_modules/@deepseek-ai/dsh-agent-presets"
-          mkdir -p "$preset_root"
-          tar -xzf "$tmp/$preset_tgz" -C "$preset_root" --strip-components=1
-          test -s "$preset_root/presets/standard/agent.cordis.yml"
-          node scripts/validate-agent-preset-parity.mjs "$tmp/lib/node_modules"
+          # DSH 0.2.x relocates agent presets into dsh-web-app.
+          webapp_tgz="$(npm pack @deepseek-ai/dsh-web-app@0.2.1-rc.5 --silent --pack-destination "$tmp")"
+          webapp_root="$tmp/dsh-web-app"
+          mkdir -p "$webapp_root"
+          tar -xzf "$tmp/$webapp_tgz" -C "$webapp_root" --strip-components=1
+          node scripts/validate-agent-preset-v2.mjs "$webapp_root" 0.2.1-rc.5
 
           workspace="$tmp/workspace"
           mkdir -p "$workspace"
@@ -610,7 +613,7 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Resolve exact DSH 0.1.5-rc.2 release family
+      - name: Resolve exact DSH 0.2.1-rc.5 release family
         shell: bash
         run: |
           set -euo pipefail
@@ -618,17 +621,17 @@ jobs:
           prefix="$runtime/usr"
           lib="$prefix/lib"
           mkdir -p "$lib" "$runtime/home/.dsh" "$runtime/home/tmp"
-          node scripts/dsh-runtime-family.mjs manifest             scripts/dsh-release-family-lock.json 0.1.5-rc.2 11.7.0 > "$lib/package.json"
+          node scripts/dsh-runtime-family.mjs manifest             scripts/dsh-release-family-lock.json 0.2.1-rc.5 11.28.5 > "$lib/package.json"
           (
             cd "$lib"
             npm install --package-lock-only --ignore-scripts --no-audit --no-fund               --include=peer --strict-peer-deps=false --loglevel=error               --registry=https://registry.npmjs.org/               --fetch-retries=3 --fetch-retry-mintimeout=10000               --fetch-retry-maxtimeout=60000 --fetch-timeout=180000
           )
-          node scripts/dsh-runtime-family.mjs verify-lock             scripts/dsh-release-family-lock.json "$lib/package-lock.json" 0.1.5-rc.2
+          node scripts/dsh-runtime-family.mjs verify-lock             scripts/dsh-release-family-lock.json "$lib/package-lock.json" 0.2.1-rc.5
           (
             cd "$lib"
             npm ci --ignore-scripts --no-audit --no-fund               --include=peer --strict-peer-deps=false --loglevel=error               --registry=https://registry.npmjs.org/               --fetch-retries=3 --fetch-retry-mintimeout=10000               --fetch-retry-maxtimeout=60000 --fetch-timeout=180000
           )
-          node scripts/dsh-runtime-family.mjs verify-installed             scripts/dsh-release-family-lock.json "$lib/node_modules" 0.1.5-rc.2
+          node scripts/dsh-runtime-family.mjs verify-installed             scripts/dsh-release-family-lock.json "$lib/node_modules" 0.2.1-rc.5
 
       - name: Validate complete published runtime graph
         shell: bash
@@ -639,7 +642,7 @@ jobs:
           lib="$prefix/lib"
           modules="$lib/node_modules"
           node scripts/test-safe-mode-skill-patch.mjs
-          DSH_TARGET_VERSION=0.1.5-rc.2 node scripts/android-runtime-patch.mjs "$prefix"
+          DSH_TARGET_VERSION=0.2.1-rc.5 node scripts/android-runtime-patch.mjs "$prefix"
           # Safe-mode Skill providers must be guarded, parse as valid JS,
           # and not be rewritten after a repeated Android patch pass.
           for package in dsh-skill-filesystem dsh-tool-skill; do
@@ -648,7 +651,7 @@ jobs:
             grep -Fq 'DSH Android safe mode: suppress Skill activation' "$source"
             node --check "$source"
           done
-          DSH_TARGET_VERSION=0.1.5-rc.2 node scripts/android-runtime-patch.mjs "$prefix" > /dev/null
+          DSH_TARGET_VERSION=0.2.1-rc.5 node scripts/android-runtime-patch.mjs "$prefix" > /dev/null
 
           while IFS= read -r file; do
             node --check "$file"
