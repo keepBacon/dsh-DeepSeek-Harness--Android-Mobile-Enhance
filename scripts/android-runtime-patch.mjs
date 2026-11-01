@@ -610,17 +610,29 @@ function locateEntryGroupUpdate(source, targetFile) {
     throw new Error('EntryGroup.update(config) not found inside EntryGroup: ' + targetFile)
   }
   const after = suffix.slice(first.index, first.index + 8000)
-  if (!after.includes('duplicate loader entry id')) {
-    throw new Error('EntryGroup.update missing expected duplicate guard in ' + targetFile)
+  // Cordis loader 1.0.3 rejects duplicates. 1.0.6 folds config rows
+  // through Object.fromEntries, silently keeping the final matching ID.
+  // Recognize only verified algorithms; unknown future layouts fail closed.
+  const strictGuard = after.includes('duplicate loader entry id')
+  const foldMap = /Object\.fromEntries\s*\(\s*config\.map\s*\(/.test(after)
+  if (!strictGuard && !foldMap) {
+    throw new Error('EntryGroup.update has an unrecognized duplicate-id algorithm in ' + targetFile)
   }
-  return from + first.index + first[0].length
+  return { offset: from + first.index + first[0].length, duplicateMode: strictGuard ? 'strict' : 'fold' }
 }
 
 const androidDuplicateLoaderInjection = "// DSH Android compat: identical duplicate loader entry collapse\n    // Reject ambiguous duplicates. The upstream guard remains in place.\n    const androidEntryCanonical = (value, trail = new WeakSet()) => {\n      if (value === null) return \"null\";\n      const kind = typeof value;\n      if (kind === \"undefined\") return \"undefined\";\n      if (kind === \"bigint\" || kind === \"symbol\" || kind === \"function\") return kind + \":\" + String(value);\n      if (kind !== \"object\") return JSON.stringify(value);\n      if (trail.has(value)) throw new TypeError(\"circular loader entry cannot be compared safely\");\n      trail.add(value);\n      let result;\n      if (Array.isArray(value)) {\n        result = \"[\" + value.map((entry) => androidEntryCanonical(entry, trail)).join(\",\") + \"]\";\n      } else {\n        result = \"{\" + Object.keys(value).sort().map((key) =>\n          JSON.stringify(key) + \":\" + androidEntryCanonical(value[key], trail)).join(\",\") + \"}\";\n      }\n      trail.delete(value);\n      return result;\n    };\n    const androidSeen = new Map();\n    const androidUnique = [];\n    for (const androidEntry of config) {\n      const androidId = this.tree.ensureId(androidEntry);\n      if (androidSeen.has(androidId)) {\n        if (androidEntryCanonical(androidSeen.get(androidId)) !== androidEntryCanonical(androidEntry)) {\n          throw new TypeError(\"duplicate loader entry id: \" + androidId);\n        }\n        this.ctx.logger?.warn?.(\"[DSH Android compat] collapsed identical loader entry: \" + androidId);\n        continue;\n      }\n      androidSeen.set(androidId, androidEntry);\n      androidUnique.push(androidEntry);\n    }\n    config = androidUnique;"
 
 function checkAndroidGeneratedLoaderCompatibility(source, targetFile) {
-  const offset = locateEntryGroupUpdate(source, targetFile)
-  const candidate = source.slice(0, offset) + '\n' + androidDuplicateLoaderInjection + '\n' + source.slice(offset)
+  const { offset, duplicateMode } = locateEntryGroupUpdate(source, targetFile)
+  // The map-fold loader uses options.id instead of requiring tree.ensureId.
+  // Anonymous entries remain separate, as in upstream 1.0.6.
+  const injection = duplicateMode === 'fold'
+    ? androidDuplicateLoaderInjection.replace(
+        'const androidId = this.tree.ensureId(androidEntry);',
+        'const androidId = androidEntry?.id;\\n      if (androidId == null) { androidUnique.push(androidEntry); continue; }')
+    : androidDuplicateLoaderInjection
+  const candidate = source.slice(0, offset) + '\n' + injection + '\n' + source.slice(offset)
   const syntax = spawnSync(process.execPath, ['--input-type=module', '--check', '-'], {
     input: candidate,
     encoding: 'utf8',
