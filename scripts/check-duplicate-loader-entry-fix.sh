@@ -99,4 +99,52 @@ node "$ALT/lib/index.js"
 AFTER="$(sha256sum "$TMP/home/.dsh/profiles/web/cordis.patch.yml" | awk '{print $1}')"
 [ "$BEFORE" = "$AFTER" ] || { echo "[FAIL] user profile data was modified" >&2; exit 1; }
 
+
+# Cordis plugin-loader 1.0.6 no longer throws from EntryGroup.update.
+# Exercise its config-map fold shape without requiring tree.ensureId.
+FOLD="$TMP/fold/usr/lib/node_modules/@deepseek-ai/cordis-plugin-loader"
+mkdir -p "$FOLD/lib"
+printf '%s\n' '{"name":"@deepseek-ai/cordis-plugin-loader","version":"1.0.6"}' > "$FOLD/package.json"
+cat > "$FOLD/lib/index.js" <<'JS_FOLD'
+class EntryGroup {
+  constructor() {
+    this.data = [];
+    this.ctx = { logger: { warn() {} } };
+  }
+  async update(config) {
+    const oldMap = Object.fromEntries(this.data.map(options => [options.id, options]));
+    const newMap = Object.fromEntries(config.map(options => [options.id, options]));
+    this.data = config;
+    return { oldMap, newMap };
+  }
+}
+async function main() {
+  const group = new EntryGroup();
+  await group.update([
+    {id: "same", config: {one: 1, two: 2}},
+    {id: "same", config: {two: 2, one: 1}},
+    {name: "anonymous-a"},
+    {name: "anonymous-b"},
+  ]);
+  if (group.data.length !== 3) throw new Error("fold loader did not preserve anonymous entries");
+  if (group.data.filter(entry => entry.id === "same").length !== 1) {
+    throw new Error("identical explicit ID not collapsed");
+  }
+  let failed = false;
+  try {
+    await group.update([{id: "conflict", config: {x: 1}}, {id: "conflict", config: {x: 2}}]);
+  } catch (error) { failed = /duplicate loader entry id: conflict/.test(String(error)); }
+  if (!failed) throw new Error("conflicting explicit IDs must remain rejected");
+}
+main();
+JS_FOLD
+DSH_COMPAT_PREFLIGHT_ONLY=1 DSH_TARGET_VERSION=0.2.1-rc.5 \
+  node "$PATCH" "$TMP/fold/usr" > /dev/null 2>"$TMP/fold-preflight.stderr"
+DSH_TARGET_VERSION=0.1.0 node "$PATCH" "$TMP/fold/usr" > /dev/null 2>"$TMP/fold-patch.stderr"
+node --check "$FOLD/lib/index.js"
+node "$FOLD/lib/index.js"
+DSH_TARGET_VERSION=0.1.0 node "$PATCH" "$TMP/fold/usr" > /dev/null 2>"$TMP/fold-repeat.stderr"
+node "$FOLD/lib/index.js"
+echo "[OK] loader 1.0.6 map-fold shape: idempotent and collision-safe"
+
 echo "[OK] identical duplicate loader entries collapse; conflicting duplicates still fail; user profile untouched"
