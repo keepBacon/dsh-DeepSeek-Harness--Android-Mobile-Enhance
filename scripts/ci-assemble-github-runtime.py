@@ -263,6 +263,49 @@ def overlay_sources(stage, source):
             raise ValueError("existing non-symlink wrapper " + command)
         os.symlink("../termux-wrapper", alias)
 
+def upgrade_dsh_core(stage, overlay, expected_version):
+    """Replace the seed's DSH family with a resolved host-neutral npm graph.
+
+    The old Android Node executable stays in place. Native host addons must never
+    be silently copied into an Android runtime.
+    """
+    source = overlay / "node_modules"
+    target = stage / "usr/lib/node_modules"
+    if not (source / "@deepseek-ai/dsh/package.json").is_file():
+        raise ValueError("core overlay does not contain @deepseek-ai/dsh")
+    installed = json.loads((source / "@deepseek-ai/dsh/package.json").read_text())
+    if installed.get("version") != expected_version:
+        raise ValueError("wrong DSH overlay version: " + str(installed.get("version")))
+    if any(source.rglob("*.node")):
+        raise ValueError("Linux native Node addons found in npm overlay; Android ARM64 rebuild required")
+    old_dsh = target / "@deepseek-ai"
+    new_dsh = source / "@deepseek-ai"
+    if not new_dsh.is_dir():
+        raise ValueError("new DSH family directory missing")
+    # Build the replacement in an isolated directory. Do not touch HOME/profiles.
+    if old_dsh.exists():
+        shutil.rmtree(old_dsh)
+    shutil.copytree(new_dsh, old_dsh, symlinks=True)
+    # Non-DSH transitive dependencies from the resolved graph are also needed.
+    for entry in source.iterdir():
+        if entry.name == "@deepseek-ai":
+            continue
+        dest = target / entry.name
+        if dest.exists() or dest.is_symlink():
+            if dest.is_dir() and not dest.is_symlink():
+                shutil.rmtree(dest)
+            else:
+                dest.unlink()
+        if entry.is_symlink():
+            os.symlink(os.readlink(entry), dest)
+        elif entry.is_dir():
+            shutil.copytree(entry, dest, symlinks=True)
+        else:
+            shutil.copy2(entry, dest)
+    got = json.loads((target / "@deepseek-ai/dsh/package.json").read_text()).get("version")
+    if got != expected_version:
+        raise ValueError("staged runtime still contains old DSH: " + str(got))
+
 def install_typescript(stage, workspace):
     archive = workspace / "typescript.tgz"
     # This pure-JavaScript dependency is required by the user's Code Engine AST.
@@ -299,12 +342,18 @@ def main():
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--repo", type=Path, default=Path("."))
     p.add_argument("--audit", type=Path, required=True)
+    p.add_argument("--core-overlay", type=Path)
+    p.add_argument("--core-version", type=str)
     args = p.parse_args()
     with tempfile.TemporaryDirectory(prefix="dsh-gh-native-") as tmp:
         workspace = Path(tmp)
         stage = workspace / "stage"
         stage.mkdir()
         unpack_seed(args.seed, stage)
+        if args.core_version:
+            if not args.core_overlay:
+                raise ValueError("core upgrade requires --core-overlay; old seed cannot be rebranded")
+            upgrade_dsh_core(stage, args.core_overlay, args.core_version)
         manifest = fetch_packages(stage, workspace)
         overlay_sources(stage, args.repo)
         install_typescript(stage, workspace)
