@@ -71,6 +71,9 @@ jobs:
             exit 1
           fi
 
+      - name: Versioned Android core overlay regression
+        run: python3 scripts/test-ci-core-overlay.py
+
       - name: Live MCP stdio wire regression (host fixture)
         shell: bash
         run: |
