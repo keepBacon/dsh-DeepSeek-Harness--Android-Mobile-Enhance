@@ -40,6 +40,7 @@ TOOL_COMMANDS = (
 SCRIPT_MAP = {
     "dsh-mobile-toolbox-mcp.mjs": "toolbox-mcp.mjs",
     "dsh-reverse-assist.mjs": "dsh-reverse-assist.mjs",
+    "dsh-vm-assist.mjs": "dsh-vm-assist.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
     "dsh-code-engine.mjs": "dsh-code-engine.mjs",
     "dsh-code-engine-v3.mjs": "dsh-code-engine-v3.mjs",
