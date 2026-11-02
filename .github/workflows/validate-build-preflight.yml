@@ -51,6 +51,7 @@ jobs:
           node scripts/test-basic-toolbox-operations.mjs
           node scripts/test-mobile-toolbox-dispatch.mjs
           node scripts/test-reverse-assist.mjs
+          node scripts/test-vm-assist.mjs
           node scripts/test-code-engine.mjs
           node scripts/test-code-engine-v3.mjs
           node scripts/test-code-engine-v4.mjs
@@ -81,6 +82,7 @@ jobs:
           ln -s "$(command -v node)" "$stage/bin/node"
           cp scripts/dsh-mobile-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/toolbox-mcp.mjs"
           cp scripts/dsh-reverse-assist.mjs "$stage/libexec/dsh-mobile/dsh-reverse-assist.mjs"
+          cp scripts/dsh-vm-assist.mjs "$stage/libexec/dsh-mobile/dsh-vm-assist.mjs"
           cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
           cp scripts/dsh-code-engine*.mjs "$stage/libexec/dsh-mobile/"
           npm install --prefix "$stage/lib/node_modules/@deepseek-ai/dsh" --no-save --ignore-scripts --no-audit --no-fund @modelcontextprotocol/sdk@1.25.3
