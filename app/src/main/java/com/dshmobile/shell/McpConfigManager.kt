@@ -337,6 +337,14 @@ class McpConfigManager(
     append("      SSL_CERT_FILE: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
+    // Preserve the MCP client's supervisor across Android background/foreground
+    // outages. Upstream stops retrying and unregisters tools after 10 failures.
+    // A bounded 30s backoff keeps CPU/wakeups low without dropping discovery.
+    append("    reconnect:\\n")
+    append("      enabled: true\\n")
+    append("      initialDelayMs: 1000\\n")
+    append("      maxDelayMs: 30000\\n")
+    append("      maxAttempts: 1000000\\n")
     append("    toolCallTimeoutMs: 60000\n")
     append("    failOnStartupError: false")
   }
@@ -364,6 +372,14 @@ class McpConfigManager(
     append("      SSL_CERT_FILE: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
+    // Preserve the MCP client's supervisor across Android background/foreground
+    // outages. Upstream stops retrying and unregisters tools after 10 failures.
+    // A bounded 30s backoff keeps CPU/wakeups low without dropping discovery.
+    append("    reconnect:\\n")
+    append("      enabled: true\\n")
+    append("      initialDelayMs: 1000\\n")
+    append("      maxDelayMs: 30000\\n")
+    append("      maxAttempts: 1000000\\n")
     append("    toolCallTimeoutMs: 300000\n")
     append("    failOnStartupError: false")
   }
@@ -390,6 +406,14 @@ class McpConfigManager(
         append("    headers: {}\n")
       }
     }
+    // Preserve the MCP client's supervisor across Android background/foreground
+    // outages. Upstream stops retrying and unregisters tools after 10 failures.
+    // A bounded 30s backoff keeps CPU/wakeups low without dropping discovery.
+    append("    reconnect:\\n")
+    append("      enabled: true\\n")
+    append("      initialDelayMs: 1000\\n")
+    append("      maxDelayMs: 30000\\n")
+    append("      maxAttempts: 1000000\\n")
     append("    toolCallTimeoutMs: 60000\n")
     append("    failOnStartupError: false")
   }
