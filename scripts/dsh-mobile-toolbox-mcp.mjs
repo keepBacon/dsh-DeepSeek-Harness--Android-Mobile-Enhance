@@ -5,6 +5,7 @@ import { codeV3Tools, codeV3Call } from './dsh-code-engine-v3.mjs'
 import { codeV4Tools, codeV4Call } from './dsh-code-engine-v4.mjs'
 import { codeAstTools, codeAstCall } from './dsh-code-engine-ast.mjs'
 import { codeWorkflowTools, codeWorkflowCall } from './dsh-code-engine-workflow.mjs'
+import { luaTools, luaCall } from './dsh-lua-tools.mjs'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
@@ -25,7 +26,7 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
-const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,
+const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -399,6 +400,7 @@ async function call(name,a={}){
  if(codeV4Tools.some(x=>x.name===name))return codeV4Call(name,a)
  if(codeAstTools.some(x=>x.name===name))return codeAstCall(name,a)
  if(codeWorkflowTools.some(x=>x.name===name))return codeWorkflowCall(name,a)
+ if(luaTools.some(x=>x.name===name))return luaCall(name,a)
 
  switch(name){
   case 'android_shell_health': {
@@ -768,6 +770,7 @@ async function selfTest(){
  const names=new Set(tools.map(x=>x.name));for(const name of ['fs_read','fs_list','fs_search','fs_write','fs_patch','command_run','git_status','git_diff','git_log','http_request','android_logcat','apk_inspect','process_list','process_info','process_maps','process_threads','module_list','memory_regions','memory_read','memory_search','syscall_trace','frida_processes','frida_attach','frida_spawn','frida_script','frida_trace','debug_session_start','debug_attach','debug_breakpoint_set','debug_continue','debug_registers','debug_backtrace','debug_memory_read','debug_session_close','binary_functions','binary_xrefs','jni_map_java_native','no_root_capabilities','self_runtime_snapshot','runtime_snapshot','runtime_diff','process_fds','process_network','child_strace','adb_devices','adb_pair','adb_connect','adb_package_info','adb_process_info','adb_logcat','adb_jdwp_list','adb_pull_apk','reverse_capabilities','package_process_info','native_backtrace','frida_detach','symbol_resolve','address_rebase','il2cpp_detect','il2cpp_metadata_info','il2cpp_find_class','il2cpp_find_method'])if(!names.has(name))throw new Error('missing tool '+name)
  if((await call('protocol_decode',{data:'414243',encoding:'hex'})).utf8!=='ABC')throw new Error('decode self-test failed')
  const rebased=await call('address_rebase',{base:'0x1000',rva:'0x20'});if(rebased.runtimeAddress!=='0x1020')throw new Error('address_rebase self-test failed')
+ const luau=await call('lua_dynamic_run',{source:'local value: number = 6; return value * 7',timeoutMs:10000});if(!luau.ok||luau.result!==42)throw new Error('Luau WASM dynamic analysis self-test failed: '+JSON.stringify(luau))
  const caps=await call('reverse_capabilities',{});if(!caps.proc?.maps)throw new Error('reverse_capabilities self-test failed')
  const noRoot=await call('no_root_capabilities',{});if(!noRoot.direct?.selfProcMaps)throw new Error('no_root_capabilities self-test failed')
  const snap1=await call('self_runtime_snapshot',{maxEntries:256}),snap2=await call('runtime_snapshot',{pid:process.pid,maxEntries:256}),diff=await call('runtime_diff',{before:snap1.id,after:snap2.id});if(diff.pid!==process.pid)throw new Error('runtime snapshot self-test failed')

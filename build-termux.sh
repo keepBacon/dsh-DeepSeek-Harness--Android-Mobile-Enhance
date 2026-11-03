@@ -1573,6 +1573,7 @@ install_mobile_mcp_toolbox() {
   cp "$ROOT/scripts/dsh-code-engine-ast.mjs" "$(dirname "$dest")/dsh-code-engine-ast.mjs"
   cp "$ROOT/scripts/dsh-code-engine-workflow.mjs" "$(dirname "$dest")/dsh-code-engine-workflow.mjs"
   cp "$ROOT/scripts/dsh-code-engine-journal.mjs" "$(dirname "$dest")/dsh-code-engine-journal.mjs"
+  cp "$ROOT/scripts/dsh-lua"*.mjs "$(dirname "$dest")/"
   chmod 0755 "$dest"
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-engine.mjs" >/dev/null
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-code-engine-v3.mjs" >/dev/null

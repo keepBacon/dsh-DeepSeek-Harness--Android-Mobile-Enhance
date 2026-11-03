@@ -524,3 +524,7 @@ Git / SSH
 Phase 1 默认把完整 Termux ARM64 工具层打入 Runtime，包括系统监控/文件工具、编译调试、网络诊断、数据库客户端、压缩/文档/媒体、Git/代码索引、终端 TUI，以及 Android APK/DEX 工具。工具由 `scripts/dsh-termux-tool-catalog.sh` 单一 catalog 管理，并执行 host + staged smoke。
 
 代表工具包括 `htop/btop/lsof/tree/rsync/tmux/fzf/bat/eza/ncdu/duf/fd/sd`、`clang/llvm/lld/cmake/ninja/gdb/gdbserver/strace/ltrace/rizin/radare2`、`git-lfs/shellcheck/shfmt/ctags/cscope/lazygit/tig`、`wget/aria2/httpie/nmap/socat/netcat/traceroute/tcpdump`、`sqlite3/psql/mariadb/redis-cli`、`zstd/lz4/cpio/pandoc/exiftool`、`micro/neovim/ranger/yazi/glow/gum/dialog`，以及 `aapt2/apksigner/apktool/jadx/adb`。
+
+## Lua/Luau VM 分析
+
+真实 Luau 动态捕获、VM 探针、指令 IR、寄存器切片和可恢复多输入案件工作流见 [使用说明](docs/LUA-VM-ANALYSIS.md)。

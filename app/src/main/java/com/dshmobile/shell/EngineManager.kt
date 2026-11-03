@@ -419,6 +419,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
     declaredTools("dsh-code-engine-v4.mjs", "mobile_tools", false)
     declaredTools("dsh-code-engine-ast.mjs", "mobile_tools", false)
     declaredTools("dsh-code-engine-workflow.mjs", "mobile_tools", false)
+    declaredTools("dsh-lua-tools.mjs", "mobile_tools", false)
+    declaredTools("dsh-lua-case.mjs", "mobile_tools", false)
     declaredTools("basic-toolbox-mcp.mjs", "basic_tools", true)
 
     // Reuse the native runtime inventory (wrappers + actual binaries). The
@@ -482,7 +484,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "reverse_", "frida_", "debug_", "binary_", "il2cpp_",
       "process_", "memory_", "module_", "symbol_", "address_",
       "syscall_", "jni_", "native_", "runtime_", "self_runtime_",
-      "adb_", "apk_",
+      "adb_", "apk_", "lua_",
     ).any { name.startsWith(it) } ||
       name in setOf("child_strace", "no_root_capabilities", "package_process_info")
 
@@ -1135,6 +1137,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-ast.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-ast.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-workflow.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-workflow.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-journal.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-journal.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-lua-tools.mjs") to "usr/libexec/dsh-mobile/dsh-lua-tools.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-lua-case.mjs") to "usr/libexec/dsh-mobile/dsh-lua-case.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-lua-analysis-core.mjs") to "usr/libexec/dsh-mobile/dsh-lua-analysis-core.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-luau-runner.mjs") to "usr/libexec/dsh-mobile/dsh-luau-runner.mjs",
       File(rootUsr, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
       File(rootUsr, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
       File(rootUsr, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
@@ -3002,6 +3008,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine-ast.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-ast.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine-workflow.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-workflow.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine-journal.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-journal.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-lua-tools.mjs") to "usr/libexec/dsh-mobile/dsh-lua-tools.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-lua-case.mjs") to "usr/libexec/dsh-mobile/dsh-lua-case.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-lua-analysis-core.mjs") to "usr/libexec/dsh-mobile/dsh-lua-analysis-core.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-luau-runner.mjs") to "usr/libexec/dsh-mobile/dsh-luau-runner.mjs",
       File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
       File(usrDir, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
       File(usrDir, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",

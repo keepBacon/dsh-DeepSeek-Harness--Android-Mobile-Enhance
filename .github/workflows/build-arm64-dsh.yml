@@ -8,6 +8,7 @@ on:
       - 'scripts/dsh-mobile-toolbox-mcp.mjs'
       - 'scripts/dsh-basic-toolbox-mcp.mjs'
       - 'scripts/dsh-code-engine*.mjs'
+      - 'scripts/dsh-lua*.mjs'
       - 'scripts/test-android-mcp-wire.mjs'
       - 'scripts/ci-restore-legacy-keystore.py'
       - 'scripts/ci-verify-current-apk.py'
@@ -20,6 +21,11 @@ on:
       - 'scripts/ci-validate-runtime.py'
       - 'scripts/dsh-release-family-lock.json'
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a GitHub Release after building
+        type: boolean
+        default: false
 permissions:
   contents: write
 jobs:
@@ -163,7 +169,8 @@ jobs:
           compression-level: 0
           retention-days: 30
           if-no-files-found: error
-      - name: Publish direct-download APK, ZIP and checksums as draft release
+      - name: Publish direct-download APK, ZIP and checksums as release
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

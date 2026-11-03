@@ -6,6 +6,7 @@ binary packages from checksum-verified APT archives and host-neutral source
 from this Git revision. Never executes an Android ELF on the Linux runner.
 """
 import argparse
+import base64
 import gzip
 import hashlib
 import json
@@ -46,6 +47,10 @@ SCRIPT_MAP = {
     "dsh-code-engine-ast.mjs": "dsh-code-engine-ast.mjs",
     "dsh-code-engine-workflow.mjs": "dsh-code-engine-workflow.mjs",
     "dsh-code-engine-journal.mjs": "dsh-code-engine-journal.mjs",
+    "dsh-lua-tools.mjs": "dsh-lua-tools.mjs",
+    "dsh-lua-case.mjs": "dsh-lua-case.mjs",
+    "dsh-lua-analysis-core.mjs": "dsh-lua-analysis-core.mjs",
+    "dsh-luau-runner.mjs": "dsh-luau-runner.mjs",
     "dsh-android-sandbox-runner.sh": "android-sandbox-runner.sh",
 }
 
@@ -293,6 +298,38 @@ def install_typescript(stage, workspace):
     if not (target / "lib/typescript.js").is_file():
         raise ValueError("TypeScript AST runtime failed to stage")
 
+def install_luau_analysis_runtime(stage, workspace):
+    """Stage the pinned portable Luau WASM backend without lifecycle scripts."""
+    packed = subprocess.run(["npm", "pack", "luau-web@1.5.1", "--ignore-scripts",
+        "--pack-destination", str(workspace), "--json"], check=True, stdout=subprocess.PIPE, text=True)
+    filename = json.loads(packed.stdout)[0]["filename"]
+    if Path(filename).name != filename:
+        raise ValueError("invalid Luau package filename")
+    archive = workspace / filename
+    expected = "/PINL46SDMR7ezqnVxxjR66+k8+JH8U7VH/ct+tY53jXfQvTMwcgGzF0jW3MFYWaY5MnGtj0wlYKSAf3L/2Slw=="
+    if base64.b64encode(hashlib.sha512(archive.read_bytes()).digest()).decode() != expected:
+        raise ValueError("Luau WASM integrity mismatch")
+    target = stage / "usr/lib/dsh-dev-tools/node_modules/luau-web"
+    if any(p.is_symlink() for p in [target, *target.parents] if p == stage or stage in p.parents):
+        raise ValueError("symlink in Luau target")
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True)
+    with tarfile.open(archive, "r:gz") as bundle:
+        for member in bundle:
+            path = check_relative(member.name)
+            if not path.startswith("package/"):
+                raise ValueError("unexpected Luau entry")
+            dest = target / path.removeprefix("package/")
+            if member.isdir():
+                dest.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with bundle.extractfile(member) as inp, dest.open("wb") as out:
+                    shutil.copyfileobj(inp, out)
+            else:
+                raise ValueError("unexpected Luau entry type")
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--seed", type=Path, required=True)
@@ -308,6 +345,7 @@ def main():
         manifest = fetch_packages(stage, workspace)
         overlay_sources(stage, args.repo)
         install_typescript(stage, workspace)
+        install_luau_analysis_runtime(stage, workspace)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         # Keep symbolic links intact. Never dereference Android-only targets.
         with tarfile.open(args.output, "w:xz", preset=0) as archive:

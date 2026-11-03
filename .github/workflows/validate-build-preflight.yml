@@ -34,7 +34,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install --prefix "$RUNNER_TEMP/dsh-code-ast" --no-save --ignore-scripts --no-audit --no-fund typescript@5.9.3
+          npm install --prefix "$RUNNER_TEMP/dsh-code-ast" --no-save --ignore-scripts --no-audit --no-fund typescript@5.9.3 luau-web@1.5.1
+          echo "DSH_LUAU_WEB_PATH=$RUNNER_TEMP/dsh-code-ast/node_modules/luau-web/src/index.js" >> "$GITHUB_ENV"
           echo "DSH_CODE_TYPESCRIPT_PATH=$RUNNER_TEMP/dsh-code-ast/node_modules/typescript/lib/typescript.js" >> "$GITHUB_ENV"
 
       - name: JavaScript syntax
@@ -50,6 +51,7 @@ jobs:
           node scripts/test-mobile-database-contract.mjs
           node scripts/test-basic-toolbox-operations.mjs
           node scripts/test-mobile-toolbox-dispatch.mjs
+          node --test scripts/test-lua-workflow.mjs
           node scripts/test-code-engine.mjs
           node scripts/test-code-engine-v3.mjs
           node scripts/test-code-engine-v4.mjs
@@ -81,6 +83,7 @@ jobs:
           cp scripts/dsh-mobile-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/toolbox-mcp.mjs"
           cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
           cp scripts/dsh-code-engine*.mjs "$stage/libexec/dsh-mobile/"
+          cp scripts/dsh-lua*.mjs "$stage/libexec/dsh-mobile/"
           npm install --prefix "$stage/lib/node_modules/@deepseek-ai/dsh" --no-save --ignore-scripts --no-audit --no-fund @modelcontextprotocol/sdk@1.25.3
           node scripts/test-android-mcp-wire.mjs "$stage"
 
