@@ -184,7 +184,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   fun mcpRuntimeSummary(): String = mcpConfigManager.runtimeSummary()
   fun mcpRegistrationDiagnostics(): String =
     mcpConfigManager.registrationDiagnostics(ShellState.safeModeEnabled(context)) +
-      "\\n\\n" + mcpSupervisorLogDiagnostics()
+      "\n\n" + mcpSupervisorLogDiagnostics()
 
   /**
    * Show only a whitelisted event category from the engine log, not the raw
@@ -204,7 +204,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         String(bytes, Charsets.UTF_8)
       }
     } catch (_: Throwable) { "" }
-    val linePattern = Regex("""mcp-client\\((mobile_tools|basic_tools)\\):\\s*([^\\r\\n]{0,400})""")
+    val linePattern = Regex("""mcp-client\((mobile_tools|basic_tools)\):\s*([^\r\n]{0,400})""")
     for (entry in linePattern.findAll(tail)) {
       val name = entry.groupValues[1]
       val rawEvent = entry.groupValues[2].lowercase()
@@ -222,8 +222,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
     return buildString {
       append("MCP 连接日志（最近 128 KiB，非实时注册表）：")
-      for ((name, event) in events) append('\\n').append(name).append("：").append(event)
-      append("\\n若注册表仍只有 Core 工具，可使用上方手动重启恢复；请在任务空闲时执行。")
+      for ((name, event) in events) append('\n').append(name).append("：").append(event)
+      append("\n若注册表仍只有 Core 工具，可使用上方手动重启恢复；请在任务空闲时执行。")
     }
   }
   fun listMcpServers(): List<McpServerConfig> = mcpConfigManager.listServers()
