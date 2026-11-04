@@ -25,7 +25,16 @@ REPOS = {
     "main": "https://packages-cf.termux.dev/apt/termux-main",
     "root": "https://packages-cf.termux.dev/apt/termux-root",
 }
-SEEDS = ("proot", "python", "python-pip", "apt", "dpkg", "termux-tools", "termux-keyring")
+# A copied seed can contain stub/dead links for /usr/bin/bash and ls.
+# Restore the actual ARM64 CLI providers, not just node/pnpm and analysis tools.
+SEEDS = (
+    "proot", "python", "python-pip", "apt", "dpkg", "termux-tools", "termux-keyring",
+    "bash", "coreutils", "findutils", "grep", "sed", "gawk", "diffutils", "tar", "curl",
+)
+# Only these package-owned CLI files may replace inherited snapshot entries.
+# Never overwrite the seed's validated Node executable or DSH package graph.
+CLI_OVERRIDE_PACKAGES = frozenset(("bash", "coreutils", "findutils", "grep", "sed", "gawk", "diffutils", "tar", "curl"))
+BASIC_ELF_COMMANDS = ("bash", "ls", "cat", "env", "find", "grep", "sed", "gawk", "tar", "curl")
 # The previous GitHub build stopped at SEEDS and packaged no tool-suite
 # dependencies, despite the full Termux catalog declaring them. Keep the
 # first ARM64 expansion deliberately focused on the tested missing binaries.
@@ -35,7 +44,7 @@ TOOL_SEEDS = (
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
-    "dig", "aapt2", "gzip",
+    "dig", "aapt2", "gzip", *BASIC_ELF_COMMANDS,
 )
 
 SCRIPT_MAP = {
@@ -195,10 +204,25 @@ def fetch_packages(stage, workspace):
             for file in files:
                 src = parent / file
                 dst = outdir / file
+                # Inherited snapshot stubs and stale CLI symlinks are NOT
+                # authoritative for Termux's actual bash/coreutils packages.
+                # Reinstall package-owned CLI entrypoints while preserving all
+                # unrelated binaries, notably Android Node and DSH.
+                replace_cli = (name in CLI_OVERRIDE_PACKAGES and rel == Path("bin"))
                 if dst.exists() or dst.is_symlink():
-                    continue  # Protect the pre-existing validated DSH/Node ABI.
+                    if not replace_cli:
+                        continue
+                    if dst.is_dir() and not dst.is_symlink():
+                        raise ValueError("CLI entrypoint is unexpectedly a directory: " + str(dst))
+                    dst.unlink()
                 if src.is_symlink():
-                    os.symlink(os.readlink(src), dst)
+                    link = os.readlink(src)
+                    if link.startswith("/data/data/com.termux/files/usr/"):
+                        mapped = stage / "usr" / link.split("/files/usr/", 1)[1]
+                        link = os.path.relpath(mapped, dst.parent)
+                    elif link.startswith("/") and link != "/system/bin/sh":
+                        raise ValueError("unsafe absolute ARM64 package symlink: " + str(src))
+                    os.symlink(link, dst)
                 else:
                     shutil.copy2(src, dst, follow_symlinks=False)
             for folder in dirs[:]:
@@ -206,7 +230,13 @@ def fetch_packages(stage, workspace):
                 if src.is_symlink():
                     dst = outdir / folder
                     if not dst.exists() and not dst.is_symlink():
-                        os.symlink(os.readlink(src), dst)
+                        link = os.readlink(src)
+                        if link.startswith("/data/data/com.termux/files/usr/"):
+                            mapped = stage / "usr" / link.split("/files/usr/", 1)[1]
+                            link = os.path.relpath(mapped, dst.parent)
+                        elif link.startswith("/") and link != "/system/bin/sh":
+                            raise ValueError("unsafe absolute ARM64 directory symlink: " + str(src))
+                        os.symlink(link, dst)
                     dirs.remove(folder)
         manifest.append({"package": name, "version": package.get("Version"), "sha256": digest})
         downloaded.unlink()
@@ -217,6 +247,28 @@ def fetch_packages(stage, workspace):
                if not (stage / "usr/bin" / command).exists()]
     if missing:
         raise ValueError("Android tool package closure lacks executable(s): " + ", ".join(missing))
+    # The original APK seed may expose bash as /system/bin/sh and ls as
+    # a dangling symlink. A path-presence check cannot detect either issue.
+    # Resolve inside the assembled filesystem and verify real executable
+    # AArch64 ELF files before packaging. This is not an Android device smoke.
+    for command in BASIC_ELF_COMMANDS:
+        entry = stage / "usr/bin" / command
+        if entry.is_symlink() and os.readlink(entry).startswith("/"):
+            raise ValueError("CLI entrypoint retains absolute symlink: " + command)
+        try:
+            target = entry.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise ValueError("CLI entrypoint dead symlink: " + command) from error
+        if not target.is_file() or not (target.stat().st_mode & 0o111):
+            raise ValueError("CLI binary is absent or not executable: " + command)
+        if stage not in target.parents:
+            raise ValueError("CLI executable escapes embedded runtime: " + command)
+        with target.open("rb") as executable:
+            header = executable.read(20)
+        if not (len(header) == 20 and header[:4] == b"\\x7fELF"
+                and int.from_bytes(header[18:20], "little") == 183):
+            raise ValueError("CLI command is not a real ARM64 ELF: " + command)
+    print("[native] verified Android ARM64 bash/coreutils ELF chain:", ", ".join(BASIC_ELF_COMMANDS))
     # The 'file' command is unusable without its compiled magic database.
     # The package may install under share/misc or share/file depending on
     # its Termux release. Verify a real resource, not only the ELF launcher.
