@@ -182,7 +182,50 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   fun mcpRuntimeSummary(): String = mcpConfigManager.runtimeSummary()
-  fun mcpRegistrationDiagnostics(): String = mcpConfigManager.registrationDiagnostics(ShellState.safeModeEnabled(context))
+  fun mcpRegistrationDiagnostics(): String =
+    mcpConfigManager.registrationDiagnostics(ShellState.safeModeEnabled(context)) +
+      "\\n\\n" + mcpSupervisorLogDiagnostics()
+
+  /**
+   * Show only a whitelisted event category from the engine log, not the raw
+   * log contents: MCP error messages can contain user filesystem paths and
+   * external server URLs. This is historical evidence, NOT a live tools/list.
+   * The bounded tail also avoids reading arbitrarily large session logs.
+   */
+  private fun mcpSupervisorLogDiagnostics(): String {
+    val events = linkedMapOf("mobile_tools" to "未找到 MCP 事件", "basic_tools" to "未找到 MCP 事件")
+    val tail = try {
+      if (!engineLogFile.isFile) ""
+      else java.io.RandomAccessFile(engineLogFile, "r").use { raf ->
+        val start = (raf.length() - 128 * 1024L).coerceAtLeast(0)
+        raf.seek(start)
+        val bytes = ByteArray((raf.length() - start).toInt())
+        raf.readFully(bytes)
+        String(bytes, Charsets.UTF_8)
+      }
+    } catch (_: Throwable) { "" }
+    val linePattern = Regex("""mcp-client\\((mobile_tools|basic_tools)\\):\\s*([^\\r\\n]{0,400})""")
+    for (entry in linePattern.findAll(tail)) {
+      val name = entry.groupValues[1]
+      val rawEvent = entry.groupValues[2].lowercase()
+      val category = when {
+        rawEvent.contains("failed generation did not close") -> "旧 MCP 进程关闭超时；重连已停止"
+        rawEvent.contains("giving up after") -> "自动重试次数已耗尽；工具已注销"
+        rawEvent.contains("reconnected and re-synced tools") -> "日志曾记录成功重连并同步工具"
+        rawEvent.contains("tool re-sync failed") -> "工具重新同步失败"
+        rawEvent.contains("connection attempt failed") -> "最近一次连接尝试失败"
+        rawEvent.contains("connection lost") -> "连接中断，正在重连"
+        rawEvent.contains("connection failed; retrying") -> "首次连接失败，正在重试"
+        else -> null
+      }
+      if (category != null) events[name] = category
+    }
+    return buildString {
+      append("MCP 连接日志（最近 128 KiB，非实时注册表）：")
+      for ((name, event) in events) append('\\n').append(name).append("：").append(event)
+      append("\\n若注册表仍只有 Core 工具，可使用上方手动重启恢复；请在任务空闲时执行。")
+    }
+  }
   fun listMcpServers(): List<McpServerConfig> = mcpConfigManager.listServers()
   fun mcpToolboxEnabled(): Boolean = mcpConfigManager.toolboxEnabled()
   fun mcpConfigurationIssue(): String? = mcpConfigManager.configurationIssue()
