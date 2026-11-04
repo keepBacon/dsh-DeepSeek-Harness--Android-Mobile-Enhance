@@ -4460,7 +4460,7 @@ class MainActivity : ComponentActivity() {
         dialog.dismiss()
         android.app.AlertDialog.Builder(this@MainActivity)
           .setTitle("确认重启 DSH Host")
-          .setMessage("这会中断正在运行的 Agent、子代理和工具调用。不会删除会话、MCP 配置、凭据或用户文件。\\n\\n仅在确认当前没有重要任务运行时执行。")
+          .setMessage("这会中断正在运行的 Agent、子代理和工具调用。不会删除会话、MCP 配置、凭据或用户文件。\n\n仅在确认当前没有重要任务运行时执行。")
           .setNegativeButton("取消", null)
           .setPositiveButton("重启并重连 MCP") { _, _ -> restartMcpHostFlow() }
           .show()
