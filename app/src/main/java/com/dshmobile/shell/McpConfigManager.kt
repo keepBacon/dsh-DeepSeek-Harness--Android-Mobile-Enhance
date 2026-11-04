@@ -347,8 +347,9 @@ class McpConfigManager(
     append("  config:\n")
     append("    serverName: mobile_tools\n")
     append("    transport: stdio\n")
-    append("    command: ").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append('\n')
-    append("    args: [").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\n")
+    // Android linker64 is the proven executable entry for app-private Node.
+    append("    command: \"/system/bin/linker64\"\n")
+    append("    args: [").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append(", ").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\n")
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
@@ -384,8 +385,9 @@ class McpConfigManager(
     append("  config:\n")
     append("    serverName: basic_tools\n")
     append("    transport: stdio\n")
-    append("    command: ").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append('\n')
-    append("    args: [").append(JSONObject.quote(basicToolboxFile.absolutePath)).append("]\n")
+    // Android linker64 is the proven executable entry for app-private Node.
+    append("    command: \"/system/bin/linker64\"\n")
+    append("    args: [").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append(", ").append(JSONObject.quote(basicToolboxFile.absolutePath)).append("]\n")
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
