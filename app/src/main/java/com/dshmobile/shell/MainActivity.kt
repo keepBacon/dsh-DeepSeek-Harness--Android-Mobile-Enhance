@@ -4446,6 +4446,27 @@ class MainActivity : ComponentActivity() {
 
     lateinit var dialog: android.app.AlertDialog
     root.addView(Button(this).apply {
+      text = "只读诊断 MCP 配置 / 注册状态"
+      setOnClickListener {
+        val diagnostics = runCatching { engineManager.mcpRegistrationDiagnostics() }
+          .getOrElse { "诊断失败：" + (it.message ?: it.javaClass.simpleName) }
+        showSimpleMessage("MCP 启动配置诊断", diagnostics +
+          "\n\n如果 Host 仅剩 Core 工具，仍需通过 run_code 检查实时注册表。")
+      }
+    })
+    root.addView(Button(this).apply {
+      text = "重新启动 Host 并重建 MCP 连接"
+      setOnClickListener {
+        dialog.dismiss()
+        android.app.AlertDialog.Builder(this@MainActivity)
+          .setTitle("确认重启 DSH Host")
+          .setMessage("这会中断正在运行的 Agent、子代理和工具调用。不会删除会话、MCP 配置、凭据或用户文件。\\n\\n仅在确认当前没有重要任务运行时执行。")
+          .setNegativeButton("取消", null)
+          .setPositiveButton("重启并重连 MCP") { _, _ -> restartMcpHostFlow() }
+          .show()
+      }
+    })
+    root.addView(Button(this).apply {
       text = if (engineManager.mcpToolboxEnabled()) "关闭内置 mobile_tools" else "启用内置 mobile_tools"
       setOnClickListener {
         val target = !engineManager.mcpToolboxEnabled()
@@ -4577,6 +4598,63 @@ class MainActivity : ComponentActivity() {
       }
     }
     dialog.show()
+  }
+
+  /**
+   * User-confirmed Host restart to recover a depleted runtime MCP registry.
+   * HTTP liveness alone is not evidence of an intact registry, but an automatic
+   * restart might interrupt in-flight agent tasks. Never delete profile data.
+   */
+  private fun restartMcpHostFlow() {
+    if (!profileMutationRunning.compareAndSet(false, true)) {
+      showSimpleMessage("重连操作未启动", "已有配置操作正在执行。")
+      return
+    }
+    if (!engineFlowRunning.compareAndSet(false, true)) {
+      profileMutationRunning.set(false)
+      showSimpleMessage("重连操作未启动", "引擎启动或修复流程正在执行。")
+      return
+    }
+    showStartingState("正在重启 DSH Host 并重连 MCP…")
+    EngineManager.beginMaintenance()
+    Thread {
+      var running = false
+      var failure = ""
+      try {
+        try { stopService(Intent(this, EngineService::class.java)) } catch (_: Throwable) {}
+        if (!engineManager.stopEngine()) {
+          failure = "无法确认旧 Host 已退出；已停止操作，避免启动重复进程。"
+        } else {
+          // startEngine regenerates android-mcp.patch.yml from user settings
+          // and lets the upstream MCP supervisor register fresh tool sets.
+          val started = engineManager.startEngine()
+          running = started && waitForEngineReady(60_000L)
+          if (running) {
+            startEngineService()
+            applyShizukuKeepAlive()
+          } else {
+            failure = engineManager.engineDiagnostics(7000)
+          }
+        }
+      } catch (t: Throwable) {
+        failure = t.message ?: t.javaClass.simpleName
+      } finally {
+        EngineManager.endMaintenance()
+        engineFlowRunning.set(false)
+        profileMutationRunning.set(false)
+      }
+      runOnUiThread {
+        if (isFinishing || isDestroyed) return@runOnUiThread
+        if (running) {
+          showWeb()
+          showSimpleMessage("DSH Host 已重新启动",
+            "请开启一个新的 run_code 程序，验证 mobile_tools / basic_tools 的实时注册数量并执行只读工具。仅 HTTP 启动成功不代表 MCP 已恢复。")
+        } else {
+          showEngineFailure("MCP Host 重建失败")
+          if (failure.isNotBlank()) showSimpleMessage("重建诊断", failure)
+        }
+      }
+    }.start()
   }
 
   /** Native Skills remain manageable while the isolated DSH profile is active. */
