@@ -182,6 +182,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   fun mcpRuntimeSummary(): String = mcpConfigManager.runtimeSummary()
+  fun mcpRegistrationDiagnostics(): String = mcpConfigManager.registrationDiagnostics(ShellState.safeModeEnabled(context))
   fun listMcpServers(): List<McpServerConfig> = mcpConfigManager.listServers()
   fun mcpToolboxEnabled(): Boolean = mcpConfigManager.toolboxEnabled()
   fun mcpConfigurationIssue(): String? = mcpConfigManager.configurationIssue()
