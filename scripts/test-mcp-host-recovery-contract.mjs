@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+// Source-contract tests for opt-in MCP recovery. Android device behavior must
+// be validated separately: grep/compilation cannot prove live registration.
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+const read = name => readFileSync(new URL('../app/src/main/java/com/dshmobile/shell/'+name, import.meta.url), 'utf8')
+const ui = read('MainActivity.kt')
+const manager = read('EngineManager.kt')
+const mcp = read('McpConfigManager.kt')
+const service = read('EngineService.kt')
+assert.match(mcp,/fun registrationDiagnostics\(safeMode: Boolean\): String/)
+assert.match(mcp,/mobileInPatch/)
+assert.match(mcp,/basicInPatch/)
+assert.match(mcp,/上述仅为 Android 本地配置检查，不能证明 Host 的实时 MCP 注册表已恢复/)
+assert.match(manager,/fun mcpRegistrationDiagnostics\(\): String/)
+assert.match(ui,/重新启动 Host 并重建 MCP 连接/)
+assert.match(ui,/只读诊断 MCP 配置 \/ 注册状态/)
+assert.match(ui,/setNegativeButton\("取消", null\)/)
+const restart = ui.slice(ui.indexOf('private fun restartMcpHostFlow()'), ui.indexOf('/** Native Skills remain manageable',ui.indexOf('private fun restartMcpHostFlow()')))
+assert.match(restart,/EngineManager\.beginMaintenance\(\)/)
+assert.match(restart,/EngineManager\.endMaintenance\(\)/)
+assert.match(restart,/engineManager\.stopEngine\(\)/)
+assert.match(restart,/engineManager\.startEngine\(\)/)
+assert.match(restart,/waitForEngineReady/)
+assert.match(restart,/profileMutationRunning\.compareAndSet\(false, true\)/)
+assert.match(restart,/engineFlowRunning\.compareAndSet\(false, true\)/)
+assert.doesNotMatch(restart,/clearBrokenRuntime|extractSnapshot|backupAndResetProfilePatch|setMcpToolboxEnabled|delete\(/)
+assert.match(service,/if \(probe\.optBoolean\("running", false\)\) return@scheduleWithFixedDelay/)
+assert.doesNotMatch(service,/mcp.*stopEngine\(/i)
+console.log('[DSH] MCP opt-in host recovery and non-destructive diagnostics source contract: OK')
