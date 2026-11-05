@@ -31,6 +31,9 @@ if (loader && process.platform==='linux') {
     assert.equal(spawnSync(process.execPath,['-p','3+3'],{encoding:'utf8'}).stdout.trim(),'6')
     assert.equal(cp.execFileSync('/bin/echo',['unrelated'],{encoding:'utf8'}).trim(),'unrelated')
     assert.equal(cp.spawnSync('/bin/echo',['normal'],{encoding:'utf8'}).stdout.trim(),'normal')
+    // Explicit linker64 for another process must not be reinterpreted as a
+    // Node self-spawn (the linker's argv must remain exactly as provided).
+    assert.equal(cp.spawnSync(loader,[node,'-p','2*4'],{encoding:'utf8'}).stdout.trim(),'8')
   } finally {
     session.restore()
     rmSync(dir,{recursive:true,force:true})
