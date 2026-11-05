@@ -1186,6 +1186,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh-mobile/dsh-lua-analysis-core.mjs") to "usr/libexec/dsh-mobile/dsh-lua-analysis-core.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-luau-runner.mjs") to "usr/libexec/dsh-mobile/dsh-luau-runner.mjs",
       File(rootUsr, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
+      File(rootUsr, "libexec/dsh-mobile/android-node-exec-bridge.cjs") to "usr/libexec/dsh-mobile/android-node-exec-bridge.cjs",
       File(rootUsr, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
       File(rootUsr, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
       File(rootUsr, "libexec/dsh/wrappers/pkg") to "usr/libexec/dsh/wrappers/pkg",
