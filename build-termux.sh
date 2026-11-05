@@ -1567,6 +1567,7 @@ install_mobile_mcp_toolbox() {
   [ -f "$MOBILE_MCP_TOOLBOX" ] || { echo "[DSH] Missing mobile MCP toolbox source"; exit 8; }
   mkdir -p "$(dirname "$dest")"
   cp "$MOBILE_MCP_TOOLBOX" "$dest"
+  cp "$ROOT/scripts/android-node-exec-bridge.cjs" "$(dirname "$dest")/android-node-exec-bridge.cjs"
   cp "$ROOT/scripts/dsh-code-engine.mjs" "$(dirname "$dest")/dsh-code-engine.mjs"
   cp "$ROOT/scripts/dsh-code-engine-v3.mjs" "$(dirname "$dest")/dsh-code-engine-v3.mjs"
   cp "$ROOT/scripts/dsh-code-engine-v4.mjs" "$(dirname "$dest")/dsh-code-engine-v4.mjs"

@@ -41,6 +41,7 @@ TOOL_COMMANDS = (
 SCRIPT_MAP = {
     "dsh-mobile-toolbox-mcp.mjs": "toolbox-mcp.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
+    "android-node-exec-bridge.cjs": "android-node-exec-bridge.cjs",
     "dsh-code-engine.mjs": "dsh-code-engine.mjs",
     "dsh-code-engine-v3.mjs": "dsh-code-engine-v3.mjs",
     "dsh-code-engine-v4.mjs": "dsh-code-engine-v4.mjs",

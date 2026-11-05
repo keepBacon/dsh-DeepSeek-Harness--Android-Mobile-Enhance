@@ -23,6 +23,7 @@ REQUIRED = (
  'usr/lib/dsh-dev-tools/node_modules/luau-web/src/lib/Luau.Web.Asyncify.js',
  'usr/lib/dsh-dev-tools/node_modules/luau-web/src/lib/Luau.Web.JSPI.js',
  'usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs',
+ 'usr/libexec/dsh-mobile/android-node-exec-bridge.cjs',
  'usr/libexec/dsh/wrappers/python3',
  'usr/libexec/dsh/wrappers/pip3',
  'usr/libexec/dsh/wrappers/pkg',

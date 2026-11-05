@@ -151,6 +151,35 @@ class McpConfigManager(
         externalStdioLaunchIssue(server)?.let { server.serverName + ": " + it }
       }
 
+  /**
+   * Config/payload-only diagnostics: avoids claiming MCP is registered just
+   * because its plugin entrypoint exists. No tokens, user profile contents,
+   * or arbitrary Host logs are emitted.
+   */
+  fun registrationDiagnostics(safeMode: Boolean): String {
+    val config = readRootSafe()
+    val enabled = config.optBoolean("toolboxEnabled", true)
+    val patch = runCatching { if (patchFile.isFile) patchFile.readText() else null }.getOrNull()
+    val mobileInPatch = patch?.contains("serverName: mobile_tools") == true
+    val basicInPatch = patch?.contains("serverName: basic_tools") == true
+    val mobilePayload = toolboxFile.isFile && toolboxFile.length() > 0L
+    val basicPayload = basicToolboxFile.isFile && basicToolboxFile.length() > 0L
+    val expected = enabled && !safeMode
+    return buildString {
+      append("Android 安全模式：").append(if (safeMode) "已启用（MCP 被有意关闭）" else "关闭").append('\n')
+      append("内置 MCP 设置：").append(if (enabled) "启用" else "停用").append('\n')
+      append("mobile_tools 入口文件：").append(if (mobilePayload) "存在" else "缺失").append('\n')
+      append("basic_tools 入口文件：").append(if (basicPayload) "存在" else "缺失").append('\n')
+      append("启动补丁：").append(if (patch == null) "不存在或不可读" else "已生成").append('\n')
+      append("补丁含 mobile_tools：").append(mobileInPatch).append('\n')
+      append("补丁含 basic_tools：").append(basicInPatch).append('\n')
+      if (expected && (!mobileInPatch || !basicInPatch || !mobilePayload || !basicPayload)) {
+        append("注意：MCP 启动配置不完整；重启 Host 前请检查安装和内置工具箱开关。\n")
+      }
+      append("上述仅为 Android 本地配置检查，不能证明 Host 的实时 MCP 注册表已恢复。")
+    }
+  }
+
   fun runtimeSummary(): String {
     // Read once: settings rendering must not parse the same JSON repeatedly.
     val root = readRootSafe()
@@ -318,8 +347,9 @@ class McpConfigManager(
     append("  config:\n")
     append("    serverName: mobile_tools\n")
     append("    transport: stdio\n")
-    append("    command: ").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append('\n')
-    append("    args: [").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\n")
+    // Android linker64 is the proven executable entry for app-private Node.
+    append("    command: \"/system/bin/linker64\"\n")
+    append("    args: [").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append(", ").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\n")
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
@@ -337,6 +367,14 @@ class McpConfigManager(
     append("      SSL_CERT_FILE: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
+    // Preserve the MCP client's supervisor across Android background/foreground
+    // outages. Upstream stops retrying and unregisters tools after 10 failures.
+    // A bounded 30s backoff keeps CPU/wakeups low without dropping discovery.
+    append("    reconnect:\n")
+    append("      enabled: true\n")
+    append("      initialDelayMs: 1000\n")
+    append("      maxDelayMs: 30000\n")
+    append("      maxAttempts: 1000000\n")
     append("    toolCallTimeoutMs: 60000\n")
     append("    failOnStartupError: false")
   }
@@ -347,8 +385,9 @@ class McpConfigManager(
     append("  config:\n")
     append("    serverName: basic_tools\n")
     append("    transport: stdio\n")
-    append("    command: ").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append('\n')
-    append("    args: [").append(JSONObject.quote(basicToolboxFile.absolutePath)).append("]\n")
+    // Android linker64 is the proven executable entry for app-private Node.
+    append("    command: \"/system/bin/linker64\"\n")
+    append("    args: [").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append(", ").append(JSONObject.quote(basicToolboxFile.absolutePath)).append("]\n")
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
@@ -364,6 +403,14 @@ class McpConfigManager(
     append("      SSL_CERT_FILE: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
+    // Preserve the MCP client's supervisor across Android background/foreground
+    // outages. Upstream stops retrying and unregisters tools after 10 failures.
+    // A bounded 30s backoff keeps CPU/wakeups low without dropping discovery.
+    append("    reconnect:\n")
+    append("      enabled: true\n")
+    append("      initialDelayMs: 1000\n")
+    append("      maxDelayMs: 30000\n")
+    append("      maxAttempts: 1000000\n")
     append("    toolCallTimeoutMs: 300000\n")
     append("    failOnStartupError: false")
   }
@@ -390,6 +437,14 @@ class McpConfigManager(
         append("    headers: {}\n")
       }
     }
+    // Preserve the MCP client's supervisor across Android background/foreground
+    // outages. Upstream stops retrying and unregisters tools after 10 failures.
+    // A bounded 30s backoff keeps CPU/wakeups low without dropping discovery.
+    append("    reconnect:\n")
+    append("      enabled: true\n")
+    append("      initialDelayMs: 1000\n")
+    append("      maxDelayMs: 30000\n")
+    append("      maxAttempts: 1000000\n")
     append("    toolCallTimeoutMs: 60000\n")
     append("    failOnStartupError: false")
   }

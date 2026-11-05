@@ -182,6 +182,50 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   fun mcpRuntimeSummary(): String = mcpConfigManager.runtimeSummary()
+  fun mcpRegistrationDiagnostics(): String =
+    mcpConfigManager.registrationDiagnostics(ShellState.safeModeEnabled(context)) +
+      "\n\n" + mcpSupervisorLogDiagnostics()
+
+  /**
+   * Show only a whitelisted event category from the engine log, not the raw
+   * log contents: MCP error messages can contain user filesystem paths and
+   * external server URLs. This is historical evidence, NOT a live tools/list.
+   * The bounded tail also avoids reading arbitrarily large session logs.
+   */
+  private fun mcpSupervisorLogDiagnostics(): String {
+    val events = linkedMapOf("mobile_tools" to "未找到 MCP 事件", "basic_tools" to "未找到 MCP 事件")
+    val tail = try {
+      if (!engineLogFile.isFile) ""
+      else java.io.RandomAccessFile(engineLogFile, "r").use { raf ->
+        val start = (raf.length() - 128 * 1024L).coerceAtLeast(0)
+        raf.seek(start)
+        val bytes = ByteArray((raf.length() - start).toInt())
+        raf.readFully(bytes)
+        String(bytes, Charsets.UTF_8)
+      }
+    } catch (_: Throwable) { "" }
+    val linePattern = Regex("""mcp-client\((mobile_tools|basic_tools)\):\s*([^\r\n]{0,400})""")
+    for (entry in linePattern.findAll(tail)) {
+      val name = entry.groupValues[1]
+      val rawEvent = entry.groupValues[2].lowercase()
+      val category = when {
+        rawEvent.contains("failed generation did not close") -> "旧 MCP 进程关闭超时；重连已停止"
+        rawEvent.contains("giving up after") -> "自动重试次数已耗尽；工具已注销"
+        rawEvent.contains("reconnected and re-synced tools") -> "日志曾记录成功重连并同步工具"
+        rawEvent.contains("tool re-sync failed") -> "工具重新同步失败"
+        rawEvent.contains("connection attempt failed") -> "最近一次连接尝试失败"
+        rawEvent.contains("connection lost") -> "连接中断，正在重连"
+        rawEvent.contains("connection failed; retrying") -> "首次连接失败，正在重试"
+        else -> null
+      }
+      if (category != null) events[name] = category
+    }
+    return buildString {
+      append("MCP 连接日志（最近 128 KiB，非实时注册表）：")
+      for ((name, event) in events) append('\n').append(name).append("：").append(event)
+      append("\n若注册表仍只有 Core 工具，可使用上方手动重启恢复；请在任务空闲时执行。")
+    }
+  }
   fun listMcpServers(): List<McpServerConfig> = mcpConfigManager.listServers()
   fun mcpToolboxEnabled(): Boolean = mcpConfigManager.toolboxEnabled()
   fun mcpConfigurationIssue(): String? = mcpConfigManager.configurationIssue()
@@ -1142,6 +1186,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh-mobile/dsh-lua-analysis-core.mjs") to "usr/libexec/dsh-mobile/dsh-lua-analysis-core.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-luau-runner.mjs") to "usr/libexec/dsh-mobile/dsh-luau-runner.mjs",
       File(rootUsr, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
+      File(rootUsr, "libexec/dsh-mobile/android-node-exec-bridge.cjs") to "usr/libexec/dsh-mobile/android-node-exec-bridge.cjs",
       File(rootUsr, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
       File(rootUsr, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
       File(rootUsr, "libexec/dsh/wrappers/pkg") to "usr/libexec/dsh/wrappers/pkg",
@@ -1781,6 +1826,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // Node 22+ persists V8 module compile artifacts here. Older Node
       // versions ignore this variable, so the optimization is backwards-safe.
       "NODE_COMPILE_CACHE" to nodeCompileCacheDir.absolutePath,
+      // linker64 is exposed as process.execPath on Android. Modsearch and
+      // other Node plugins spawn(process.execPath, [cli]); preload a narrow
+      // child-process bridge so they start Node, not the linker on a .js file.
+      // The bridge is a no-op when the direct Node executable path works.
+      "NODE_OPTIONS" to ("--require=" + File(usrDir, "libexec/dsh-mobile/android-node-exec-bridge.cjs").absolutePath),
       "LD_PRELOAD" to preload.absolutePath,
       "TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE" to "force",
       "TERMUX_EXEC__EXECVE_CALL__INTERCEPT" to "1",

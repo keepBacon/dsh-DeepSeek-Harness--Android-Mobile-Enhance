@@ -49,6 +49,9 @@ jobs:
           node scripts/validate-agent-preset-parity.mjs --self-test
           node --check app/src/main/assets/dsh-tool-call-monitor.js
           node scripts/test-mobile-database-contract.mjs
+          node scripts/test-mcp-reconnect-contract.mjs
+          node scripts/test-android-node-exec-bridge.mjs
+          node scripts/test-mcp-host-recovery-contract.mjs
           node scripts/test-basic-toolbox-operations.mjs
           node scripts/test-mobile-toolbox-dispatch.mjs
           node --test scripts/test-lua-workflow.mjs
@@ -81,6 +84,7 @@ jobs:
           mkdir -p "$stage/bin" "$stage/libexec/dsh-mobile" "$stage/lib/node_modules/@deepseek-ai/dsh"
           ln -s "$(command -v node)" "$stage/bin/node"
           cp scripts/dsh-mobile-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/toolbox-mcp.mjs"
+          cp scripts/android-node-exec-bridge.cjs "$stage/libexec/dsh-mobile/android-node-exec-bridge.cjs"
           cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
           cp scripts/dsh-code-engine*.mjs "$stage/libexec/dsh-mobile/"
           cp scripts/dsh-lua*.mjs "$stage/libexec/dsh-mobile/"
