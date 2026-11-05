@@ -38,7 +38,10 @@ function installNodeBridge({
     fork: cp.fork,
   }
   const transform = (method) => function bridgedNodeProcess(command, ...rest) {
-    if (command !== nodeBinary && command !== originals.execPath) {
+    // A caller explicitly running linker64 for another ELF must remain
+    // untouched; we only rewrite Node self-spawns after process.execPath
+    // has been corrected to nodeBinary below.
+    if (command !== nodeBinary) {
       return originals[method].call(this, command, ...rest)
     }
     const hasArgv = Array.isArray(rest[0])
@@ -50,6 +53,10 @@ function installNodeBridge({
     cp[method] = transform(method)
   }
   cp.fork = function bridgedFork(modulePath, args, options) {
+    const explicitOptions = Array.isArray(args) ? options : args
+    if (explicitOptions?.execPath && explicitOptions.execPath !== nodeBinary) {
+      return originals.fork.apply(this, arguments)
+    }
     if (Array.isArray(args)) {
       const opts = options || {}
       return originals.fork.call(this, modulePath, args, {
