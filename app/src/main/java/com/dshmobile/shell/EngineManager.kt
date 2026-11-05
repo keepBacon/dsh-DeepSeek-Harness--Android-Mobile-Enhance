@@ -1825,6 +1825,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // Node 22+ persists V8 module compile artifacts here. Older Node
       // versions ignore this variable, so the optimization is backwards-safe.
       "NODE_COMPILE_CACHE" to nodeCompileCacheDir.absolutePath,
+      // linker64 is exposed as process.execPath on Android. Modsearch and
+      // other Node plugins spawn(process.execPath, [cli]); preload a narrow
+      // child-process bridge so they start Node, not the linker on a .js file.
+      // The bridge is a no-op when the direct Node executable path works.
+      "NODE_OPTIONS" to ("--require=" + File(usrDir, "libexec/dsh-mobile/android-node-exec-bridge.cjs").absolutePath),
       "LD_PRELOAD" to preload.absolutePath,
       "TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE" to "force",
       "TERMUX_EXEC__EXECVE_CALL__INTERCEPT" to "1",
