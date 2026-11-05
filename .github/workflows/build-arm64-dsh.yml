@@ -1,7 +1,7 @@
 name: Build DSH on GitHub (Android ARM64, no Termux)
 on:
   push:
-    branches: [main]
+    branches: [main, "build/mcp-node-exec-final-20261105"]
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
