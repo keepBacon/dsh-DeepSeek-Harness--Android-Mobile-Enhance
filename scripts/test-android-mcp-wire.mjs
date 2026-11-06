@@ -65,7 +65,7 @@ async function test(kind,dir){
     assert.equal(names.length,new Set(names).size,'duplicate tool names');
     assert.ok(names.length>=(kind==='mobile'?100:50),'tool registry incomplete: '+names.length);
     if(kind==='mobile'){
-      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start']){
+      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start','read_page','modsearch_health']){
         assert.ok(names.includes(tool),'missing mobile MCP tool: '+tool);
       }
     }else{
@@ -84,6 +84,9 @@ async function test(kind,dir){
     assert.equal(typeof invalid.structuredContent?.error,'string','error result must include a structured reason');
     assert.equal((await service.request('tools/list',{})).tools.length,names.length,'MCP must remain usable after tool failure');
     if(kind==='mobile'){
+      const pluginHealth=await call('modsearch_health',{runDoctor:false});
+      assert.equal(pluginHealth.installed,false,'missing ModSearch should give actionable status without crashing MCP');
+      assert.match(pluginHealth.action,/Install/);
       const file=join(dir,'mobile-write.txt'),text='中文🚀\n{"nested":[1,true,null],"escaped":"\\u2603"}\n';
       await call('fs_write',{path:file,content:text});
       assert.equal(await readFile(file,'utf8'),text);
