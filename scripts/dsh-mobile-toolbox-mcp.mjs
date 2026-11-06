@@ -28,7 +28,7 @@ const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
 const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,readPageTool,
- {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
+ {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and actual CLI wrappers (Bash, Python, curl, Git, rg). Reports per-command execution failures rather than only checking entrypoint existence. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
@@ -437,6 +437,26 @@ async function call(name,a={}){
         probes[name]={ok:r.exitCode===0,exitCode:r.exitCode,timedOut:r.timedOut,stdout:r.stdout.slice(0,512),stderr:r.stderr.slice(0,1200)};
       }
     }
+    // Probe the SAME wrappers agents actually spawn, not just file existence.
+    // Version requests are read-only. Report every failure without masking
+    // individual successes or requiring root / another app.
+    const cliProbes={};
+    if(a.probeExecutables!==false){
+      const specs=[
+        ['bash',toolWrapped('bash'),['-lc','printf DSH_BASH_CHILD_OK']],
+        ['python3',toolWrapped('python3'),['--version']],
+        ['curl',toolWrapped('curl'),['--version']],
+        ['git','git',['--version']],
+        ['rg','rg',['--version']],
+        ['node',paths.node,['--version']],
+      ];
+      for(const [name,command,args] of specs){
+        const result=await runProcess(command,args,{timeoutMs:8000,maxOutputBytes:4096});
+        cliProbes[name]={ok:result.exitCode===0&&!result.timedOut,
+          exitCode:result.exitCode,timedOut:result.timedOut,
+          stdout:result.stdout.slice(0,300),stderr:result.stderr.slice(0,600)};
+      }
+    }
     const legacy=files.hostLegacyTermux?.exists===true;
     const shell=probes.shellViaProot;
     const shellLog=shell ? [shell.stderr,shell.stdout].join('\n') : '';
@@ -449,7 +469,7 @@ async function call(name,a={}){
       :!shell?'PROOT_NOT_PROBED'
       :shell.ok && shell.stdout.includes('DSH_SHELL_OK')?'PROOT_BASH_OK'
       :'PROOT_BASH_FAILED';
-    return {mode:'diagnostic',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,
+    return {mode:'diagnostic',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,cliProbes,
       diagnosis,hostLegacyTermuxPresent:legacy,expectedProotTmpDir:paths.prootHostTemp,
       warning:'PROOT_TMP_DIR must resolve to the real app HOME/tmp before entering the guest. A missing com.termux path alone does not imply user data was uninstalled.'};
   }
