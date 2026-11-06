@@ -9,6 +9,7 @@ import {resolve, join, relative, dirname} from 'node:path'
 import {randomBytes} from 'node:crypto'
 
 const MARKER='DSH Android modsearch: stable app-private CLI cwd'
+const ENV_MARKER='DSH Android modsearch: clean inherited NODE_OPTIONS for CLI'
 const OLD='      signal,\n      env,\n    });'
 const NEW='      signal,\n      env,\n      // '+MARKER+'\n      ...(process.env.DSH_ANDROID_STANDALONE === "1" ? { cwd: process.env.DSH_ANDROID_MODSEARCH_CWD || process.env.HOME || process.cwd() } : {}),\n    });'
 function scoped(root, path) {
@@ -38,12 +39,29 @@ function inspectProfile(home, name){
 }
 function patchPlugin(file) {
   const before=readFileSync(file,'utf8')
-  if(before.includes(MARKER))return 'already-patched'
   if(!before.includes('function run(command, args, signal, env)') && !before.includes('function run(command,args,signal,env)'))
     return 'unknown-plugin-version'
-  const count=before.split(OLD).length-1
-  if(count!==1)return 'unexpected-spawn-shape-'+count
-  const next=before.replace(OLD,NEW)
+  let next=before
+  if(!next.includes(MARKER)){
+    const count=next.split(OLD).length-1
+    if(count!==1)return 'unexpected-spawn-shape-'+count
+    next=next.replace(OLD,NEW)
+  }
+  if(!next.includes(ENV_MARKER)){
+    const oldEnv='function childEnv() {'
+    if(next.split(oldEnv).length!==2)return 'unexpected-env-function-shape'
+    const compatEnv=[
+      oldEnv,
+      '  // '+ENV_MARKER,
+      '  if (process.env.DSH_ANDROID_STANDALONE === "1") {',
+      '    const cleaned = { ...process.env };',
+      '    delete cleaned.NODE_OPTIONS;',
+      '    return cleaned;',
+      '  }'
+    ].join('\\n')
+    next=next.replace(oldEnv,compatEnv)
+  }
+  if(next===before)return 'already-patched'
   const backup=file+'.dsh-pre-android-cwd.bak'
   if(!existsSync(backup))copyFileSync(file,backup)
   const mode=statSync(file).mode & 0o777
