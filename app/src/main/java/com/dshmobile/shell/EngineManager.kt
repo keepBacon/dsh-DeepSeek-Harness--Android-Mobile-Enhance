@@ -1667,6 +1667,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
       applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
       applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
+      applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
       val safeMode = ShellState.safeModeEnabled(context)
       val safeProfile = if (safeMode) prepareSafeModeProfile() else null
       val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode)
@@ -1808,6 +1809,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // copies Termux rg into the embedded prefix when available.
       "DSH_RG_PATH" to File(usrDir, "bin/rg").takeIf { it.isFile }?.absolutePath.orEmpty(),
       "DSH_ANDROID_STANDALONE" to "1",
+      "DSH_ANDROID_MODSEARCH_CWD" to homeDir.absolutePath,
       // Android cannot rely on desktop Linux bwrap/Landlock from an ordinary
       // app UID. sandbox-local is patched to use this explicit partial runner
       // while fs-sandbox remains the workspace write-containment authority.
@@ -2629,6 +2631,43 @@ class EngineManager(private val context: Context, private val pickToken: String?
     } catch (t: Throwable) {
       Log.w(TAG, "Codex relay compatibility deferred", t)
       return listOf("relay compatibility check deferred")
+    }
+  }
+
+  /**
+   * Preserve original ModSearch read_page/x_search/web_search tools, but launch
+   * its original bundled CLI from the Android app-private HOME. An inherited
+   * profile/workspace cwd can point modsearch's file-consuming engines at
+   * relative ".dsh/profiles/..." paths and fail both tools together.
+   *
+   * Applies only to a recognized, installed @liustack/modsearch package and
+   * creates a one-time backup. No credentials or provider settings are changed.
+   */
+  private fun applyAndroidModsearchCompat(): List<String> {
+    val assetName = "modsearch-android-compat.mjs"
+    return try {
+      val directory = File(context.filesDir, "plugin-compat").apply { mkdirs() }
+      val helper = File(directory, assetName)
+      val embedded = context.assets.open(assetName).bufferedReader(Charsets.UTF_8).use { it.readText() }
+      if (!helper.isFile || helper.readText() != embedded) writeTextAtomic(helper, embedded)
+      val log = File(context.filesDir, "modsearch-compat.log")
+      log.writeText("")
+      val env = engineEnv(preloadBin).toMutableMap()
+      env["DSH_ANDROID_MODSEARCH_CWD"] = homeDir.absolutePath
+      val proc = startWithArgsToFile(
+        arrayOf(nodeBin.absolutePath, helper.absolutePath, "--repair-home", homeDir.absolutePath),
+        env, log,
+      )
+      val finished = proc.waitFor(12, TimeUnit.SECONDS)
+      if (!finished) proc.destroyForcibly()
+      val output = runCatching { log.readText().takeLast(4096) }.getOrDefault("")
+      if (!finished || proc.exitValue() != 0) {
+        Log.w(TAG, "ModSearch CLI compatibility failed: $output")
+        listOf("original ModSearch compatibility check failed")
+      } else listOf("original ModSearch compatibility checked; " + output.take(900))
+    } catch (t: Throwable) {
+      Log.w(TAG, "ModSearch compatibility deferred", t)
+      listOf("original ModSearch compatibility deferred")
     }
   }
 
