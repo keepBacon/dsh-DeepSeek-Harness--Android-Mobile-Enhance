@@ -207,6 +207,8 @@ const wanted = new Set([
   '@deepseek-ai/dsh-sandbox-local',
   '@deepseek-ai/dsh-subprocess-local',
   '@deepseek-ai/dsh-terminal-bash',
+  '@deepseek-ai/dsh-web-fetch-http',
+  '@deepseek-ai/dsh-tool-web',
   '@deepseek-ai/dsh-skill-filesystem',
   '@deepseek-ai/dsh-tool-skill',
 ])
