@@ -23,6 +23,10 @@ jobs:
           node --check scripts/android-runtime-patch.mjs
       - name: HTTP paging and cache regression
         run: node scripts/test-dsh-web-page-reader.mjs
+      - name: Original ModSearch plugin compatibility regression
+        run: |
+          node --check app/src/main/assets/modsearch-android-compat.mjs
+          node scripts/test-modsearch-android-compat.mjs
       - name: Termux launcher generation contract
         run: |
           bash -n scripts/embed-termux-tools.sh
