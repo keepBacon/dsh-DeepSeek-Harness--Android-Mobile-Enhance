@@ -121,7 +121,7 @@ jobs:
           set -euo pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
-          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=40
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=41
       - name: Explicitly sign APK with verified original key
         shell: bash
         run: |
@@ -142,7 +142,7 @@ jobs:
             --snapshot app/src/main/assets/snapshot.tar.xz \
             --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-            --version-code 40
+            --version-code 41
       - name: Create and verify direct APK / distribution ZIP
         shell: bash
         run: |
