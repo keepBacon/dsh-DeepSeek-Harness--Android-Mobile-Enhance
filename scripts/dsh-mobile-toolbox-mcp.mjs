@@ -522,16 +522,40 @@ async function call(name,a={}){
       });
       // Do not return raw doctor output: environment/config diagnostics can
       // include private paths or provider/account information.
-      let validJson=false;
+      let validJson=false, readiness=null, configReadable=null, nodeCompatible=null;
       if(r.exitCode===0) {
-        try { JSON.parse(r.stdout); validJson=true } catch {}
+        try {
+          const data=JSON.parse(r.stdout);
+          validJson=Boolean(data && typeof data==='object' && Array.isArray(data.roles));
+          if(validJson){
+            nodeCompatible=data.node?.ok===true;
+            configReadable=data.configFile?.readable===true;
+            // Doctor returns three roles: search, fetch and social. Only
+            // expose availability, not provider credentials or config paths.
+            readiness=Object.fromEntries(data.roles
+              .filter(role=>['search','fetch','social'].includes(role.role))
+              .map(role=>[role.role,{
+                ready:typeof role.resolved==='string'&&role.resolved.length>0,
+                resolved:role.resolved||null,
+                candidateCount:Array.isArray(role.candidates)?role.candidates.length:0
+              }]));
+          }
+        }catch{}
       }
       report.doctor={ok:r.exitCode===0&&validJson,exitCode:r.exitCode,
-        timedOut:r.timedOut,validJson};
+        timedOut:r.timedOut,validJson,nodeCompatible,configReadable,readiness};
       if(!report.doctor.ok) {
         report.doctor.failureKind=r.timedOut?'timeout':
           r.exitCode===null?'spawn-failed':r.exitCode===0?'invalid-json':'cli-exit-'+r.exitCode;
         report.action='Inspect app-private modsearch-compat.log and ModSearch CLI environment';
+      }else if(!nodeCompatible){
+        report.action='ModSearch requires Node.js >=22.13; inspect embedded runtime version';
+      }else if(!configReadable){
+        report.action='Fix the permissions or JSON format of the private ~/.modsearch/config.json file';
+      }else if(!readiness?.fetch?.ready || !readiness?.search?.ready){
+        report.action='No ready page-fetch or web-search route; check modsearch doctor engine status';
+      }else if(!readiness?.social?.ready){
+        report.action='X/Grok provider unavailable: x_search may return degraded web results';
       }
     }
     return report;
