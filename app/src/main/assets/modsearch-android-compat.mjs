@@ -7,6 +7,7 @@
 import {existsSync, lstatSync, readFileSync, realpathSync, statSync, copyFileSync, chmodSync, writeFileSync, renameSync, unlinkSync, mkdirSync} from 'node:fs'
 import {resolve, join, relative, dirname} from 'node:path'
 import {randomBytes} from 'node:crypto'
+import {createRequire} from 'node:module'
 
 const MARKER='DSH Android modsearch: stable app-private CLI cwd'
 const ENV_MARKER='DSH Android modsearch: clean inherited NODE_OPTIONS for CLI'
@@ -29,6 +30,14 @@ function inspectProfile(home, name){
   // arbitrary absolute link pointing elsewhere, even if its name matches.
   if(!scoped(home,resolved))return {profile:name,status:'external-package-path',packagePath:resolved}
   if(!verifyManifest(resolved))return {profile:name,status:'unexpected-package-identity'}
+  // Node resolves bare imports relative to the installed CLI, not the DSH
+  // Host. Detect an incomplete pnpm installation before tools start failing.
+  const pkgManifest=JSON.parse(readFileSync(join(resolved,'package.json'),'utf8'))
+  const localRequire=createRequire(join(resolved,'dist','main.js'))
+  const unavailable=Object.keys(pkgManifest.dependencies||{}).filter(dep=>{
+    try { localRequire.resolve(dep); return false } catch { return true }
+  })
+  if(unavailable.length)return {profile:name,status:'missing-npm-dependencies',packages:unavailable}
   const plugin=join(resolved,'dsh','index.js')
   const cli=join(resolved,'dist','main.js')
   if(!existsSync(plugin))return {profile:name,status:'plugin-entry-missing'}
