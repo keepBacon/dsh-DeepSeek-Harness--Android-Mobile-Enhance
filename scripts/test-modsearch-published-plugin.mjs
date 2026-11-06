@@ -18,8 +18,11 @@ const previous=Object.fromEntries(envNames.map(name=>[name,process.env[name]]))
 try{
   const packageDir=join(root,'.dsh/profiles/web/node_modules/@liustack/modsearch')
   const appCwd=join(root,'app-home')
-  await mkdir(packageDir,{recursive:true})
-  await cp(installed,packageDir,{recursive:true,force:true})
+  // Preserve npm's complete hoisted node_modules tree, including commander.
+  // Copying only the plugin folder reproduces ERR_MODULE_NOT_FOUND even though
+  // both DSH tool registrations load successfully.
+  await mkdir(join(root,'.dsh/profiles/web'),{recursive:true})
+  await cp(resolve(installed,'../..'),join(root,'.dsh/profiles/web/node_modules'),{recursive:true,force:true})
   await mkdir(appCwd)
   const pkg=JSON.parse(await readFile(join(packageDir,'package.json'),'utf8'))
   assert.equal(pkg.name,'@liustack/modsearch')
