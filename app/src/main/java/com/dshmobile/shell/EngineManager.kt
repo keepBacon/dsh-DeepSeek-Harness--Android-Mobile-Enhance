@@ -2341,7 +2341,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
     val after = listPluginBundles(profile)
     val added = after.filter { !before.containsKey(it.name) }
-    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
+    // Apply third-party CLI compatibility immediately after a successful
+    // install, not just on the next DSH Host restart.
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile) +
+      applyAndroidModsearchCompatIfPresent(profile)
     val validation = validateProfileConfig(profile)
     if (!validation.ok) {
       val disabled = mutableListOf<String>()
@@ -2444,7 +2447,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val wasEnabled = listPluginBundles(profile).firstOrNull { it.name == clean }?.enabled == true
     var result = runPluginCommandWithRetry(profile, listOf("update", clean), timeoutMinutes = 20)
     if (!result.ok) return result
-    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile) +
+      applyAndroidModsearchCompatIfPresent(profile)
     if (compatNotes.isNotEmpty()) {
       result = result.copy(output = buildString {
         append(result.output.trim())
@@ -2467,7 +2471,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
   fun updateAllPlugins(profile: String = "web"): PluginCommandResult {
     var result = runPluginCommandWithRetry(profile, listOf("update"), timeoutMinutes = 25)
     if (!result.ok) return result
-    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile) +
+      applyAndroidModsearchCompatIfPresent(profile)
     if (compatNotes.isNotEmpty()) {
       result = result.copy(output = buildString {
         append(result.output.trim())
@@ -2634,6 +2639,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
+  /** A no-op for other plugins, including installs in empty profiles. */
+  private fun applyAndroidModsearchCompatIfPresent(profile: String): List<String> {
+    if (profile !in listOf("web", "headless")) return emptyList()
+    if (!installedPackageManifest("@liustack/modsearch", profile).isFile) return emptyList()
+    return applyAndroidModsearchCompat()
+  }
+
   /**
    * Preserve original ModSearch read_page/x_search/web_search tools, but launch
    * its original bundled CLI from the Android app-private HOME. An inherited
@@ -2663,8 +2675,33 @@ class EngineManager(private val context: Context, private val pickToken: String?
       val output = runCatching { log.readText().takeLast(4096) }.getOrDefault("")
       if (!finished || proc.exitValue() != 0) {
         Log.w(TAG, "ModSearch CLI compatibility failed: $output")
-        listOf("original ModSearch compatibility check failed")
-      } else listOf("original ModSearch compatibility checked; " + output.take(900))
+        listOf("ModSearch: compatibility helper could not finish (see modsearch-compat.log)")
+      } else {
+        // The helper may complete successfully but report an unavailable CLI,
+        // unknown package layout, or missing transitive dependencies. Report
+        // those as failures, not as "compatibility checked / OK".
+        val reports = JSONObject(output.trim()).optJSONArray("results")
+        buildList {
+          for (index in 0 until (reports?.length() ?: 0)) {
+            val item = reports?.optJSONObject(index) ?: continue
+            val status = item.optString("status", "unknown")
+            if (status == "absent") continue
+            val selectedProfile = item.optString("profile", "web")
+            val detail = when (status) {
+              "patched" -> "CLI compatibility applied"
+              "already-patched" -> "CLI compatibility is already applied"
+              "missing-npm-dependencies" -> "missing npm packages: " +
+                (item.optJSONArray("packages")?.let { arr ->
+                  (0 until arr.length()).map { arr.optString(it) }.joinToString(", ")
+                } ?: "unknown")
+              "cli-build-missing" -> "CLI build absent; reinstall the published npm package"
+              "plugin-entry-missing" -> "DSH plugin entry absent; reinstall the published npm package"
+              else -> status
+            }
+            add("ModSearch ($selectedProfile): $detail")
+          }
+        }
+      }
     } catch (t: Throwable) {
       Log.w(TAG, "ModSearch compatibility deferred", t)
       listOf("original ModSearch compatibility deferred")
