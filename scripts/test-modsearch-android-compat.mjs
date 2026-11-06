@@ -14,6 +14,9 @@ try{
   await writeFile(join(root,'dist/main.js'),'process.stdout.write("original CLI")')
   const plugin=join(root,'dsh/index.js')
   const body=[
+    "function childEnv() {",
+    "  return process.env;",
+    "}",
     "export function run(command, args, signal, env) {",
     "  const child = spawnHidden(command, args, {",
     "      stdio: ['ignore', 'pipe', 'pipe'],",
@@ -32,6 +35,8 @@ try{
   const next=await readFile(plugin,'utf8')
   assert.match(next,/DSH Android modsearch: stable app-private CLI cwd/)
   assert.match(next,/DSH_ANDROID_MODSEARCH_CWD/)
+  assert.match(next,/delete cleaned\.NODE_OPTIONS/)
+  assert.match(next,/clean inherited NODE_OPTIONS/)
   assert.match(next,/DSH_ANDROID_STANDALONE/)
   assert.equal(await readFile(plugin+'.dsh-pre-android-cwd.bak','utf8'),body)
   assert.equal(repairModsearch(home,true).results.find(x=>x.profile==='web').status,'already-patched')
