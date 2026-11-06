@@ -1306,7 +1306,9 @@ validate_termux_tool_runtime() {
   local home="$CACHE_DIR/tool-runtime-smoke-home"
   rm -rf "$home"; mkdir -p "$home/tmp"
   local wrappers="$stage/usr/libexec/dsh/wrappers"
-  local common_env=(env DSH_TERMUX_EXEC_MODE=proot TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" JAVA_HOME="/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
+  local common_env=(env DSH_TERMUX_EXEC_MODE=direct TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" JAVA_HOME="/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
+  # Verify the default mode actually used by the APK. The previous test
+  # explicitly forced PRoot and could pass while direct-mode CLIs were dead.
   dsh_validate_staged_interpreter_closure "$stage" || return 7
   "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }
