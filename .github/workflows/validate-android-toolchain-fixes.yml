@@ -28,6 +28,11 @@ jobs:
           node --check app/src/main/assets/modsearch-android-compat.mjs
           node scripts/test-modsearch-android-compat.mjs
           node scripts/test-modsearch-process-boundary.mjs
+      - name: Published ModSearch integration (offline execution)
+        run: |
+          mkdir -p "$RUNNER_TEMP/modsearch-published"
+          npm install --prefix "$RUNNER_TEMP/modsearch-published" --no-save --ignore-scripts --no-audit --no-fund @liustack/modsearch@5.10.11
+          node scripts/test-modsearch-published-plugin.mjs "$RUNNER_TEMP/modsearch-published/node_modules/@liustack/modsearch"
       - name: Termux launcher generation contract
         run: |
           bash -n scripts/embed-termux-tools.sh
