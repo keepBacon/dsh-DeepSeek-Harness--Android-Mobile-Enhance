@@ -33,6 +33,19 @@ class McpConfigManager(
   private val toolboxFile = File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs")
   private val basicToolboxFile = File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs")
 
+  /** The main toolbox imports sibling ESM modules. A missing one crashes stdio
+   * discovery before tools/list; previously the UI still displayed it as ready. */
+  private fun missingToolboxModules(): List<String> {
+    if (!toolboxFile.isFile) return listOf("toolbox-mcp.mjs")
+    val source = try { toolboxFile.readText() } catch (_: Throwable) {
+      return listOf("toolbox-mcp.mjs (unreadable)")
+    }
+    val importPattern = Regex("""from\s+['"]\./([A-Za-z0-9._-]+\.mjs)['"]""")
+    return importPattern.findAll(source)
+      .map { it.groupValues[1] }.distinct()
+      .filter { !File(toolboxFile.parentFile, it).isFile }.toList()
+  }
+
   fun toolboxEnabled(): Boolean = readRootSafe().optBoolean("toolboxEnabled", true)
   fun listServers(): List<McpServerConfig> = readServersForRuntime(readRootSafe())
 
@@ -91,6 +104,9 @@ class McpConfigManager(
       if (root.optBoolean("toolboxEnabled", true)) {
         if (!toolboxFile.isFile || !basicToolboxFile.isFile)
           throw java.io.IOException("内置 MCP 工具箱文件缺失；需要修复 DSH 运行时")
+        val missing = missingToolboxModules()
+        if (missing.isNotEmpty())
+          throw java.io.IOException("内置 MCP 依赖模块缺失：" + missing.joinToString(", "))
         rows += toolboxRow()
         rows += basicToolboxRow()
       }
@@ -158,9 +174,11 @@ class McpConfigManager(
     val enabled = root.optBoolean("toolboxEnabled", true)
     val mobilePresent = toolboxFile.isFile
     val basicPresent = basicToolboxFile.isFile
+    val missingModules = missingToolboxModules()
     val builtIn = when {
       !enabled -> "已关闭"
-      mobilePresent && basicPresent -> "已配置（2/2 入口）"
+      mobilePresent && basicPresent && missingModules.isEmpty() -> "已配置（2/2 入口）"
+      missingModules.isNotEmpty() -> "依赖缺失：" + missingModules.joinToString(", ")
       else -> "入口缺失（mobile=" + mobilePresent + ", basic=" + basicPresent + "）"
     }
     val binary = if (File(usrDir, "libexec/dsh/wrappers/readelf").exists() && File(usrDir, "libexec/dsh/wrappers/objdump").exists()) " · Binutils" else ""
