@@ -27,6 +27,7 @@ jobs:
         run: |
           node --check app/src/main/assets/modsearch-android-compat.mjs
           node scripts/test-modsearch-android-compat.mjs
+          node scripts/test-modsearch-process-boundary.mjs
       - name: Termux launcher generation contract
         run: |
           bash -n scripts/embed-termux-tools.sh
