@@ -7,6 +7,7 @@ import { codeAstTools, codeAstCall } from './dsh-code-engine-ast.mjs'
 import { codeWorkflowTools, codeWorkflowCall } from './dsh-code-engine-workflow.mjs'
 import { luaTools, luaCall } from './dsh-lua-tools.mjs'
 import { spawn } from 'node:child_process'
+import { readWebPage, readPageTool } from './dsh-web-page-reader.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -26,11 +27,12 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
-const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,
- {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
+const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,readPageTool,
+ {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and actual CLI wrappers (Bash, Python, curl, Git, rg). Reports per-command execution failures rather than only checking entrypoint existence. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
+ {name:'modsearch_health',description:'Diagnose the original installed @liustack/modsearch read_page/x_search plugin and run its offline doctor --json command. Read-only; does not fetch pages or spend search quota.',inputSchema:{type:'object',properties:{profile:{type:'string',enum:['web','headless'],default:'web'},runDoctor:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'tool_registry_list',description:'List tools exposed by this mobile MCP server (read-only).',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'tool_inspect',description:'Inspect the name, description and input schema of a mobile MCP tool.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
  {name:'plugin_source_read',description:'Read one UTF-8 source file belonging to an installed Web-profile plugin. Read-only and size bounded.',inputSchema:{type:'object',properties:{name:{type:'string'},path:{type:'string'},maxBytes:{type:'integer',minimum:1,maximum:262144,default:65536}},required:['name','path'],additionalProperties:false}},
@@ -395,6 +397,7 @@ async function closeDebug(session){
 }
 
 async function call(name,a={}){
+ if(name==='read_page')return await readWebPage(a)
  if(codeTools.some(x=>x.name===name))return codeCall(name,a)
  if(codeV3Tools.some(x=>x.name===name))return codeV3Call(name,a)
  if(codeV4Tools.some(x=>x.name===name))return codeV4Call(name,a)
@@ -435,6 +438,26 @@ async function call(name,a={}){
         probes[name]={ok:r.exitCode===0,exitCode:r.exitCode,timedOut:r.timedOut,stdout:r.stdout.slice(0,512),stderr:r.stderr.slice(0,1200)};
       }
     }
+    // Probe the SAME wrappers agents actually spawn, not just file existence.
+    // Version requests are read-only. Report every failure without masking
+    // individual successes or requiring root / another app.
+    const cliProbes={};
+    if(a.probeExecutables!==false){
+      const specs=[
+        ['bash',toolWrapped('bash'),['-lc','printf DSH_BASH_CHILD_OK']],
+        ['python3',toolWrapped('python3'),['--version']],
+        ['curl',toolWrapped('curl'),['--version']],
+        ['git','git',['--version']],
+        ['rg','rg',['--version']],
+        ['node',paths.node,['--version']],
+      ];
+      for(const [name,command,args] of specs){
+        const result=await runProcess(command,args,{timeoutMs:8000,maxOutputBytes:4096});
+        cliProbes[name]={ok:result.exitCode===0&&!result.timedOut,
+          exitCode:result.exitCode,timedOut:result.timedOut,
+          stdout:result.stdout.slice(0,300),stderr:result.stderr.slice(0,600)};
+      }
+    }
     const legacy=files.hostLegacyTermux?.exists===true;
     const shell=probes.shellViaProot;
     const shellLog=shell ? [shell.stderr,shell.stdout].join('\n') : '';
@@ -447,9 +470,95 @@ async function call(name,a={}){
       :!shell?'PROOT_NOT_PROBED'
       :shell.ok && shell.stdout.includes('DSH_SHELL_OK')?'PROOT_BASH_OK'
       :'PROOT_BASH_FAILED';
-    return {mode:'diagnostic',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,
+    return {mode:'diagnostic',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,cliProbes,
       diagnosis,hostLegacyTermuxPresent:legacy,expectedProotTmpDir:paths.prootHostTemp,
       warning:'PROOT_TMP_DIR must resolve to the real app HOME/tmp before entering the guest. A missing com.termux path alone does not imply user data was uninstalled.'};
+  }
+  case 'modsearch_health': {
+    const profile=a.profile==='headless'?'headless':'web';
+    const home=process.env.HOME||process.cwd();
+    const root=resolve(home,'.dsh/profiles',profile,'node_modules/@liustack/modsearch');
+    const report={profile,installed:false,cliPresent:false,pluginPresent:false,
+      npmDependencies:{},doctor:null,action:'none'};
+    let manifest;
+    try {
+      manifest=JSON.parse(await readFile(resolve(root,'package.json'),'utf8'));
+    }catch(e) {
+      report.action='Install the published npm package @liustack/modsearch in DSH plugin settings';
+      report.error='manifest unreadable: '+(e.code||String(e));
+      return report;
+    }
+    if(manifest.name!=='@liustack/modsearch') {
+      report.error='package manifest name mismatch';
+      return report;
+    }
+    report.installed=true;
+    report.version=String(manifest.version||'unknown');
+    const plugin=resolve(root,'dsh/index.js');
+    const cli=resolve(root,'dist/main.js');
+    const isFile=async path=>{try {return (await stat(path)).isFile()}catch{return false}};
+    report.pluginPresent=await isFile(plugin);
+    report.cliPresent=await isFile(cli);
+    if(!report.cliPresent||!report.pluginPresent) {
+      report.action='Reinstall @liustack/modsearch from npm (GitHub source checkout does not contain dist/main.js)';
+      return report;
+    }
+    // Resolve using precisely the location Node uses for its bare imports.
+    // A plugin can register tools while its external CLI lacks commander/undici.
+    const localRequire=createRequire(cli);
+    for(const dependency of Object.keys(manifest.dependencies||{})){
+      try { localRequire.resolve(dependency); report.npmDependencies[dependency]='ok' }
+      catch { report.npmDependencies[dependency]='missing' }
+    }
+    if(Object.values(report.npmDependencies).includes('missing')) {
+      report.action='Repair the DSH plugin npm installation (missing CLI dependency)';
+      return report;
+    }
+    if(a.runDoctor!==false){
+      const safeEnv={...process.env};
+      delete safeEnv.NODE_OPTIONS;
+      const r=await runProcess(resolve(PREFIX,'bin/node'),[cli,'doctor','--json'],{
+        env:safeEnv,cwd:home,timeoutMs:10000,maxOutputBytes:32768
+      });
+      // Do not return raw doctor output: environment/config diagnostics can
+      // include private paths or provider/account information.
+      let validJson=false, readiness=null, configReadable=null, nodeCompatible=null;
+      if(r.exitCode===0) {
+        try {
+          const data=JSON.parse(r.stdout);
+          validJson=Boolean(data && typeof data==='object' && Array.isArray(data.roles));
+          if(validJson){
+            nodeCompatible=data.node?.ok===true;
+            configReadable=data.configFile?.exists!==true || data.configFile?.readable===true;
+            // Doctor returns three roles: search, fetch and social. Only
+            // expose availability, not provider credentials or config paths.
+            readiness=Object.fromEntries(data.roles
+              .filter(role=>['search','fetch','social'].includes(role.role))
+              .map(role=>[role.role,{
+                ready:typeof role.resolved==='string'&&role.resolved.length>0,
+                resolved:role.resolved||null,
+                candidateCount:Array.isArray(role.candidates)?role.candidates.length:0
+              }]));
+          }
+        }catch{}
+      }
+      report.doctor={ok:r.exitCode===0&&validJson,exitCode:r.exitCode,
+        timedOut:r.timedOut,validJson,nodeCompatible,configReadable,readiness};
+      if(!report.doctor.ok) {
+        report.doctor.failureKind=r.timedOut?'timeout':
+          r.exitCode===null?'spawn-failed':r.exitCode===0?'invalid-json':'cli-exit-'+r.exitCode;
+        report.action='Inspect app-private modsearch-compat.log and ModSearch CLI environment';
+      }else if(!nodeCompatible){
+        report.action='ModSearch requires Node.js >=22.13; inspect embedded runtime version';
+      }else if(!configReadable){
+        report.action='Fix the permissions or JSON format of the private ~/.modsearch/config.json file';
+      }else if(!readiness?.fetch?.ready || !readiness?.search?.ready){
+        report.action='No ready page-fetch or web-search route; check modsearch doctor engine status';
+      }else if(!readiness?.social?.ready){
+        report.action='X/Grok provider unavailable: x_search may return degraded web results';
+      }
+    }
+    return report;
   }
   case 'tool_registry_list': return {server:'mobile_tools',tools:tools.map(t=>({name:t.name,description:t.description})),total:tools.length};
   case 'tool_validate': {
@@ -774,6 +883,7 @@ async function selfTest(){
  const caps=await call('reverse_capabilities',{});if(!caps.proc?.maps)throw new Error('reverse_capabilities self-test failed')
  const noRoot=await call('no_root_capabilities',{});if(!noRoot.direct?.selfProcMaps)throw new Error('no_root_capabilities self-test failed')
  const snap1=await call('self_runtime_snapshot',{maxEntries:256}),snap2=await call('runtime_snapshot',{pid:process.pid,maxEntries:256}),diff=await call('runtime_diff',{before:snap1.id,after:snap2.id});if(diff.pid!==process.pid)throw new Error('runtime snapshot self-test failed')
+ if(!tools.some(t=>t.name==='read_page'))throw new Error('read_page tool missing')
  for(const b of ['file','readelf','objdump','nm','strings','rg','git'])await runStrict(b,['--version'])
  await runStrict('openssl',['version'])
  await runStrict('aapt2',['version'])

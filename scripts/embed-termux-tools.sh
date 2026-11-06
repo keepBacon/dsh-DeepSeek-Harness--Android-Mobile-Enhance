@@ -399,6 +399,28 @@ dsh_materialize_required_host_entrypoints() {
 }
 
 
+# Reconcile ALL dangling packaged command symlinks, not only the mandatory
+# catalog. This commonly affects package alternatives installed by maintainer
+# scripts (e.g. nc and interpreter aliases) whose intermediate targets were
+# never part of dpkg-query -L. Do not delete unresolved optional links: retain
+# them for diagnostics, and never follow a host target outside Termux prefix.
+dsh_materialize_optional_host_entrypoints() {
+  local stage="$1" entry cmd fixed=0 unresolved=0
+  for entry in "$stage/usr/bin/"*; do
+    [ -L "$entry" ] || continue
+    [ ! -e "$entry" ] || continue
+    cmd="${entry##*/}"
+    if dsh_materialize_host_entrypoint "$stage" "$cmd"; then
+      fixed=$((fixed + 1))
+    else
+      unresolved=$((unresolved + 1))
+      echo "[DSH] Optional embedded entrypoint remains unresolved: $cmd" >&2
+    fi
+  done
+  echo "[DSH] Optional CLI symlink reconciliation: repaired=$fixed unresolved=$unresolved"
+}
+
+
 dsh_materialize_runtime_interpreters() {
   local stage="$1"
   local cmd fail=0
@@ -1090,6 +1112,17 @@ case "${DSH_TERMUX_EXEC_MODE:-direct}" in
     export JAVA_HOME="$REAL_PREFIX/lib/jvm/java-21-openjdk"
     export DSH_TERMUX_INNER=1
     unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT || true
+    # A regular script with an absolute com.termux shebang is an ENOENT dead
+    # link inside the DSH app UID. Invoke known interpreters explicitly.
+    first_bytes="$(/system/bin/head -c 180 "$REAL_PREFIX/bin/$CMD" 2>/dev/null || true)"
+    case "$first_bytes" in
+      "#!$LEGACY_PREFIX/bin/bash"*) exec "$REAL_PREFIX/bin/bash" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/sh"*) exec /system/bin/sh "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/python3"*) exec "$REAL_PREFIX/bin/python3" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/python"*) exec "$REAL_PREFIX/bin/python3" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/perl"*) exec "$REAL_PREFIX/bin/perl" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/node"*) exec "$REAL_PREFIX/bin/node" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+    esac
     exec "$REAL_PREFIX/bin/$CMD" "$@"
     ;;
   proot) ;;
@@ -1280,6 +1313,7 @@ EOF_TERMUX_WRAPPER
     return 7
   fi
   dsh_repair_staged_compiler_aliases "$stage" || return 7
+  dsh_materialize_optional_host_entrypoints "$stage" || return 7
 
   # Validate package contents immediately. Do not spend minutes compiling
   # node-pty only to discover that a requested Termux subpackage did not
@@ -1295,7 +1329,9 @@ validate_termux_tool_runtime() {
   local home="$CACHE_DIR/tool-runtime-smoke-home"
   rm -rf "$home"; mkdir -p "$home/tmp"
   local wrappers="$stage/usr/libexec/dsh/wrappers"
-  local common_env=(env DSH_TERMUX_EXEC_MODE=proot TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" JAVA_HOME="/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
+  local common_env=(env DSH_TERMUX_EXEC_MODE=direct TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr" HOME="$home" TMPDIR="$home/tmp" PATH="$wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" JAVA_HOME="/data/data/com.termux/files/usr/lib/jvm/java-21-openjdk" TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1)
+  # Verify the default mode actually used by the APK. The previous test
+  # explicitly forced PRoot and could pass while direct-mode CLIs were dead.
   dsh_validate_staged_interpreter_closure "$stage" || return 7
   "${common_env[@]}" "$wrappers/python3" -c 'import json, ssl, sqlite3, subprocess, sys; assert sys.version_info >= (3, 10); print(sys.version.split()[0])' >/dev/null || { echo "[DSH] Embedded Python3 smoke test failed."; return 7; }
   "${common_env[@]}" "$wrappers/pip3" --version >/dev/null 2>&1 || { echo "[DSH] Embedded pip smoke test failed."; return 7; }

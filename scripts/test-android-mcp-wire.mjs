@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const [prefix] = process.argv.slice(2);
@@ -65,7 +65,7 @@ async function test(kind,dir){
     assert.equal(names.length,new Set(names).size,'duplicate tool names');
     assert.ok(names.length>=(kind==='mobile'?100:50),'tool registry incomplete: '+names.length);
     if(kind==='mobile'){
-      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start']){
+      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start','read_page','modsearch_health']){
         assert.ok(names.includes(tool),'missing mobile MCP tool: '+tool);
       }
     }else{
@@ -84,6 +84,20 @@ async function test(kind,dir){
     assert.equal(typeof invalid.structuredContent?.error,'string','error result must include a structured reason');
     assert.equal((await service.request('tools/list',{})).tools.length,names.length,'MCP must remain usable after tool failure');
     if(kind==='mobile'){
+      const pluginHealth=await call('modsearch_health',{runDoctor:false});
+      assert.equal(pluginHealth.installed,false,'missing ModSearch should give actionable status without crashing MCP');
+      assert.match(pluginHealth.action,/Install/);
+      const modRoot=join(dir,'.dsh/profiles/web/node_modules/@liustack/modsearch');
+      await mkdir(join(modRoot,'dsh'),{recursive:true});
+      await mkdir(join(modRoot,'dist'),{recursive:true});
+      await writeFile(join(modRoot,'package.json'),JSON.stringify({name:'@liustack/modsearch',version:'5.10.11',dependencies:{'dsh-intentionally-missing-dependency':'1.0.0'}}));
+      await writeFile(join(modRoot,'dsh/index.js'),'export const name = "modsearch"');
+      await writeFile(join(modRoot,'dist/main.js'),'console.log("fake CLI")');
+      const brokenHealth=await call('modsearch_health',{runDoctor:false});
+      assert.equal(brokenHealth.installed,true);
+      assert.equal(brokenHealth.npmDependencies['dsh-intentionally-missing-dependency'],'missing');
+      assert.match(brokenHealth.action,/missing CLI dependency/);
+      await rm(join(dir,'.dsh'),{recursive:true,force:true});
       const file=join(dir,'mobile-write.txt'),text='中文🚀\n{"nested":[1,true,null],"escaped":"\\u2603"}\n';
       await call('fs_write',{path:file,content:text});
       assert.equal(await readFile(file,'utf8'),text);

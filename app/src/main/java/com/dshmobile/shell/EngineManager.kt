@@ -323,7 +323,19 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val validName = Regex("""^[A-Za-z0-9][A-Za-z0-9._+-]*$""")
     val wrappers = File(usrDir, "libexec/dsh/wrappers")
     wrappers.listFiles()?.forEach { entry ->
-      if (validName.matches(entry.name) && (entry.exists() || java.nio.file.Files.isSymbolicLink(entry.toPath()))) {
+      // A dangling wrapper symlink used to be advertised as a working CLI.
+      // Only expose a wrapper when its launcher and target executable exist.
+      val targetName = when (entry.name) {
+        "python" -> "python3"
+        "termux-run" -> null // launcher lives in libexec, not usr/bin
+        else -> entry.name
+      }
+      val targetExists = targetName == null ||
+        File(usrDir, "bin/$targetName").canExecute() ||
+        (targetName in setOf("ar", "addr2line", "c++filt", "nm", "objcopy",
+          "objdump", "ranlib", "readelf", "size", "strings", "strip") &&
+          File(usrDir, "bin/g$targetName").canExecute())
+      if (validName.matches(entry.name) && entry.canExecute() && targetExists) {
         names += entry.name
       }
     }
@@ -334,7 +346,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     )
     for (name in directRuntimeCommands) {
       val entry = File(usrDir, "bin/$name")
-      if (entry.exists() || java.nio.file.Files.isSymbolicLink(entry.toPath())) names += name
+      if (entry.canExecute()) names += name
     }
 
     val categoryOrder = listOf("terminal", "files", "processes", "packages", "git", "network", "system")
@@ -1655,6 +1667,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
       applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
       applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
+      applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
       val safeMode = ShellState.safeModeEnabled(context)
       val safeProfile = if (safeMode) prepareSafeModeProfile() else null
       val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode)
@@ -1796,6 +1809,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // copies Termux rg into the embedded prefix when available.
       "DSH_RG_PATH" to File(usrDir, "bin/rg").takeIf { it.isFile }?.absolutePath.orEmpty(),
       "DSH_ANDROID_STANDALONE" to "1",
+      "DSH_ANDROID_MODSEARCH_CWD" to homeDir.absolutePath,
       // Android cannot rely on desktop Linux bwrap/Landlock from an ordinary
       // app UID. sandbox-local is patched to use this explicit partial runner
       // while fs-sandbox remains the workspace write-containment authority.
@@ -2327,7 +2341,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
     val after = listPluginBundles(profile)
     val added = after.filter { !before.containsKey(it.name) }
-    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
+    // Apply third-party CLI compatibility immediately after a successful
+    // install, not just on the next DSH Host restart.
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile) +
+      applyAndroidModsearchCompatIfPresent(profile)
     val validation = validateProfileConfig(profile)
     if (!validation.ok) {
       val disabled = mutableListOf<String>()
@@ -2430,7 +2447,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val wasEnabled = listPluginBundles(profile).firstOrNull { it.name == clean }?.enabled == true
     var result = runPluginCommandWithRetry(profile, listOf("update", clean), timeoutMinutes = 20)
     if (!result.ok) return result
-    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile) +
+      applyAndroidModsearchCompatIfPresent(profile)
     if (compatNotes.isNotEmpty()) {
       result = result.copy(output = buildString {
         append(result.output.trim())
@@ -2453,7 +2471,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
   fun updateAllPlugins(profile: String = "web"): PluginCommandResult {
     var result = runPluginCommandWithRetry(profile, listOf("update"), timeoutMinutes = 25)
     if (!result.ok) return result
-    val compatNotes = applyAndroidCodexModelPickerCompat(profile)
+    val compatNotes = applyAndroidCodexModelPickerCompat(profile) +
+      applyAndroidModsearchCompatIfPresent(profile)
     if (compatNotes.isNotEmpty()) {
       result = result.copy(output = buildString {
         append(result.output.trim())
@@ -2617,6 +2636,75 @@ class EngineManager(private val context: Context, private val pickToken: String?
     } catch (t: Throwable) {
       Log.w(TAG, "Codex relay compatibility deferred", t)
       return listOf("relay compatibility check deferred")
+    }
+  }
+
+  /** A no-op for other plugins, including installs in empty profiles. */
+  private fun applyAndroidModsearchCompatIfPresent(profile: String): List<String> {
+    if (profile !in listOf("web", "headless")) return emptyList()
+    if (!installedPackageManifest("@liustack/modsearch", profile).isFile) return emptyList()
+    return applyAndroidModsearchCompat()
+  }
+
+  /**
+   * Preserve original ModSearch read_page/x_search/web_search tools, but launch
+   * its original bundled CLI from the Android app-private HOME. An inherited
+   * profile/workspace cwd can point modsearch's file-consuming engines at
+   * relative ".dsh/profiles/..." paths and fail both tools together.
+   *
+   * Applies only to a recognized, installed @liustack/modsearch package and
+   * creates a one-time backup. No credentials or provider settings are changed.
+   */
+  private fun applyAndroidModsearchCompat(): List<String> {
+    val assetName = "modsearch-android-compat.mjs"
+    return try {
+      val directory = File(context.filesDir, "plugin-compat").apply { mkdirs() }
+      val helper = File(directory, assetName)
+      val embedded = context.assets.open(assetName).bufferedReader(Charsets.UTF_8).use { it.readText() }
+      if (!helper.isFile || helper.readText() != embedded) writeTextAtomic(helper, embedded)
+      val log = File(context.filesDir, "modsearch-compat.log")
+      log.writeText("")
+      val env = engineEnv(preloadBin).toMutableMap()
+      env["DSH_ANDROID_MODSEARCH_CWD"] = homeDir.absolutePath
+      val proc = startWithArgsToFile(
+        arrayOf(nodeBin.absolutePath, helper.absolutePath, "--repair-home", homeDir.absolutePath),
+        env, log,
+      )
+      val finished = proc.waitFor(12, TimeUnit.SECONDS)
+      if (!finished) proc.destroyForcibly()
+      val output = runCatching { log.readText().takeLast(4096) }.getOrDefault("")
+      if (!finished || proc.exitValue() != 0) {
+        Log.w(TAG, "ModSearch CLI compatibility failed: $output")
+        listOf("ModSearch: compatibility helper could not finish (see modsearch-compat.log)")
+      } else {
+        // The helper may complete successfully but report an unavailable CLI,
+        // unknown package layout, or missing transitive dependencies. Report
+        // those as failures, not as "compatibility checked / OK".
+        val reports = JSONObject(output.trim()).optJSONArray("results")
+        buildList {
+          for (index in 0 until (reports?.length() ?: 0)) {
+            val item = reports?.optJSONObject(index) ?: continue
+            val status = item.optString("status", "unknown")
+            if (status == "absent") continue
+            val selectedProfile = item.optString("profile", "web")
+            val detail = when (status) {
+              "patched" -> "CLI compatibility applied"
+              "already-patched" -> "CLI compatibility is already applied"
+              "missing-npm-dependencies" -> "missing npm packages: " +
+                (item.optJSONArray("packages")?.let { arr ->
+                  (0 until arr.length()).map { arr.optString(it) }.joinToString(", ")
+                } ?: "unknown")
+              "cli-build-missing" -> "CLI build absent; reinstall the published npm package"
+              "plugin-entry-missing" -> "DSH plugin entry absent; reinstall the published npm package"
+              else -> status
+            }
+            add("ModSearch ($selectedProfile): $detail")
+          }
+        }
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "ModSearch compatibility deferred", t)
+      listOf("original ModSearch compatibility deferred")
     }
   }
 

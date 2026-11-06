@@ -1,0 +1,41 @@
+name: Validate Android CLI and Web Tool Fixes
+on:
+  push:
+    branches:
+      - fix/android-cli-web-page-tools-20261106
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/validate-android-toolchain-fixes.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript syntax
+        run: |
+          node --check scripts/dsh-web-page-reader.mjs
+          node --check scripts/dsh-mobile-toolbox-mcp.mjs
+          node --check scripts/android-runtime-patch.mjs
+      - name: HTTP paging and cache regression
+        run: node scripts/test-dsh-web-page-reader.mjs
+      - name: Original ModSearch plugin compatibility regression
+        run: |
+          node --check app/src/main/assets/modsearch-android-compat.mjs
+          node scripts/test-modsearch-android-compat.mjs
+          node scripts/test-modsearch-process-boundary.mjs
+      - name: Published ModSearch integration (offline execution)
+        run: |
+          mkdir -p "$RUNNER_TEMP/modsearch-published"
+          npm install --prefix "$RUNNER_TEMP/modsearch-published" --no-save --ignore-scripts --no-audit --no-fund @liustack/modsearch@5.10.11
+          node scripts/test-modsearch-published-plugin.mjs "$RUNNER_TEMP/modsearch-published/node_modules/@liustack/modsearch"
+      - name: Termux launcher generation contract
+        run: |
+          bash -n scripts/embed-termux-tools.sh
+          bash -n scripts/validate-termux-wrapper-routing.sh
+          bash scripts/validate-termux-wrapper-routing.sh
+          bash scripts/test-termux-optional-symlink-repair.sh
