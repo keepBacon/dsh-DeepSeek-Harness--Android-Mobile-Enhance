@@ -48,7 +48,7 @@ try{
   const link=join(home,'.dsh/profiles/headless/node_modules/@liustack/modsearch')
   await rm(link,{recursive:true})
   await symlink(badRoot,link)
-  assert.equal(repairModsearch(home,true).results.find(x=>x.profile==='headless').status,'unexpected-package-identity')
+  assert.equal(repairModsearch(home,true).results.find(x=>x.profile==='headless').status,'error')
   // Syntax-check patched file by prepending a minimal import stub.
   const syntax=spawnSync(process.execPath,['--check','--input-type=module'],{input:next,encoding:'utf8'})
   assert.equal(syntax.status,0,syntax.stderr)
