@@ -323,7 +323,19 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val validName = Regex("""^[A-Za-z0-9][A-Za-z0-9._+-]*$""")
     val wrappers = File(usrDir, "libexec/dsh/wrappers")
     wrappers.listFiles()?.forEach { entry ->
-      if (validName.matches(entry.name) && (entry.exists() || java.nio.file.Files.isSymbolicLink(entry.toPath()))) {
+      // A dangling wrapper symlink used to be advertised as a working CLI.
+      // Only expose a wrapper when its launcher and target executable exist.
+      val targetName = when (entry.name) {
+        "python" -> "python3"
+        "termux-run" -> null // launcher lives in libexec, not usr/bin
+        else -> entry.name
+      }
+      val targetExists = targetName == null ||
+        File(usrDir, "bin/$targetName").canExecute() ||
+        (targetName in setOf("ar", "addr2line", "c++filt", "nm", "objcopy",
+          "objdump", "ranlib", "readelf", "size", "strings", "strip") &&
+          File(usrDir, "bin/g$targetName").canExecute())
+      if (validName.matches(entry.name) && entry.canExecute() && targetExists) {
         names += entry.name
       }
     }
@@ -334,7 +346,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     )
     for (name in directRuntimeCommands) {
       val entry = File(usrDir, "bin/$name")
-      if (entry.exists() || java.nio.file.Files.isSymbolicLink(entry.toPath())) names += name
+      if (entry.canExecute()) names += name
     }
 
     val categoryOrder = listOf("terminal", "files", "processes", "packages", "git", "network", "system")
