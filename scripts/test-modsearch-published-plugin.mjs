@@ -60,7 +60,14 @@ try{
   assert.ok(xArgs.args.includes('x'))
   const doctor=spawnSync(process.execPath,[join(packageDir,'dist/main.js'),'doctor','--json'],{encoding:'utf8',timeout:15000,env:{...process.env,NODE_OPTIONS:''},cwd:appCwd})
   assert.equal(doctor.status,0,doctor.stderr.slice(0,2000))
-  assert.doesNotThrow(()=>JSON.parse(doctor.stdout),'published ModSearch CLI doctor must produce JSON')
+  const diagnosed=JSON.parse(doctor.stdout)
+  assert.equal(diagnosed.node?.ok,true,'published ModSearch doctor must accept the Node runtime')
+  assert.equal(diagnosed.configFile?.readable,true,'missing optional ModSearch config must remain supported')
+  for(const role of ['search','fetch','social']){
+    const item=diagnosed.roles?.find(x=>x.role===role)
+    assert.ok(item,'published doctor missing role '+role)
+    assert.ok(Array.isArray(item.candidates),'role must have structured candidates')
+  }
   console.log('[OK] published @liustack/modsearch '+pkg.version+': read_page, x_search, CLI doctor and original DSH plugin')
 }finally{
  for(const name of envNames){if(previous[name]===undefined)delete process.env[name];else process.env[name]=previous[name]}
