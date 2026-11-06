@@ -7,6 +7,7 @@ import { codeAstTools, codeAstCall } from './dsh-code-engine-ast.mjs'
 import { codeWorkflowTools, codeWorkflowCall } from './dsh-code-engine-workflow.mjs'
 import { luaTools, luaCall } from './dsh-lua-tools.mjs'
 import { spawn } from 'node:child_process'
+import { readWebPage, readPageTool } from './dsh-web-page-reader.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -26,7 +27,7 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
-const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,
+const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,readPageTool,
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and writable host scratch; optionally launch harmless version/echo probes. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -395,6 +396,7 @@ async function closeDebug(session){
 }
 
 async function call(name,a={}){
+ if(name==='read_page')return await readWebPage(a)
  if(codeTools.some(x=>x.name===name))return codeCall(name,a)
  if(codeV3Tools.some(x=>x.name===name))return codeV3Call(name,a)
  if(codeV4Tools.some(x=>x.name===name))return codeV4Call(name,a)
@@ -774,6 +776,7 @@ async function selfTest(){
  const caps=await call('reverse_capabilities',{});if(!caps.proc?.maps)throw new Error('reverse_capabilities self-test failed')
  const noRoot=await call('no_root_capabilities',{});if(!noRoot.direct?.selfProcMaps)throw new Error('no_root_capabilities self-test failed')
  const snap1=await call('self_runtime_snapshot',{maxEntries:256}),snap2=await call('runtime_snapshot',{pid:process.pid,maxEntries:256}),diff=await call('runtime_diff',{before:snap1.id,after:snap2.id});if(diff.pid!==process.pid)throw new Error('runtime snapshot self-test failed')
+ if(!tools.some(t=>t.name==='read_page'))throw new Error('read_page tool missing')
  for(const b of ['file','readelf','objdump','nm','strings','rg','git'])await runStrict(b,['--version'])
  await runStrict('openssl',['version'])
  await runStrict('aapt2',['version'])
