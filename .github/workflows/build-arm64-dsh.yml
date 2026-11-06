@@ -6,6 +6,7 @@ on:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
       - 'scripts/dsh-mobile-toolbox-mcp.mjs'
+      - 'scripts/dsh-web-page-reader.mjs'
       - 'scripts/dsh-basic-toolbox-mcp.mjs'
       - 'scripts/dsh-code-engine*.mjs'
       - 'scripts/dsh-lua*.mjs'
