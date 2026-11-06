@@ -399,6 +399,28 @@ dsh_materialize_required_host_entrypoints() {
 }
 
 
+# Reconcile ALL dangling packaged command symlinks, not only the mandatory
+# catalog. This commonly affects package alternatives installed by maintainer
+# scripts (e.g. nc and interpreter aliases) whose intermediate targets were
+# never part of dpkg-query -L. Do not delete unresolved optional links: retain
+# them for diagnostics, and never follow a host target outside Termux prefix.
+dsh_materialize_optional_host_entrypoints() {
+  local stage="$1" entry cmd fixed=0 unresolved=0
+  for entry in "$stage/usr/bin/"*; do
+    [ -L "$entry" ] || continue
+    [ ! -e "$entry" ] || continue
+    cmd="${entry##*/}"
+    if dsh_materialize_host_entrypoint "$stage" "$cmd"; then
+      fixed=$((fixed + 1))
+    else
+      unresolved=$((unresolved + 1))
+      echo "[DSH] Optional embedded entrypoint remains unresolved: $cmd" >&2
+    fi
+  done
+  echo "[DSH] Optional CLI symlink reconciliation: repaired=$fixed unresolved=$unresolved"
+}
+
+
 dsh_materialize_runtime_interpreters() {
   local stage="$1"
   local cmd fail=0
@@ -1291,6 +1313,7 @@ EOF_TERMUX_WRAPPER
     return 7
   fi
   dsh_repair_staged_compiler_aliases "$stage" || return 7
+  dsh_materialize_optional_host_entrypoints "$stage" || return 7
 
   # Validate package contents immediately. Do not spend minutes compiling
   # node-pty only to discover that a requested Termux subpackage did not
