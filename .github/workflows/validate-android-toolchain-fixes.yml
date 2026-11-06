@@ -28,3 +28,4 @@ jobs:
           bash -n scripts/embed-termux-tools.sh
           bash -n scripts/validate-termux-wrapper-routing.sh
           bash scripts/validate-termux-wrapper-routing.sh
+          bash scripts/test-termux-optional-symlink-repair.sh
