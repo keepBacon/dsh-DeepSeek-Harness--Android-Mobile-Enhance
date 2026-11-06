@@ -529,7 +529,7 @@ async function call(name,a={}){
           validJson=Boolean(data && typeof data==='object' && Array.isArray(data.roles));
           if(validJson){
             nodeCompatible=data.node?.ok===true;
-            configReadable=data.configFile?.readable===true;
+            configReadable=data.configFile?.exists!==true || data.configFile?.readable===true;
             // Doctor returns three roles: search, fetch and social. Only
             // expose availability, not provider credentials or config paths.
             readiness=Object.fromEntries(data.roles
