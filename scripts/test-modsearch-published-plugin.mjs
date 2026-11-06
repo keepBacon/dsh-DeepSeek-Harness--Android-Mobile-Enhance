@@ -62,7 +62,8 @@ try{
   assert.equal(doctor.status,0,doctor.stderr.slice(0,2000))
   const diagnosed=JSON.parse(doctor.stdout)
   assert.equal(diagnosed.node?.ok,true,'published ModSearch doctor must accept the Node runtime')
-  assert.equal(diagnosed.configFile?.readable,true,'missing optional ModSearch config must remain supported')
+  assert.equal(diagnosed.configFile?.exists,false,'fresh published ModSearch installation should use zero-config defaults')
+  assert.equal(diagnosed.configFile?.permissionsOk,true,'zero-config mode must not require permissions repair')
   for(const role of ['search','fetch','social']){
     const item=diagnosed.roles?.find(x=>x.role===role)
     assert.ok(item,'published doctor missing role '+role)
