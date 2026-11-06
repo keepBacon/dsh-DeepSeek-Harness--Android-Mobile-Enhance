@@ -496,8 +496,9 @@ async function call(name,a={}){
     report.version=String(manifest.version||'unknown');
     const plugin=resolve(root,'dsh/index.js');
     const cli=resolve(root,'dist/main.js');
-    report.pluginPresent=await exists(plugin);
-    report.cliPresent=await exists(cli);
+    const isFile=async path=>{try {return (await stat(path)).isFile()}catch{return false}};
+    report.pluginPresent=await isFile(plugin);
+    report.cliPresent=await isFile(cli);
     if(!report.cliPresent||!report.pluginPresent) {
       report.action='Reinstall @liustack/modsearch from npm (GitHub source checkout does not contain dist/main.js)';
       return report;
