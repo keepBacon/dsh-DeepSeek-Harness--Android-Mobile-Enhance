@@ -1090,6 +1090,17 @@ case "${DSH_TERMUX_EXEC_MODE:-direct}" in
     export JAVA_HOME="$REAL_PREFIX/lib/jvm/java-21-openjdk"
     export DSH_TERMUX_INNER=1
     unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT || true
+    # A regular script with an absolute com.termux shebang is an ENOENT dead
+    # link inside the DSH app UID. Invoke known interpreters explicitly.
+    first_bytes="$(/system/bin/head -c 180 "$REAL_PREFIX/bin/$CMD" 2>/dev/null || true)"
+    case "$first_bytes" in
+      "#!$LEGACY_PREFIX/bin/bash"*) exec "$REAL_PREFIX/bin/bash" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/sh"*) exec /system/bin/sh "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/python3"*) exec "$REAL_PREFIX/bin/python3" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/python"*) exec "$REAL_PREFIX/bin/python3" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/perl"*) exec "$REAL_PREFIX/bin/perl" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+      "#!$LEGACY_PREFIX/bin/node"*) exec "$REAL_PREFIX/bin/node" "$REAL_PREFIX/bin/$CMD" "$@" ;;
+    esac
     exec "$REAL_PREFIX/bin/$CMD" "$@"
     ;;
   proot) ;;
