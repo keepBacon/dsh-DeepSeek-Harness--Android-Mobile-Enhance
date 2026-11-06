@@ -88,7 +88,8 @@ async function fetchComplete(url, bodyPath, metaPath) {
     await handle.close(); handle = null
     const meta = {url: response.url, status: response.status, contentType: type, fetchedBytes: received}
     await rename(temp, bodyPath)
-    await (await open(metaPath, 'w', 0o600)).writeFile(JSON.stringify(meta))
+    const metadataHandle = await open(metaPath, 'w', 0o600)
+    try { await metadataHandle.writeFile(JSON.stringify(meta)) } finally { await metadataHandle.close() }
     return meta
   } finally {
     clearTimeout(timer)
