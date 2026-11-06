@@ -48,7 +48,9 @@ try{
   process.env.HOME=home
   process.env.DSH_ANDROID_STANDALONE='1'
   process.env.DSH_ANDROID_MODSEARCH_CWD=cwd
-  process.env.NODE_OPTIONS='--no-warnings'
+  // Reproduce the prior Android failure shape: a child inherits a relative
+  // profile preload and Node cannot open it from its working directory.
+  process.env.NODE_OPTIONS='--require=.dsh/profiles/missing-preload.cjs'
   process.env.DSH_TEST_MARKER='retained'
   const report=repairModsearch(home,true)
   assert.equal(report.results[0].status,'patched',JSON.stringify(report))
@@ -62,7 +64,13 @@ try{
   assert.equal(value.NODE_OPTIONS,null)
   assert.equal(value.HOME,home)
   assert.equal(value.marker,'retained')
+  // With the same broken inherited preload outside Android the original
+  // semantics intentionally fail: this demonstrates the bug being isolated.
   process.env.DSH_ANDROID_STANDALONE='0'
+  const brokenOutside=await instance.exercise()
+  assert.notEqual(brokenOutside.code,0)
+  assert.match(brokenOutside.stderr,/Cannot find module|MODULE_NOT_FOUND/)
+  process.env.NODE_OPTIONS='--no-warnings'
   const outside=await instance.exercise()
   assert.equal(outside.code,0,outside.stderr)
   const ordinary=JSON.parse(outside.stdout)
