@@ -32,6 +32,7 @@ const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeW
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
+ {name:'modsearch_health',description:'Diagnose the original installed @liustack/modsearch read_page/x_search plugin and run its offline doctor --json command. Read-only; does not fetch pages or spend search quota.',inputSchema:{type:'object',properties:{profile:{type:'string',enum:['web','headless'],default:'web'},runDoctor:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'tool_registry_list',description:'List tools exposed by this mobile MCP server (read-only).',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'tool_inspect',description:'Inspect the name, description and input schema of a mobile MCP tool.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
  {name:'plugin_source_read',description:'Read one UTF-8 source file belonging to an installed Web-profile plugin. Read-only and size bounded.',inputSchema:{type:'object',properties:{name:{type:'string'},path:{type:'string'},maxBytes:{type:'integer',minimum:1,maximum:262144,default:65536}},required:['name','path'],additionalProperties:false}},
@@ -472,6 +473,67 @@ async function call(name,a={}){
     return {mode:'diagnostic',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,cliProbes,
       diagnosis,hostLegacyTermuxPresent:legacy,expectedProotTmpDir:paths.prootHostTemp,
       warning:'PROOT_TMP_DIR must resolve to the real app HOME/tmp before entering the guest. A missing com.termux path alone does not imply user data was uninstalled.'};
+  }
+  case 'modsearch_health': {
+    const profile=a.profile==='headless'?'headless':'web';
+    const home=process.env.HOME||process.cwd();
+    const root=resolve(home,'.dsh/profiles',profile,'node_modules/@liustack/modsearch');
+    const report={profile,installed:false,cliPresent:false,pluginPresent:false,
+      npmDependencies:{},doctor:null,action:'none'};
+    let manifest;
+    try {
+      manifest=JSON.parse(await readFile(resolve(root,'package.json'),'utf8'));
+    }catch(e) {
+      report.action='Install the published npm package @liustack/modsearch in DSH plugin settings';
+      report.error='manifest unreadable: '+(e.code||String(e));
+      return report;
+    }
+    if(manifest.name!=='@liustack/modsearch') {
+      report.error='package manifest name mismatch';
+      return report;
+    }
+    report.installed=true;
+    report.version=String(manifest.version||'unknown');
+    const plugin=resolve(root,'dsh/index.js');
+    const cli=resolve(root,'dist/main.js');
+    report.pluginPresent=await exists(plugin);
+    report.cliPresent=await exists(cli);
+    if(!report.cliPresent||!report.pluginPresent) {
+      report.action='Reinstall @liustack/modsearch from npm (GitHub source checkout does not contain dist/main.js)';
+      return report;
+    }
+    // Resolve using precisely the location Node uses for its bare imports.
+    // A plugin can register tools while its external CLI lacks commander/undici.
+    const localRequire=createRequire(cli);
+    for(const dependency of Object.keys(manifest.dependencies||{})){
+      try { localRequire.resolve(dependency); report.npmDependencies[dependency]='ok' }
+      catch { report.npmDependencies[dependency]='missing' }
+    }
+    if(Object.values(report.npmDependencies).includes('missing')) {
+      report.action='Repair the DSH plugin npm installation (missing CLI dependency)';
+      return report;
+    }
+    if(a.runDoctor!==false){
+      const safeEnv={...process.env};
+      delete safeEnv.NODE_OPTIONS;
+      const r=await runProcess(resolve(PREFIX,'bin/node'),[cli,'doctor','--json'],{
+        env:safeEnv,cwd:home,timeoutMs:10000,maxOutputBytes:32768
+      });
+      // Do not return raw doctor output: environment/config diagnostics can
+      // include private paths or provider/account information.
+      let validJson=false;
+      if(r.exitCode===0) {
+        try { JSON.parse(r.stdout); validJson=true } catch {}
+      }
+      report.doctor={ok:r.exitCode===0&&validJson,exitCode:r.exitCode,
+        timedOut:r.timedOut,validJson};
+      if(!report.doctor.ok) {
+        report.doctor.failureKind=r.timedOut?'timeout':
+          r.exitCode===null?'spawn-failed':r.exitCode===0?'invalid-json':'cli-exit-'+r.exitCode;
+        report.action='Inspect app-private modsearch-compat.log and ModSearch CLI environment';
+      }
+    }
+    return report;
   }
   case 'tool_registry_list': return {server:'mobile_tools',tools:tools.map(t=>({name:t.name,description:t.description})),total:tools.length};
   case 'tool_validate': {
