@@ -1011,4 +1011,42 @@ eachPackage('@deepseek-ai/dsh-attachment-local', 'lib/index.js', (file) => {
   return txt.includes('DSH Android compat:') ? 'already' : 'no-op'
 }, { requiredIfPresent: androidStableStorageMandatory })
 
+// Raise two independent upstream web_fetch ceilings. The provider normally
+// drops body text at 100k chars; tool-web then clips the rendered result at
+// 200k chars. Keep explicit deployment overrides intact (modify defaults only).
+// read_page in mobile_tools is the lossless/paged path for larger documents.
+eachPackage('@deepseek-ai/dsh-web-fetch-http', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: larger web fetch provider defaults'
+  if (txt.includes(marker)) return 'already'
+  const edits = [
+    [/maxResponseBytes:\s*z\.number\(\)\.default\(\s*5_?000_?000\s*\)/, 'maxResponseBytes: z.number().default(16777216)'],
+    [/maxBodyChars:\s*z\.number\(\)\.default\(\s*100_?000\s*\)/, 'maxBodyChars: z.number().default(1000000)'],
+  ]
+  let changed = 0
+  for (const [pattern, replacement] of edits) {
+    if (pattern.test(txt)) { txt = txt.replace(pattern, replacement); changed++ }
+  }
+  if (changed === 0) { warn('web-fetch provider defaults have different upstream layout: ' + file); return 'anchor-missing' }
+  txt += '\n// ' + marker + '\n'
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  if (changed !== edits.length) warn('web-fetch provider only partially raised limits: ' + file)
+  return 'patched'
+})
+eachPackage('@deepseek-ai/dsh-tool-web', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: larger web fetch render default'
+  if (txt.includes(marker)) return 'already'
+  const constant = /(?:const|let|var)\s+DEFAULT_FETCH_MAX_OUTPUT_CHARS\s*=\s*200_?000\b/
+  const config = /fetchMaxOutputChars:\s*z\.number\(\)\.default\(\s*200_?000\s*\)/
+  if (constant.test(txt)) txt = txt.replace(constant, 'const DEFAULT_FETCH_MAX_OUTPUT_CHARS = 1000000')
+  else if (config.test(txt)) txt = txt.replace(config, 'fetchMaxOutputChars: z.number().default(1000000)')
+  else { warn('tool-web render limit default layout changed: ' + file); return 'anchor-missing' }
+  txt += '\n// ' + marker + '\n'
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+})
+
 console.log(JSON.stringify({ prefix, targetVersion, patches: report }, null, 2))
