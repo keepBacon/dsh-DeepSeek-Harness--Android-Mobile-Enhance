@@ -58,7 +58,7 @@ function patchPlugin(file) {
       '    delete cleaned.NODE_OPTIONS;',
       '    return cleaned;',
       '  }'
-    ].join('\\n')
+    ].join('\n')
     next=next.replace(oldEnv,compatEnv)
   }
   if(next===before)return 'already-patched'
