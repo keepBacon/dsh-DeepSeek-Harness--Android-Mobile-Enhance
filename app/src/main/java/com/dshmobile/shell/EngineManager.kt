@@ -1669,6 +1669,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
       applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
       applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
+      applyAndroidWebFetchCompat().forEach { Log.i(TAG, "[web_fetch compat] $it") }
       applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
       val safeMode = ShellState.safeModeEnabled(context)
       val safeProfile = if (safeMode) prepareSafeModeProfile() else null
@@ -2712,6 +2713,45 @@ class EngineManager(private val context: Context, private val pickToken: String?
     } catch (t: Throwable) {
       Log.w(TAG, "ModSearch compatibility deferred", t)
       listOf("original ModSearch compatibility deferred")
+    }
+  }
+
+  /**
+   * Repair the Web profile's real npm modules rather than the Termux-only seed.
+   * Only exact published provider defaults are changed. Failure is diagnosed,
+   * never treated as a reason to delete user settings or sessions.
+   */
+  private fun applyAndroidWebFetchCompat(): List<String> {
+    return try {
+      val assetName = "web-fetch-android-compat.mjs"
+      val directory = File(context.filesDir, "plugin-compat").apply { mkdirs() }
+      val helper = File(directory, assetName)
+      val embedded = context.assets.open(assetName).bufferedReader(Charsets.UTF_8).use { it.readText() }
+      if (!helper.isFile || helper.readText() != embedded) writeTextAtomic(helper, embedded)
+      val log = File(context.filesDir, "web-fetch-compat.log")
+      log.writeText("")
+      val env = engineEnv(preloadBin).toMutableMap()
+      val proc = startWithArgsToFile(
+        arrayOf(nodeBin.absolutePath, helper.absolutePath, "--apply", homeDir.absolutePath),
+        env, log,
+      )
+      val finished = proc.waitFor(15, TimeUnit.SECONDS)
+      if (!finished) proc.destroyForcibly()
+      val output = runCatching { log.readText().takeLast(3072) }.getOrDefault("")
+      if (!finished || proc.exitValue() != 0) {
+        Log.w(TAG, "web_fetch compatibility incomplete: $output")
+        listOf("web_fetch profile default patch failed (web-fetch-compat.log)")
+      } else {
+        val data = JSONObject(output.trim())
+        val changed = data.optJSONArray("packages")
+        val success = (0 until (changed?.length() ?: 0))
+          .mapNotNull { i -> changed?.optJSONObject(i) }
+          .count { it.optString("status") in listOf("patched", "already") }
+        listOf("web_fetch module defaults verified: $success")
+      }
+    } catch (t: Throwable) {
+      Log.w(TAG, "web_fetch profile patch deferred", t)
+      listOf("web_fetch profile default patch deferred")
     }
   }
 
