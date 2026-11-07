@@ -455,6 +455,7 @@ async function call(name,a={}){
     if(a.probeExecutables!==false){
       const specs=[
         ['bash',toolWrapped('bash'),['-lc','printf DSH_BASH_CHILD_OK']],
+        ['bashExternal',toolWrapped('bash'),['-lc','git --version && python3 --version && ls -d .']],
         ['python3',toolWrapped('python3'),['--version']],
         ['curl',toolWrapped('curl'),['--version']],
         ['git','git',['--version']],
