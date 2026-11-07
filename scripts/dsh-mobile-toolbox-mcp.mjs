@@ -140,9 +140,10 @@ async function runProcess(command,args=[],opts={}){
   // Model tools may request direct app-private ELF paths instead of wrappers.
   // Use /system/bin/sh as the executable; the bridge invokes linker64 for
   // Android ELF and the correct interpreter for Termux scripts.
-  const bridge=env.DSH_ANDROID_EXEC_BRIDGE
-  const root=env.TERMUX__PREFIX||''
-  const bridgeNeeded=env.DSH_ANDROID_STANDALONE==='1' && bridge &&
+  const root=env.TERMUX__PREFIX||env.PREFIX||''
+  const bridge=env.DSH_ANDROID_EXEC_BRIDGE||
+    (root?resolve(root,'libexec/dsh-mobile/android-exec.sh'):null)
+  const bridgeNeeded=Boolean(bridge && root) &&
     (bin.startsWith(root+'/') || bin.startsWith((env.HOME||'')+'/'))
   const launch=bridgeNeeded?'/system/bin/sh':bin
   const launchArgs=bridgeNeeded?[bridge,bin,...argv]:argv
