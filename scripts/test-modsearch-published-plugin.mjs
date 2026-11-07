@@ -44,6 +44,15 @@ try{
   const registered=new Map()
   plugin.apply({tools:{register(tool){registered.set(tool.name,tool)}},web:{}},{searchProvider:false,settingsCard:false})
   for(const toolName of ['read_page','x_search'])assert.ok(registered.has(toolName),'original tool absent: '+toolName)
+
+  // Plain URL must use upstream guarded local engine without waiting for
+  // cloud quotas. Focused request retains cloud first; on failure it must
+  // retry through local and clearly label that focus synthesis was skipped.
+  const plain=await registered.get('read_page').execute({url:'https://example.com/plain'}, {signal:AbortSignal.timeout(10000)})
+  const plainArgs=JSON.parse(plain.summary).args
+  assert.ok(plainArgs.includes('--engine'))
+  assert.equal(plainArgs[plainArgs.indexOf('--engine')+1],'local')
+  assert.equal(plainArgs[plainArgs.indexOf('--timeout')+1],'18000')
   const read=await registered.get('read_page').execute({url:'https://example.com/docs',query:'scope'}, {signal:AbortSignal.timeout(10000)})
   assert.equal(read.content,'original read_page executed')
   const x=await registered.get('x_search').execute({query:'some topic',max_results:3},{signal:AbortSignal.timeout(10000)})
@@ -56,6 +65,8 @@ try{
   assert.equal(xArgs.nodeOptions,null)
   assert.ok(readArgs.args.includes('-u'))
   assert.ok(readArgs.args.includes('https://example.com/docs'))
+  assert.equal(readArgs.args.includes('--engine'),false,'focused read should retain original cloud route')
+  assert.equal(readArgs.args[readArgs.args.indexOf('--deadline')+1],'32000')
   assert.ok(xArgs.args.includes('--source'))
   assert.ok(xArgs.args.includes('x'))
   const doctor=spawnSync(process.execPath,[join(packageDir,'dist/main.js'),'doctor','--json'],{encoding:'utf8',timeout:15000,env:{...process.env,NODE_OPTIONS:''},cwd:appCwd})
