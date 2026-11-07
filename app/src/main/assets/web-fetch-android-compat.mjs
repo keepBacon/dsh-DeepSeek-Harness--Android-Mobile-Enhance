@@ -75,15 +75,19 @@ function scan(root,home,results){
   }
  }
 }
-export function patchInstalledWebFetch(home){
+export function patchInstalledWebFetch(home,runtimePrefix){
  const canonical=realpathSync(resolve(home)),results=[]
  for(const profile of ['web','headless'])scan(join(canonical,'.dsh/profiles',profile,'node_modules'),canonical,results)
+ if(runtimePrefix){
+  const prefix=realpathSync(resolve(runtimePrefix))
+  scan(join(prefix,'lib/node_modules'),prefix,results)
+ }
  return {packages:results,foundProvider:results.some(x=>x.package==='@deepseek-ai/dsh-web-fetch-http'),
   foundRenderer:results.some(x=>x.package==='@deepseek-ai/dsh-tool-web'),
   errorCount:results.filter(x=>x.status==='error').length}
 }
 if(process.argv[1]&&resolve(process.argv[1])===new URL(import.meta.url).pathname){
  if(process.argv[2]!=='--apply'||!process.argv[3]){console.error('usage: web-fetch-android-compat.mjs --apply <app-private-home>');process.exitCode=2}
- else try{const result=patchInstalledWebFetch(process.argv[3]);console.log(JSON.stringify(result));if(result.errorCount)process.exitCode=1}
+ else try{const result=patchInstalledWebFetch(process.argv[3],process.argv[4]);console.log(JSON.stringify(result));if(result.errorCount)process.exitCode=1}
  catch(e){console.error('web_fetch compatibility: '+String(e.message));process.exitCode=1}
 }
