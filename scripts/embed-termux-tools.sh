@@ -1111,19 +1111,13 @@ case "${DSH_TERMUX_EXEC_MODE:-direct}" in
     export SHELL="$REAL_PREFIX/libexec/dsh/wrappers/bash"
     export JAVA_HOME="$REAL_PREFIX/lib/jvm/java-21-openjdk"
     export DSH_TERMUX_INNER=1
-    unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT || true
-    # A regular script with an absolute com.termux shebang is an ENOENT dead
-    # link inside the DSH app UID. Invoke known interpreters explicitly.
-    first_bytes="$(/system/bin/head -c 180 "$REAL_PREFIX/bin/$CMD" 2>/dev/null || true)"
-    case "$first_bytes" in
-      "#!$LEGACY_PREFIX/bin/bash"*) exec "$REAL_PREFIX/bin/bash" "$REAL_PREFIX/bin/$CMD" "$@" ;;
-      "#!$LEGACY_PREFIX/bin/sh"*) exec /system/bin/sh "$REAL_PREFIX/bin/$CMD" "$@" ;;
-      "#!$LEGACY_PREFIX/bin/python3"*) exec "$REAL_PREFIX/bin/python3" "$REAL_PREFIX/bin/$CMD" "$@" ;;
-      "#!$LEGACY_PREFIX/bin/python"*) exec "$REAL_PREFIX/bin/python3" "$REAL_PREFIX/bin/$CMD" "$@" ;;
-      "#!$LEGACY_PREFIX/bin/perl"*) exec "$REAL_PREFIX/bin/perl" "$REAL_PREFIX/bin/$CMD" "$@" ;;
-      "#!$LEGACY_PREFIX/bin/node"*) exec "$REAL_PREFIX/bin/node" "$REAL_PREFIX/bin/$CMD" "$@" ;;
-    esac
-    exec "$REAL_PREFIX/bin/$CMD" "$@"
+    # Preserve termux-exec's child execve interception. Clearing LD_PRELOAD
+    # disabled linker-based child launches and broke commands invoked by Bash.
+    # The helper itself is interpreted by the trusted system shell, so its
+    # noexec app-data pathname is never the execve() target.
+    export TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force
+    export TERMUX_EXEC__EXECVE_CALL__INTERCEPT=1
+    exec /system/bin/sh "$REAL_PREFIX/libexec/dsh-mobile/android-exec.sh" "$REAL_PREFIX/bin/$CMD" "$@"
     ;;
   proot) ;;
   *)
@@ -1262,9 +1256,9 @@ case "$name" in
   *) command_name="$name" ;;
 esac
 if [ "${DSH_TERMUX_INNER:-0}" = "1" ]; then
-  exec "$prefix/bin/$command_name" "$@"
+  exec /system/bin/sh "$prefix/libexec/dsh-mobile/android-exec.sh" "$prefix/bin/$command_name" "$@"
 fi
-exec "$prefix/libexec/dsh/termux-run" "$command_name" "$@"
+exec /system/bin/sh "$prefix/libexec/dsh/termux-run" "$command_name" "$@"
 EOF_TERMUX_WRAPPER
   chmod 0755 "$stage/usr/libexec/dsh/termux-wrapper"
 
@@ -1291,6 +1285,18 @@ EOF_TERMUX_WRAPPER
   done
   rm -f "$stage/usr/libexec/dsh/wrappers/termux-run"
   ln -s ../termux-run "$stage/usr/libexec/dsh/wrappers/termux-run"
+  # Publish wrappers for the entire packaged CLI inventory, not just the
+  # hand-picked catalog. Child commands resolve PATH to wrappers first and
+  # therefore reach the linker bridge instead of execve(app-data ELF).
+  local cli alias
+  for cli in "$stage/usr/bin/"*; do
+    [ -f "$cli" ] || continue
+    alias="${cli##*/}"
+    case "$alias" in *[!A-Za-z0-9._+-]*|'') continue ;; esac
+    if [ ! -e "$stage/usr/libexec/dsh/wrappers/$alias" ] && [ ! -L "$stage/usr/libexec/dsh/wrappers/$alias" ]; then
+      ln -s ../termux-wrapper "$stage/usr/libexec/dsh/wrappers/$alias"
+    fi
+  done
 
   while IFS= read -r -d '' elf; do
     case "$(file -b "$elf" 2>/dev/null || true)" in *ELF*) copy_link_deps "$elf" "$stage/usr/lib" ;; esac

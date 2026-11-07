@@ -19,7 +19,13 @@ sh -n "$TMP/termux-run"
 
 # In this portable test /system does not exist. Only replace command paths
 # inside the extracted fixture, never in the shipped Android launcher.
-sed -i 's@/system/bin/mkdir@/bin/mkdir@g;s@/system/bin/env@/usr/bin/env@g' "$TMP/termux-run"
+sed -i 's@/system/bin/mkdir@/bin/mkdir@g;s@/system/bin/env@/usr/bin/env@g;s@exec /system/bin/sh@exec /bin/sh@g' "$TMP/termux-run"
+mkdir -p "$PREFIX/libexec/dsh-mobile"
+cp "$ROOT/scripts/dsh-android-exec.sh" "$PREFIX/libexec/dsh-mobile/android-exec.sh"
+# The system linker and Android /system paths are mocked only in this Linux CI
+# fixture; the shipped helper still invokes /system/bin/linker64.
+sed -i 's@exec /system/bin/sh@exec /bin/sh@g' "$PREFIX/libexec/dsh-mobile/android-exec.sh"
+export DSH_ANDROID_HEAD="$(command -v head)"
 cat > "$PREFIX/bin/proot" <<'EOF_MOCK'
 #!/usr/bin/env sh
 : "${DSH_MOCK_PROOT_CAPTURE:?}"

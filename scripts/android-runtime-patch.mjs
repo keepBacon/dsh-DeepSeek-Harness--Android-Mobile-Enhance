@@ -469,7 +469,16 @@ eachPackage('@deepseek-ai/dsh-client-modules', 'lib/index.js', (file) => {
 eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: partial app-UID sandbox runner'
-  if (txt.includes(marker)) return 'already'
+  const oldArgv = 'argv: [runner, policy.mode, policy.workspaceRoot, "--", ...argv]'
+  const bridgedArgv = 'argv: ["/system/bin/sh", runner, policy.mode, policy.workspaceRoot, "--", ...argv]'
+  if (txt.includes(marker)) {
+    if (txt.includes(bridgedArgv)) return 'already'
+    if (!txt.includes(oldArgv)) throw new Error('sandbox-local existing Android runner entry changed: ' + file)
+    txt = txt.replace(oldArgv, bridgedArgv)
+    write(file, txt)
+    checkPatchedJavaScript(file)
+    return 'patched'
+  }
   const anchor = /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
   const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
   if (matches.length !== 1) throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}`)
@@ -481,7 +490,7 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
         throw new Error("DSH Android sandbox runner path is missing");
       }
       return {
-        argv: [runner, policy.mode, policy.workspaceRoot, "--", ...argv],
+        argv: ["/system/bin/sh", runner, policy.mode, policy.workspaceRoot, "--", ...argv],
         enforcement: "partial",
         denialSignatures: ["permission denied", "read-only file system", "operation not permitted"],
         runnerFailureRules: [{
@@ -503,17 +512,49 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
 eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: skip desktop linux-scope'
-  if (txt.includes(marker)) return 'already'
-  const anchor = /selectContainmentMode\s*\(\s*kind\s*\)\s*\{/
-  const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
-  if (matches.length !== 1) throw new Error(`subprocess-local containment anchor changed (${matches.length}): ${file}`)
-  const injection = `${matches[0]}
-    // ${marker}.
-    if (process.env.DSH_ANDROID_STANDALONE === "1") {
-      this.warnFallback?.(kind, "Android app runtime uses the app UID/process-session boundary");
-      return "fallback";
-    }`
-  txt = txt.replace(anchor, injection)
+  const execMarker = 'DSH Android compat: executable spawn via system linker'
+  let changed = false
+  if (!txt.includes(marker)) {
+    const anchor = /selectContainmentMode\s*\(\s*kind\s*\)\s*\{/
+    const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+    if (matches.length !== 1) throw new Error('subprocess-local containment anchor changed: ' + file)
+    txt = txt.replace(anchor, match => match + [
+      '',
+      '    // ' + marker,
+      '    if (process.env.DSH_ANDROID_STANDALONE === "1") {',
+      '      this.warnFallback?.(kind, "Android app runtime uses the app UID/process-session boundary");',
+      '      return "fallback";',
+      '    }',
+    ].join('\n'))
+    changed = true
+  }
+  if (!txt.includes(execMarker)) {
+    // The published index bundle exposes Runtime.spawn(spec), while the
+    // underlying spawn.ts function is folded into a different bundle chunk.
+    // Transform its API request, preserving the entire spec and exact argv.
+    // This covers both ordinary and non-confined Bash/CLI child launches.
+    const anchor = /spawnSubprocess\(\s*spec\s*,\s*this\.internals\s*\)/g
+    const matches = txt.match(anchor) ?? []
+    if (matches.length !== 1) {
+      const sample = [...txt.matchAll(/[^\n]{0,90}spawnSubprocess[^\n]{0,170}/g)]
+        .slice(0, 6).map(m => m[0])
+      throw new Error('subprocess-local Runtime.spawn anchor changed (' +
+        matches.length + '): ' + file + ' candidates=' + JSON.stringify(sample))
+    }
+    txt = txt.replace(anchor, [
+      'spawnSubprocess((() => {',
+      '  // ' + execMarker,
+      '  if (process.env.DSH_ANDROID_STANDALONE !== "1") return spec;',
+      '  const prefix = process.env.TERMUX__PREFIX || process.env.PREFIX || "";',
+      '  if (!prefix || !Array.isArray(spec.argv) || spec.argv.length === 0) return spec;',
+      '  const program = String(spec.argv[0]);',
+      '  if (program.startsWith("/system/") || program.startsWith("/apex/")) return spec;',
+      '  return { ...spec, argv: ["/system/bin/sh", prefix + "/libexec/dsh-mobile/android-exec.sh", ...spec.argv] };',
+      '})(), this.internals)',
+    ].join('\n'))
+    changed = true
+  }
+  if (!changed) return 'already'
   write(file, txt)
   checkPatchedJavaScript(file)
   return 'patched'
@@ -525,12 +566,36 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
 eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: embedded Bash default'
-  if (txt.includes(marker)) return 'already'
-  const anchor = /((?:const|let|var)\s+DEFAULT_BASH_SHELL\s*=\s*)["']\/bin\/bash["']/
-  const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
-  if (matches.length !== 1) throw new Error(`terminal-bash DEFAULT_BASH_SHELL anchor changed (${matches.length}): ${file}`)
-  txt = txt.replace(anchor, (_m, prefix) =>
-    `${prefix}process.env.DSH_ANDROID_STANDALONE === "1" ? (process.env.DSH_SIDEBAR_SHELL || process.env.SHELL || "/bin/bash") : "/bin/bash" /* ${marker} */`)
+  const bridgeMarker = 'DSH Android compat: Bash PTY via system sh and linker bridge'
+  let changed = false
+  if (!txt.includes(marker)) {
+    const anchor = /((?:const|let|var)\s+DEFAULT_BASH_SHELL\s*=\s*)["']\/bin\/bash["']/
+    const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+    if (matches.length !== 1) throw new Error('terminal-bash DEFAULT_BASH_SHELL anchor changed: ' + file)
+    txt = txt.replace(anchor, (_m, prefix) =>
+      prefix + 'process.env.DSH_ANDROID_STANDALONE === "1" ? (process.env.DSH_SIDEBAR_SHELL || process.env.SHELL || "/bin/bash") : "/bin/bash" /* ' + marker + ' */')
+    changed = true
+  }
+  if (!txt.includes(bridgeMarker)) {
+    // node-pty uses execve(argv[0]). An app-private wrapper script is subject
+    // to SELinux/noexec even when its shebang points to a system executable.
+    // Launch /system/bin/sh with the Termux runner as an argument instead.
+    const anchor = /(?:const|let|var)\s+argv\s*=\s*\[\s*config\.shellPath\s*,\s*\.\.\.config\.shellArgs\s*\]\s*;?/
+    const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+    if (matches.length !== 1) throw new Error('terminal-bash spawnArgv anchor changed: ' + file)
+    txt = txt.replace(anchor, match => match + '\n    // ' + bridgeMarker + '\n' + [
+      "    if (process.env.DSH_ANDROID_STANDALONE === \"1\" && config.shellDialect === \"bash\") {",
+      "      const runner = process.env.DSH_ANDROID_TERMUX_RUN;",
+      "      const prefix = process.env.TERMUX__PREFIX || \"\";",
+      "      if (runner && (config.shellPath === \"/bin/bash\" ||",
+      "          (prefix && String(config.shellPath).startsWith(prefix + \"/\")))) {",
+      "        argv.splice(0, 1, \"/system/bin/sh\", runner, \"bash\");",
+      "      }",
+      "    }"
+    ].join('\n'))
+    changed = true
+  }
+  if (!changed) return 'already'
   write(file, txt)
   checkPatchedJavaScript(file)
   return 'patched'

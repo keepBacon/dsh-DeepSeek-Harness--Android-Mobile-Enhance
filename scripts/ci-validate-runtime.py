@@ -8,6 +8,7 @@ REQUIRED = (
  'usr/lib/node_modules/@deepseek-ai/dsh/package.json',
  'usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
  'usr/libexec/dsh-mobile/android-sandbox-runner.sh',
+ 'usr/libexec/dsh-mobile/android-exec.sh',
  'usr/libexec/dsh-mobile/toolbox-mcp.mjs',
  'usr/libexec/dsh-mobile/dsh-web-page-reader.mjs',
  'usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js',

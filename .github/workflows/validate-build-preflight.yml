@@ -45,6 +45,14 @@ jobs:
           node "$cli" doctor --json > "$tmp/doctor.json"
           node -e 'const d=require(process.argv[1]);if(!d.node?.ok||!Array.isArray(d.roles))process.exit(3)' "$tmp/doctor.json"
 
+      - name: Android system linker execution and complete Termux wrapper routing
+        run: |
+          bash -n scripts/embed-termux-tools.sh
+          bash -n scripts/dsh-android-exec.sh
+          bash scripts/test-android-linker-bridge.sh
+          bash scripts/test-android-sandbox-linker-routing.sh
+          bash scripts/validate-termux-wrapper-routing.sh
+
       - name: Shell syntax
         shell: bash
         run: |
@@ -681,6 +689,15 @@ jobs:
             node --check "$source"
           done
           DSH_TARGET_VERSION=0.1.5-rc.2 node scripts/android-runtime-patch.mjs "$prefix" > /dev/null
+          # PTY Bash must be executable via the Android system shell, not an
+          # app-data wrapper path that SELinux rejects before the shebang runs.
+          terminal="$modules/@deepseek-ai/dsh-terminal-bash/lib/index.js"
+          grep -Fq 'DSH Android compat: Bash PTY via system sh and linker bridge' "$terminal"
+          node --check "$terminal"
+          subprocess="$modules/@deepseek-ai/dsh-subprocess-local/lib/index.js"
+          grep -Fq 'DSH Android compat: executable spawn via system linker' "$subprocess"
+          grep -Fq 'argv: ["/system/bin/sh", runner' "$modules/@deepseek-ai/dsh-sandbox-local/lib/index.js"
+          node --check "$subprocess"
 
           while IFS= read -r file; do
             node --check "$file"

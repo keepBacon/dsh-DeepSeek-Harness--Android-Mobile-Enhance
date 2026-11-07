@@ -137,7 +137,17 @@ async function runProcess(command,args=[],opts={}){
  return await new Promise((resolvePromise)=>{
   const started=Date.now()
   let child
-  try{child=spawn(bin,argv,{cwd,env,shell:false,stdio:['ignore','pipe','pipe']})}catch(error){resolvePromise({exitCode:null,signal:null,stdout:'',stderr:String(error),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
+  // Model tools may request direct app-private ELF paths instead of wrappers.
+  // Use /system/bin/sh as the executable; the bridge invokes linker64 for
+  // Android ELF and the correct interpreter for Termux scripts.
+  const root=env.TERMUX__PREFIX||env.PREFIX||''
+  const bridge=env.DSH_ANDROID_EXEC_BRIDGE||
+    (root?resolve(root,'libexec/dsh-mobile/android-exec.sh'):null)
+  const bridgeNeeded=Boolean(bridge && root) &&
+    (bin.startsWith(root+'/') || bin.startsWith((env.HOME||'')+'/'))
+  const launch=bridgeNeeded?'/system/bin/sh':bin
+  const launchArgs=bridgeNeeded?[bridge,bin,...argv]:argv
+  try{child=spawn(launch,launchArgs,{cwd,env,shell:false,stdio:['ignore','pipe','pipe']})}catch(error){resolvePromise({exitCode:null,signal:null,stdout:'',stderr:String(error),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
   let stdout=Buffer.alloc(0),stderr=Buffer.alloc(0),truncated=false,timedOut=false,spawnError=null
   const capture=(current,chunk)=>{const b=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);if(current.length>=maxOutput){truncated=true;return current}const room=maxOutput-current.length;if(b.length>room)truncated=true;return Buffer.concat([current,b.subarray(0,room)])}
   child.stdout?.on('data',chunk=>{stdout=capture(stdout,chunk)})
@@ -445,6 +455,7 @@ async function call(name,a={}){
     if(a.probeExecutables!==false){
       const specs=[
         ['bash',toolWrapped('bash'),['-lc','printf DSH_BASH_CHILD_OK']],
+        ['bashExternal',toolWrapped('bash'),['-lc','git --version && python3 --version && ls -d .']],
         ['python3',toolWrapped('python3'),['--version']],
         ['curl',toolWrapped('curl'),['--version']],
         ['git','git',['--version']],
