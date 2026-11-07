@@ -2732,7 +2732,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       log.writeText("")
       val env = engineEnv(preloadBin).toMutableMap()
       val proc = startWithArgsToFile(
-        arrayOf(nodeBin.absolutePath, helper.absolutePath, "--apply", homeDir.absolutePath),
+        arrayOf(nodeBin.absolutePath, helper.absolutePath, "--apply", homeDir.absolutePath, usrDir.absolutePath),
         env, log,
       )
       val finished = proc.waitFor(15, TimeUnit.SECONDS)
