@@ -11,6 +11,38 @@ import {createRequire} from 'node:module'
 
 const MARKER='DSH Android modsearch: stable app-private CLI cwd'
 const ENV_MARKER='DSH Android modsearch: clean inherited NODE_OPTIONS for CLI'
+
+const READ_MARKER='DSH Android modsearch: bounded original read_page local fallback'
+// Inserted only into the ORIGINAL plugin. Do not bypass its URL/private-network
+// restrictions: the local provider keeps the upstream SSRF checks and redirects.
+const READ_HELPER = [
+  '// '+READ_MARKER,
+  'async function androidReadPageCli(cliArgs, signal) {',
+  '  if (process.env.DSH_ANDROID_STANDALONE !== "1") return runCli(cliArgs, signal);',
+  '  const urlIndex = cliArgs.indexOf("-u");',
+  '  const queryIndex = cliArgs.indexOf("-q");',
+  '  const hasFocus = queryIndex >= 0 && String(cliArgs[queryIndex + 1] || "").trim() !== "";',
+  '  // Local-first for plain pages. Focused reads keep the cloud extraction first.',
+  '  const localArgs = [...cliArgs.filter((_, i, all) => !["--timeout","--deadline"].includes(all[i-1]) && !["--timeout","--deadline"].includes(all[i]))];',
+  '  localArgs.push("--engine", "local", "--timeout", "18000", "--deadline", "22000");',
+  '  if (!hasFocus) return runCli(localArgs, signal);',
+  '  const remoteArgs = [...cliArgs.filter((_, i, all) => !["--timeout","--deadline"].includes(all[i-1]) && !["--timeout","--deadline"].includes(all[i]))];',
+  '  remoteArgs.push("--timeout", "14000", "--deadline", "32000");',
+  '  try { return await runCli(remoteArgs, signal); }',
+  '  catch (primaryError) {',
+  '    if (signal?.aborted) throw primaryError;',
+  '    try {',
+  '      const value = await runCli(localArgs, signal);',
+  '      value.warnings = [...(Array.isArray(value.warnings) ? value.warnings : []),',
+  '        "Android read_page: remote focused extraction unavailable; local HTML text returned without query-specific synthesis."];',
+  '      return value;',
+  '    } catch (localError) {',
+  '      throw new Error("read_page remote and local engines failed. Remote: " + String(primaryError?.message || primaryError).slice(0, 350) + "; Local: " + String(localError?.message || localError).slice(0, 350));',
+  '    }',
+  '  }',
+  '}',
+].join('\n') + '\n\n'
+
 const OLD='      signal,\n      env,\n    });'
 const NEW='      signal,\n      env,\n      // '+MARKER+'\n      ...(process.env.DSH_ANDROID_STANDALONE === "1" ? { cwd: process.env.DSH_ANDROID_MODSEARCH_CWD || process.env.HOME || process.cwd() } : {}),\n    });'
 function scoped(root, path) {
@@ -69,6 +101,18 @@ function patchPlugin(file) {
       '  }'
     ].join('\n')
     next=next.replace(oldEnv,compatEnv)
+  }
+  if(!next.includes(READ_MARKER)){
+    const start=next.indexOf('function registerReadPageTool(ctx) {')
+    const end=next.indexOf('/** The CLI budget flags',start)
+    if(start<0||end<0)return 'unexpected-read-page-tool-layout'
+    const section=next.slice(start,end)
+    const entry='const entry = await runCli(cliArgs, exec.signal);'
+    if(section.split(entry).length!==2)return 'unexpected-read-page-call-layout'
+    next=next.slice(0,start)+section.replace(entry,'const entry = await androidReadPageCli(cliArgs, exec.signal);')+next.slice(end)
+    const helperAnchor='function childEnv() {'
+    if(next.split(helperAnchor).length!==2)return 'unexpected-child-env-layout'
+    next=next.replace(helperAnchor,READ_HELPER+helperAnchor)
   }
   if(next===before)return 'already-patched'
   const backup=file+'.dsh-pre-android-cwd.bak'
