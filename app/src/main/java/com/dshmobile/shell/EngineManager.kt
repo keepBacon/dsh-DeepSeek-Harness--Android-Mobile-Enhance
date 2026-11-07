@@ -2667,6 +2667,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       log.writeText("")
       val env = engineEnv(preloadBin).toMutableMap()
       env["DSH_ANDROID_MODSEARCH_CWD"] = homeDir.absolutePath
+      env["DSH_ANDROID_MODSEARCH_RECOVERY"] = File(usrDir, "share/dsh-modsearch-recovery/node_modules").absolutePath
       val proc = startWithArgsToFile(
         arrayOf(nodeBin.absolutePath, helper.absolutePath, "--repair-home", homeDir.absolutePath),
         env, log,
