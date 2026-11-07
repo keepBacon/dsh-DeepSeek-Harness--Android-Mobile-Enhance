@@ -3,7 +3,8 @@
 // Exercises the real DSH plugin's original read_page and x_search execute()
 // methods with a deterministic local CLI stub (no network/API keys).
 import assert from 'node:assert/strict'
-import {spawnSync} from 'node:child_process'
+import {spawnSync,spawn} from 'node:child_process'
+import {createServer} from 'node:http'
 import {cp, mkdtemp, mkdir, readFile, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join, resolve} from 'node:path'
@@ -36,6 +37,8 @@ try{
   await writeFile(cli,[
     'const a=process.argv.slice(2)',
     'const isRead=a.includes("-u")',
+    'if(isRead && a.includes("https://example.com/fallback") && !a.includes("--engine")){console.error("remote engine unavailable");process.exit(2)}',
+    'if(isRead && a.includes("https://example.com/relay") && a.includes("--engine")){console.error("local engine unavailable");process.exit(2)}',
     'const entry={status:"ok",source:isRead?"web":"x",summary:JSON.stringify({cwd:process.cwd(),nodeOptions:process.env.NODE_OPTIONS??null,args:a}),content:isRead?"original read_page executed":undefined,items:[{title:"Original X post",url:"https://example.com/post/1",snippet:"sample"}],links:[],uncertainty:[],warnings:[]}',
     'console.log(JSON.stringify({results:[entry]}))'
   ].join('\n'))
@@ -44,6 +47,20 @@ try{
   const registered=new Map()
   plugin.apply({tools:{register(tool){registered.set(tool.name,tool)}},web:{}},{searchProvider:false,settingsCard:false})
   for(const toolName of ['read_page','x_search'])assert.ok(registered.has(toolName),'original tool absent: '+toolName)
+
+  // Plain URL must use upstream guarded local engine without waiting for
+  // cloud quotas. Focused request retains cloud first; on failure it must
+  // retry through local and clearly label that focus synthesis was skipped.
+  const plain=await registered.get('read_page').execute({url:'https://example.com/plain'}, {signal:AbortSignal.timeout(10000)})
+  const plainArgs=JSON.parse(plain.summary).args
+  assert.ok(plainArgs.includes('--engine'))
+  assert.equal(plainArgs[plainArgs.indexOf('--engine')+1],'local')
+  assert.equal(plainArgs[plainArgs.indexOf('--timeout')+1],'18000')
+  const cloud=await registered.get('read_page').execute({url:'https://example.com/relay'}, {signal:AbortSignal.timeout(10000)})
+  const cloudArgs=JSON.parse(cloud.summary).args
+  assert.equal(cloudArgs.includes('--engine'),false,'plain URL must have bounded cloud fallback if local fails')
+  assert.equal(cloudArgs[cloudArgs.indexOf('--deadline')+1],'32000')
+
   const read=await registered.get('read_page').execute({url:'https://example.com/docs',query:'scope'}, {signal:AbortSignal.timeout(10000)})
   assert.equal(read.content,'original read_page executed')
   const x=await registered.get('x_search').execute({query:'some topic',max_results:3},{signal:AbortSignal.timeout(10000)})
@@ -56,6 +73,13 @@ try{
   assert.equal(xArgs.nodeOptions,null)
   assert.ok(readArgs.args.includes('-u'))
   assert.ok(readArgs.args.includes('https://example.com/docs'))
+  assert.equal(readArgs.args.includes('--engine'),false,'focused read should retain original cloud route')
+  assert.equal(readArgs.args[readArgs.args.indexOf('--deadline')+1],'32000')
+  const fallback=await registered.get('read_page').execute({url:'https://example.com/fallback',query:'focus'}, {signal:AbortSignal.timeout(10000)})
+  const fallbackArgs=JSON.parse(fallback.summary).args
+  assert.equal(fallbackArgs[fallbackArgs.indexOf('--engine')+1],'local')
+  assert.ok(fallback.warnings.some(x=>x.includes('without query-specific synthesis')))
+
   assert.ok(xArgs.args.includes('--source'))
   assert.ok(xArgs.args.includes('x'))
   const doctor=spawnSync(process.execPath,[join(packageDir,'dist/main.js'),'doctor','--json'],{encoding:'utf8',timeout:15000,env:{...process.env,NODE_OPTIONS:''},cwd:appCwd})
@@ -69,6 +93,34 @@ try{
     assert.ok(item,'published doctor missing role '+role)
     assert.ok(Array.isArray(item.candidates),'role must have structured candidates')
   }
+  // Exercise the REAL built-in ModSearch local HTTP engine, not the CLI mock.
+  // --allow-private-network is deliberately restricted to this loopback test;
+  // production read_page does NOT pass this flag and retains upstream SSRF guards.
+  const server=createServer((req,res)=>{
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8'})
+    res.end('<html><head><title>DSH Test Page</title></head><body><h1>Real Local Fetch</h1><p>Deterministic page content token q7z2</p></body></html>')
+  })
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+  try{
+    const url='http://127.0.0.1:'+server.address().port+'/'
+    const real=spawn(process.execPath,[join(packageDir,'dist/main.js'),'-u',url,'--engine','local','--allow-private-network','--timeout','10000','--deadline','15000'],{
+      env:{...process.env,NODE_OPTIONS:''},cwd:appCwd,stdio:['ignore','pipe','pipe']
+    })
+    let stdout='',stderr=''
+    real.stdout.on('data',v=>stdout+=v)
+    real.stderr.on('data',v=>stderr+=v)
+    const exit=await Promise.race([
+      new Promise((resolve,reject)=>{real.once('error',reject);real.once('close',code=>resolve(code))}),
+      new Promise((_,reject)=>setTimeout(()=>{real.kill('SIGKILL');reject(new Error('real ModSearch local fetch timed out'))},15000))
+    ])
+    assert.equal(exit,0,stderr.slice(0,1200))
+    const data=JSON.parse(stdout)
+    assert.equal(data.results?.[0]?.status,'ok')
+    assert.match(JSON.stringify(data.results?.[0]),/Deterministic page content token q7z2/)
+  }finally{
+    await new Promise(resolve=>server.close(resolve))
+  }
+
   console.log('[OK] published @liustack/modsearch '+pkg.version+': read_page, x_search, CLI doctor and original DSH plugin')
 }finally{
  for(const name of envNames){if(previous[name]===undefined)delete process.env[name];else process.env[name]=previous[name]}

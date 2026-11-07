@@ -24,7 +24,15 @@ try{
     "      env,",
     "    });",
     "  return child;",
-    "}"
+    "}",
+    "function registerReadPageTool(ctx) {",
+    "  async function execute(args, exec) {",
+    "    const cliArgs = ['-u', args.url, ...ownToolBudget()];",
+    "    const entry = await runCli(cliArgs, exec.signal);",
+    "    return entry;",
+    "  }",
+    "}",
+    "/** The CLI budget flags for the plugin's own tools. */"
   ].join('\n')
   await writeFile(plugin,body)
   const before=repairModsearch(home,false)
