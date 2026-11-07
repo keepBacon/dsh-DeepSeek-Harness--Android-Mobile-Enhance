@@ -525,12 +525,35 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
 eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: embedded Bash default'
-  if (txt.includes(marker)) return 'already'
-  const anchor = /((?:const|let|var)\s+DEFAULT_BASH_SHELL\s*=\s*)["']\/bin\/bash["']/
-  const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
-  if (matches.length !== 1) throw new Error(`terminal-bash DEFAULT_BASH_SHELL anchor changed (${matches.length}): ${file}`)
-  txt = txt.replace(anchor, (_m, prefix) =>
-    `${prefix}process.env.DSH_ANDROID_STANDALONE === "1" ? (process.env.DSH_SIDEBAR_SHELL || process.env.SHELL || "/bin/bash") : "/bin/bash" /* ${marker} */`)
+  const bridgeMarker = 'DSH Android compat: Bash PTY via system sh and linker bridge'
+  let changed = false
+  if (!txt.includes(marker)) {
+    const anchor = /((?:const|let|var)\s+DEFAULT_BASH_SHELL\s*=\s*)["']\/bin\/bash["']/
+    const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+    if (matches.length !== 1) throw new Error('terminal-bash DEFAULT_BASH_SHELL anchor changed: ' + file)
+    txt = txt.replace(anchor, (_m, prefix) =>
+      prefix + 'process.env.DSH_ANDROID_STANDALONE === "1" ? (process.env.DSH_SIDEBAR_SHELL || process.env.SHELL || "/bin/bash") : "/bin/bash" /* ' + marker + ' */')
+    changed = true
+  }
+  if (!txt.includes(bridgeMarker)) {
+    // node-pty uses execve(argv[0]). An app-private wrapper script is subject
+    // to SELinux/noexec even when its shebang points to a system executable.
+    // Launch /system/bin/sh with the Termux runner as an argument instead.
+    const anchor = /(?:const|let|var)\s+argv\s*=\s*\[\s*config\.shellPath\s*,\s*\.\.\.config\.shellArgs\s*\]\s*;?/
+    const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+    if (matches.length !== 1) throw new Error('terminal-bash spawnArgv anchor changed: ' + file)
+    txt = txt.replace(anchor, match => match + '\n    // ' + bridgeMarker + String.raw'
+    if (process.env.DSH_ANDROID_STANDALONE === "1" && config.shellDialect === "bash") {
+      const runner = process.env.DSH_ANDROID_TERMUX_RUN;
+      const prefix = process.env.TERMUX__PREFIX || "";
+      if (runner && (config.shellPath === "/bin/bash" ||
+          (prefix && String(config.shellPath).startsWith(prefix + "/")))) {
+        argv.splice(0, 1, "/system/bin/sh", runner, "bash");
+      }
+    }')
+    changed = true
+  }
+  if (!changed) return 'already'
   write(file, txt)
   checkPatchedJavaScript(file)
   return 'patched'
