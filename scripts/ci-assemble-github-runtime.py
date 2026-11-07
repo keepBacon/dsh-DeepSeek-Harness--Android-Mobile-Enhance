@@ -20,6 +20,7 @@ import sys
 import tarfile
 import tempfile
 from ci_fix_web_fetch_limits import patch as patch_web_fetch_limits
+from ci_modsearch_recovery import stage_modsearch
 from urllib.request import Request, urlopen
 
 REPOS = {
@@ -347,6 +348,7 @@ def main():
         manifest = fetch_packages(stage, workspace)
         overlay_sources(stage, args.repo)
         patch_web_fetch_limits(stage)
+        stage_modsearch(stage, workspace)
         install_typescript(stage, workspace)
         install_luau_analysis_runtime(stage, workspace)
         args.output.parent.mkdir(parents=True, exist_ok=True)
