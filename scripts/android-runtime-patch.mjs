@@ -542,15 +542,16 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
     const anchor = /(?:const|let|var)\s+argv\s*=\s*\[\s*config\.shellPath\s*,\s*\.\.\.config\.shellArgs\s*\]\s*;?/
     const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
     if (matches.length !== 1) throw new Error('terminal-bash spawnArgv anchor changed: ' + file)
-    txt = txt.replace(anchor, match => match + '\n    // ' + bridgeMarker + String.raw'
-    if (process.env.DSH_ANDROID_STANDALONE === "1" && config.shellDialect === "bash") {
-      const runner = process.env.DSH_ANDROID_TERMUX_RUN;
-      const prefix = process.env.TERMUX__PREFIX || "";
-      if (runner && (config.shellPath === "/bin/bash" ||
-          (prefix && String(config.shellPath).startsWith(prefix + "/")))) {
-        argv.splice(0, 1, "/system/bin/sh", runner, "bash");
-      }
-    }')
+    txt = txt.replace(anchor, match => match + '\n    // ' + bridgeMarker + '\n' + [
+      "    if (process.env.DSH_ANDROID_STANDALONE === \"1\" && config.shellDialect === \"bash\") {",
+      "      const runner = process.env.DSH_ANDROID_TERMUX_RUN;",
+      "      const prefix = process.env.TERMUX__PREFIX || \"\";",
+      "      if (runner && (config.shellPath === \"/bin/bash\" ||",
+      "          (prefix && String(config.shellPath).startsWith(prefix + \"/\")))) {",
+      "        argv.splice(0, 1, \"/system/bin/sh\", runner, \"bash\");",
+      "      }",
+      "    }"
+    ].join('\n'))
     changed = true
   }
   if (!changed) return 'already'
