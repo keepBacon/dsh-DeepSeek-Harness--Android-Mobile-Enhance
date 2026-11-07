@@ -6,6 +6,7 @@ on:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
       - 'scripts/dsh-mobile-toolbox-mcp.mjs'
+      - 'scripts/dsh-web-page-reader.mjs'
       - 'scripts/dsh-basic-toolbox-mcp.mjs'
       - 'scripts/dsh-code-engine*.mjs'
       - 'scripts/dsh-lua*.mjs'
@@ -52,6 +53,8 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: Verify packaged MCP ESM import closure
+        run: python3 scripts/validate-ci-mobile-esm-closure.py
       - name: Build Android ARM64 runtime on GitHub runner (no Termux)
         shell: bash
         env:
@@ -120,7 +123,7 @@ jobs:
           set -euo pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
-          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=40
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=41
       - name: Explicitly sign APK with verified original key
         shell: bash
         run: |
@@ -141,7 +144,7 @@ jobs:
             --snapshot app/src/main/assets/snapshot.tar.xz \
             --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-            --version-code 40
+            --version-code 41
       - name: Create and verify direct APK / distribution ZIP
         shell: bash
         run: |
