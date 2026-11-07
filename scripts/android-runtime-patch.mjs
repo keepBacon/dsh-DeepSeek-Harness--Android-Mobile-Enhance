@@ -534,7 +534,12 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
     // Android, including the danger-full-access mode that skips confine().
     const anchor = /(?:const|let)\s+\[\s*program\s*,\s*\.\.\.args\s*\]\s*=\s*spec\.argv\s*;?/
     const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
-    if (matches.length !== 1) throw new Error('subprocess-local spawnSubprocess anchor changed: ' + file)
+    if (matches.length !== 1) {
+      const sample = [...txt.matchAll(/[^\n]{0,110}spec\.argv[^\n]{0,160}/g)]
+        .slice(0, 6).map(m => m[0])
+      throw new Error('subprocess-local spawnSubprocess anchor changed (' + matches.length +
+        '): ' + file + ' candidates=' + JSON.stringify(sample))
+    }
     txt = txt.replace(anchor, match => [
       match.replace(/^(?:const|let)/, 'let'),
       '  // ' + execMarker,
