@@ -688,6 +688,11 @@ jobs:
             node --check "$source"
           done
           DSH_TARGET_VERSION=0.1.5-rc.2 node scripts/android-runtime-patch.mjs "$prefix" > /dev/null
+          # PTY Bash must be executable via the Android system shell, not an
+          # app-data wrapper path that SELinux rejects before the shebang runs.
+          terminal="$modules/@deepseek-ai/dsh-terminal-bash/lib/index.js"
+          grep -Fq 'DSH Android compat: Bash PTY via system sh and linker bridge' "$terminal"
+          node --check "$terminal"
 
           while IFS= read -r file; do
             node --check "$file"
