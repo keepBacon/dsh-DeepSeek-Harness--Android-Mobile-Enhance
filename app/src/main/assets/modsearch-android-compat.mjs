@@ -4,7 +4,7 @@
 // change is where the ORIGINAL plugin's CLI child starts: the app-private HOME
 // instead of an incidental DSH profile / workspace cwd.
 // Source anchor: liustack/modsearch@5.10.11 dsh/index.js, function run().
-import {existsSync, lstatSync, readFileSync, realpathSync, statSync, copyFileSync, chmodSync, writeFileSync, renameSync, unlinkSync, mkdirSync} from 'node:fs'
+import {existsSync, lstatSync, readFileSync, realpathSync, statSync, copyFileSync, chmodSync, writeFileSync, renameSync, unlinkSync, mkdirSync, cpSync} from 'node:fs'
 import {resolve, join, relative, dirname} from 'node:path'
 import {randomBytes} from 'node:crypto'
 import {createRequire} from 'node:module'
@@ -63,6 +63,63 @@ function verifyManifest(dir){
   const manifest=JSON.parse(readFileSync(join(dir,'package.json'),'utf8'))
   return manifest.name==='@liustack/modsearch'
 }
+// Restore *only absent* published executable assets for a package that was
+// installed from its source repository. Never replace manifests, user config,
+// patch files, or already installed executables. The recovery bundle is staged
+// from pinned npm releases in the APK by GitHub Actions (not downloaded at boot).
+function recoverOriginalPublishedCli(home, name) {
+  const recovery = process.env.DSH_ANDROID_MODSEARCH_RECOVERY
+  if (process.env.DSH_ANDROID_STANDALONE !== '1' || !recovery) return {restored:[]}
+  const location = resolve(home, '.dsh', 'profiles', name, 'node_modules', '@liustack', 'modsearch')
+  if (!existsSync(location)) return {restored:[]}
+  const installed = realpathSync(location)
+  if (!scoped(home, installed)) return {restored:[], warning:'plugin-outside-app-home'}
+  const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'))
+  if (manifest.name !== '@liustack/modsearch' || manifest.version !== '5.10.11') {
+    return {restored:[], warning:'unsupported-published-version'}
+  }
+  const source = resolve(recovery)
+  const published = join(source, '@liustack', 'modsearch')
+  const publishedManifest = JSON.parse(readFileSync(join(published,'package.json'),'utf8'))
+  if (publishedManifest.name !== manifest.name || publishedManifest.version !== manifest.version) {
+    throw new Error('ModSearch recovery resource identity mismatch')
+  }
+  const restored = []
+  const destinationDist = join(installed, 'dist')
+  if (!existsSync(join(destinationDist, 'main.js'))) {
+    // Existing non-directory nodes and symlinked destination paths must not
+    // be followed. The original profile remains authoritative.
+    if (existsSync(destinationDist) && (!lstatSync(destinationDist).isDirectory() || lstatSync(destinationDist).isSymbolicLink())) {
+      throw new Error('ModSearch dist path is not a regular directory')
+    }
+    cpSync(join(published,'dist'), destinationDist, {
+      recursive:true, force:false, errorOnExist:false, dereference:false
+    })
+    if (!existsSync(join(destinationDist,'main.js'))) throw new Error('ModSearch CLI recovery incomplete')
+    restored.push('dist/main.js')
+  }
+  const originalRequire = createRequire(join(installed, 'dist', 'main.js'))
+  for (const [dependency, expected] of [['commander','13.1.0'],['undici','7.29.0']]) {
+    try { originalRequire.resolve(dependency); continue } catch {}
+    const publishedDependency = join(source, dependency)
+    const meta = JSON.parse(readFileSync(join(publishedDependency,'package.json'),'utf8'))
+    if (meta.name !== dependency || meta.version !== expected) {
+      throw new Error('ModSearch recovery dependency mismatch: '+dependency)
+    }
+    const target = join(installed, 'node_modules', dependency)
+    if (existsSync(target) || lstatExists(target)) {
+      // A damaged existing dependency is not safe to overwrite silently.
+      throw new Error('Existing ModSearch dependency cannot be resolved: '+dependency)
+    }
+    mkdirSync(dirname(target), {recursive:true})
+    cpSync(publishedDependency, target, {recursive:true,force:false,errorOnExist:true,dereference:false})
+    originalRequire.resolve(dependency)
+    restored.push('node_modules/'+dependency)
+  }
+  return {restored}
+}
+function lstatExists(file) { try { lstatSync(file); return true } catch { return false } }
+
 function inspectProfile(home, name){
   const profile=resolve(home,'.dsh','profiles',name)
   const pkg=join(profile,'node_modules','@liustack','modsearch')
@@ -141,9 +198,10 @@ export function repairModsearch(home, write=false){
   const results=[]
   for(const name of ['web','headless']){
     try{
+      const recovery=write?recoverOriginalPublishedCli(canonical,name):{restored:[]}
       const item=inspectProfile(canonical,name)
-      if(item.status!=='ready'){results.push(item);continue}
-      results.push({profile:name,status:write?patchPlugin(item.plugin):'ready',cliPresent:true})
+      if(item.status!=='ready'){results.push({...item,...recovery});continue}
+      results.push({profile:name,status:write?patchPlugin(item.plugin):'ready',cliPresent:true,...recovery})
     }catch(error){
       results.push({profile:name,status:'error',error:String(error?.code||error?.message||error).slice(0,240)})
     }

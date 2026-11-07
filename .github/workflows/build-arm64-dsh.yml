@@ -5,6 +5,8 @@ on:
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
+      - 'scripts/ci_fix_web_fetch_limits.py'
+      - 'scripts/ci_modsearch_recovery.py'
       - 'scripts/dsh-mobile-toolbox-mcp.mjs'
       - 'scripts/dsh-web-page-reader.mjs'
       - 'scripts/dsh-basic-toolbox-mcp.mjs'
@@ -123,7 +125,7 @@ jobs:
           set -euo pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
-          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=42
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=43
       - name: Explicitly sign APK with verified original key
         shell: bash
         run: |
@@ -144,7 +146,7 @@ jobs:
             --snapshot app/src/main/assets/snapshot.tar.xz \
             --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-            --version-code 42
+            --version-code 43
       - name: Create and verify direct APK / distribution ZIP
         shell: bash
         run: |

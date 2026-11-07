@@ -1013,42 +1013,40 @@ eachPackage('@deepseek-ai/dsh-attachment-local', 'lib/index.js', (file) => {
   return txt.includes('DSH Android compat:') ? 'already' : 'no-op'
 }, { requiredIfPresent: androidStableStorageMandatory })
 
-// Raise two independent upstream web_fetch ceilings. The provider normally
-// drops body text at 100k chars; tool-web then clips the rendered result at
-// 200k chars. Keep explicit deployment overrides intact (modify defaults only).
-// read_page in mobile_tools is the lossless/paged path for larger documents.
+// The npm bundle may render 100_000 as 1e5 (and 5_000_000 as 5e6).
+// Previous non-matching regexes silently retained the provider's destructive
+// limit even though the APK was signed and installed successfully.
 eachPackage('@deepseek-ai/dsh-web-fetch-http', 'lib/index.js', (file) => {
   let txt = read(file)
-  const marker = 'DSH Android compat: larger web fetch provider defaults'
-  if (txt.includes(marker)) return 'already'
-  const edits = [
-    [/maxResponseBytes:\s*z\.number\(\)\.default\(\s*5_?000_?000\s*\)/, 'maxResponseBytes: z.number().default(16777216)'],
-    [/maxBodyChars:\s*z\.number\(\)\.default\(\s*100_?000\s*\)/, 'maxBodyChars: z.number().default(1000000)'],
-  ]
-  let changed = 0
-  for (const [pattern, replacement] of edits) {
-    if (pattern.test(txt)) { txt = txt.replace(pattern, replacement); changed++ }
+  const marker = 'DSH Android compat: verified web_fetch provider defaults'
+  const fix = (key, value, accepted) => {
+    const re = new RegExp('(\\b' + key + '\\s*:\\s*z\\.number\\(\\)\\.default\\(\\s*)(\\d[\\d_]*(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?)(\\s*\\))', 'g')
+    const all = [...txt.matchAll(re)]
+    if (all.length !== 1) throw new Error('web_fetch provider default anchor missing or ambiguous: ' + key + ' at ' + file)
+    const current = all[0][2].replaceAll('_', '').toLowerCase()
+    if (!accepted.includes(current) && current !== value) throw new Error('unexpected web_fetch ' + key + ' default: ' + current)
+    txt = txt.replace(re, (_full, prefix, _old, suffix) => prefix + value + suffix)
   }
-  if (changed === 0) { warn('web-fetch provider defaults have different upstream layout: ' + file); return 'anchor-missing' }
-  txt += '\n// ' + marker + '\n'
+  fix('maxResponseBytes', '16777216', ['5000000', '5e6', '5e+6'])
+  fix('maxBodyChars', '400000', ['100000', '1e5', '1e+5', '1000000'])
+  if (!txt.includes(marker)) txt += '\n// ' + marker + '\n'
   write(file, txt)
   checkPatchedJavaScript(file)
-  if (changed !== edits.length) warn('web-fetch provider only partially raised limits: ' + file)
   return 'patched'
-})
+}, {requiredIfPresent: true})
 eachPackage('@deepseek-ai/dsh-tool-web', 'lib/index.js', (file) => {
   let txt = read(file)
-  const marker = 'DSH Android compat: larger web fetch render default'
-  if (txt.includes(marker)) return 'already'
-  const constant = /(?:const|let|var)\s+DEFAULT_FETCH_MAX_OUTPUT_CHARS\s*=\s*200_?000\b/
-  const config = /fetchMaxOutputChars:\s*z\.number\(\)\.default\(\s*200_?000\s*\)/
-  if (constant.test(txt)) txt = txt.replace(constant, 'const DEFAULT_FETCH_MAX_OUTPUT_CHARS = 1000000')
-  else if (config.test(txt)) txt = txt.replace(config, 'fetchMaxOutputChars: z.number().default(1000000)')
-  else { warn('tool-web render limit default layout changed: ' + file); return 'anchor-missing' }
-  txt += '\n// ' + marker + '\n'
+  const marker = 'DSH Android compat: verified web_fetch renderer default'
+  const re = /(\b(?:const|let|var)\s+DEFAULT_FETCH_MAX_OUTPUT_CHARS\s*=\s*)(\d[\d_]*(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g
+  const all = [...txt.matchAll(re)]
+  if (all.length !== 1) throw new Error('tool-web renderer default anchor missing: ' + file)
+  const current = all[0][2].replaceAll('_', '').toLowerCase()
+  if (!['200000', '2e5', '2e+5', '400000', '1000000'].includes(current)) throw new Error('unexpected tool-web render ceiling ' + current)
+  txt = txt.replace(re, (_full, prefix) => prefix + '400000')
+  if (!txt.includes(marker)) txt += '\n// ' + marker + '\n'
   write(file, txt)
   checkPatchedJavaScript(file)
   return 'patched'
-})
+}, {requiredIfPresent: true})
 
 console.log(JSON.stringify({ prefix, targetVersion, patches: report }, null, 2))

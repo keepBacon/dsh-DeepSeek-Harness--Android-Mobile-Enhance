@@ -1144,6 +1144,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(rootUsr, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
+      File(rootUsr, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js") to "usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js",
       File(rootUsr, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-v3.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v3.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-v4.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v4.mjs",
@@ -2667,6 +2668,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       log.writeText("")
       val env = engineEnv(preloadBin).toMutableMap()
       env["DSH_ANDROID_MODSEARCH_CWD"] = homeDir.absolutePath
+      env["DSH_ANDROID_MODSEARCH_RECOVERY"] = File(usrDir, "share/dsh-modsearch-recovery/node_modules").absolutePath
       val proc = startWithArgsToFile(
         arrayOf(nodeBin.absolutePath, helper.absolutePath, "--repair-home", homeDir.absolutePath),
         env, log,
@@ -2699,7 +2701,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
               "plugin-entry-missing" -> "DSH plugin entry absent; reinstall the published npm package"
               else -> status
             }
-            add("ModSearch ($selectedProfile): $detail")
+            val files = item.optJSONArray("restored")
+            val recovered = if (files != null && files.length() > 0)
+              "；恢复缺失文件：" + (0 until files.length()).map { files.optString(it) }.joinToString(", ")
+            else ""
+            add("ModSearch ($selectedProfile): $detail$recovered")
           }
         }
       }
@@ -3092,6 +3098,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
+      File(usrDir, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js") to "usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine-v3.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v3.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine-v4.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v4.mjs",
