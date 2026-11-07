@@ -65,10 +65,10 @@ def patch(stage, allow_missing=False):
     provider = find_package_files(stage, "dsh-web-fetch-http")
     render = find_package_files(stage, "dsh-tool-web")
     if not provider or not render:
-        if allow_missing and not provider and not render:
-            print("[OK] Web provider/renderer not shipped in Termux seed; patching installed Web profile at engine start")
-            return
-        raise ValueError("Incomplete web_fetch module graph in APK snapshot (provider=" + str(len(provider)) + ", renderer=" + str(len(render)) + ")")
+        if not allow_missing:
+            raise ValueError("Web modules incomplete in strict build fixture")
+        print("[DSH] Termux seed Web modules: provider=" + str(len(provider)) +
+              " renderer=" + str(len(render)) + "; missing modules patched at DSH startup")
     for file in provider:
         source = file.read_text()
         for name, (target, values) in DEFAULTS.items():
