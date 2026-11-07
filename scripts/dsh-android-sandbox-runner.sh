@@ -41,4 +41,11 @@ if [ -n "${TMPDIR:-}" ]; then
   mkdir -p "$TMPDIR" 2>/dev/null || true
 fi
 
+# Preserve the selected sandbox mode and requested workspace; only the
+# executable startup is bridged through the system interpreter. No change to
+# DSH approvals, allowed paths, or sandbox-file-policy containment.
+bridge="${DSH_ANDROID_EXEC_BRIDGE:-}"
+if [ "${DSH_ANDROID_STANDALONE:-0}" = "1" ] && [ -f "$bridge" ]; then
+  exec /system/bin/sh "$bridge" "$@"
+fi
 exec "$@"
