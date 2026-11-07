@@ -53,6 +53,8 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: Verify packaged MCP ESM import closure
+        run: python3 scripts/validate-ci-mobile-esm-closure.py
       - name: Build Android ARM64 runtime on GitHub runner (no Termux)
         shell: bash
         env:
