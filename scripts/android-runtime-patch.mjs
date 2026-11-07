@@ -512,17 +512,45 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
 eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: skip desktop linux-scope'
-  if (txt.includes(marker)) return 'already'
-  const anchor = /selectContainmentMode\s*\(\s*kind\s*\)\s*\{/
-  const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
-  if (matches.length !== 1) throw new Error(`subprocess-local containment anchor changed (${matches.length}): ${file}`)
-  const injection = `${matches[0]}
-    // ${marker}.
-    if (process.env.DSH_ANDROID_STANDALONE === "1") {
-      this.warnFallback?.(kind, "Android app runtime uses the app UID/process-session boundary");
-      return "fallback";
-    }`
-  txt = txt.replace(anchor, injection)
+  const execMarker = 'DSH Android compat: executable spawn via system linker'
+  let changed = false
+  if (!txt.includes(marker)) {
+    const anchor = /selectContainmentMode\s*\(\s*kind\s*\)\s*\{/
+    const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+    if (matches.length !== 1) throw new Error('subprocess-local containment anchor changed: ' + file)
+    txt = txt.replace(anchor, match => match + [
+      '',
+      '    // ' + marker,
+      '    if (process.env.DSH_ANDROID_STANDALONE === "1") {',
+      '      this.warnFallback?.(kind, "Android app runtime uses the app UID/process-session boundary");',
+      '      return "fallback";',
+      '    }',
+    ].join('\n'))
+    changed = true
+  }
+  if (!txt.includes(execMarker)) {
+    // The one-shot subprocess seam normally passes argv[0] directly to
+    // libuv spawn. App-private binaries and scripts are noexec on modern
+    // Android, including the danger-full-access mode that skips confine().
+    const anchor = /(?:const|let)\s+\[\s*program\s*,\s*\.\.\.args\s*\]\s*=\s*spec\.argv\s*;?/
+    const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+    if (matches.length !== 1) throw new Error('subprocess-local spawnSubprocess anchor changed: ' + file)
+    txt = txt.replace(anchor, match => [
+      match.replace(/^(?:const|let)/, 'let'),
+      '  // ' + execMarker,
+      '  if (process.env.DSH_ANDROID_STANDALONE === "1") {',
+      '    const prefix = process.env.TERMUX__PREFIX || process.env.PREFIX || "";',
+      '    const helper = prefix + "/libexec/dsh-mobile/android-exec.sh";',
+      '    if (prefix && program !== "/system/bin/sh" && program !== "/system/bin/env" &&',
+      '        !String(program).startsWith("/system/") && !String(program).startsWith("/apex/")) {',
+      '      args = [helper, program, ...args];',
+      '      program = "/system/bin/sh";',
+      '    }',
+      '  }'
+    ].join('\n'))
+    changed = true
+  }
+  if (!changed) return 'already'
   write(file, txt)
   checkPatchedJavaScript(file)
   return 'patched'
