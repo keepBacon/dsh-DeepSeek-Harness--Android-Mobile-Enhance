@@ -12,6 +12,10 @@ mkdir -p "$PREFIX_DIR/bin" "$PREFIX_DIR/libexec/dsh" "$PREFIX_DIR/libexec/dsh/wr
 # Extract the exact embedded wrapper body so this regression test validates
 # what build-termux.sh will place into the APK, not a hand-written duplicate.
 awk '/^  cat > "\$stage\/usr\/libexec\/dsh\/termux-wrapper" <<'\''EOF_TERMUX_WRAPPER'\''$/{capture=1;next} /^EOF_TERMUX_WRAPPER$/{capture=0} capture{print}' "$SOURCE" > "$PREFIX_DIR/libexec/dsh/termux-wrapper"
+# Validate shipped Android entrypoint before mocking it for Linux.
+grep -Fq 'exec /system/bin/sh "$prefix/libexec/dsh/termux-run"' "$PREFIX_DIR/libexec/dsh/termux-wrapper"
+# Linux runners do not have /system; only rewrite the extracted test fixture.
+sed -i 's@exec /system/bin/sh@exec /bin/sh@g' "$PREFIX_DIR/libexec/dsh/termux-wrapper"
 chmod 0755 "$PREFIX_DIR/libexec/dsh/termux-wrapper"
 
 # Check both generated wrappers, including the full PRoot path-relocation
@@ -55,7 +59,7 @@ grep -Fq 'for tool_cmd in bash apt apt-get' "$SOURCE"
 ENGINE="$ROOT/app/src/main/java/com/dshmobile/shell/EngineManager.kt"
 grep -Fq '"DSH_SIDEBAR_SHELL" to File(usrDir, "libexec/dsh/wrappers/bash")' "$ENGINE"
 grep -Fq '"SHELL" to File(usrDir, "libexec/dsh/wrappers/bash")' "$ENGINE"
-grep -Fq 'exec /system/bin/sh "$prefix/libexec/dsh-mobile/android-exec.sh"' "$PREFIX_DIR/libexec/dsh/termux-wrapper"
+grep -Fq 'exec /bin/sh "$prefix/libexec/dsh-mobile/android-exec.sh"' "$PREFIX_DIR/libexec/dsh/termux-wrapper"
 grep -Fq 'for cli in "$stage/usr/bin/"*; do' "$SOURCE"
 
 echo '[OK] Termux relocation-wrapper routing'
