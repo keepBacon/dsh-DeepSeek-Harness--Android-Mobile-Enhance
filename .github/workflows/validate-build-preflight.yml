@@ -20,6 +20,12 @@ jobs:
       - name: Verify packaged MCP ESM import closure
         run: python3 scripts/validate-ci-mobile-esm-closure.py
 
+      - name: Verify actual web_fetch default limit and ModSearch offline recovery
+        run: |
+          python3 scripts/ci_fix_web_fetch_limits.py --self-test
+          node --check app/src/main/assets/modsearch-android-compat.mjs
+          node scripts/test-modsearch-cli-recovery.mjs
+
       - name: Shell syntax
         shell: bash
         run: |
