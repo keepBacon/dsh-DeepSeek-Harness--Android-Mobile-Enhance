@@ -23,6 +23,8 @@ jobs:
       - name: Verify actual web_fetch default limit and ModSearch offline recovery
         run: |
           python3 scripts/ci_fix_web_fetch_limits.py --self-test
+          node --check app/src/main/assets/web-fetch-android-compat.mjs
+          node scripts/test-web-fetch-profile-compat.mjs
           node --check app/src/main/assets/modsearch-android-compat.mjs
           node scripts/test-modsearch-cli-recovery.mjs
 
