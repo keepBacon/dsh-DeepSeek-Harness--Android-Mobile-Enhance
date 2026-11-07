@@ -18,7 +18,7 @@ try {
   await packageFile(profile,'@liustack/modsearch','5.10.11',{dependencies:{commander:'^13.1.0',undici:'^7.29.0'}})
   await mkdir(join(profile,'dsh'),{recursive:true})
   const body=[
-    'function childEnv(){ return process.env }',
+    'function childEnv() { return process.env }',
     'function run(command, args, signal, env) {',
     '  const child=spawnHidden(command,args,{',
     "      stdio: ['ignore', 'pipe', 'pipe'],",
