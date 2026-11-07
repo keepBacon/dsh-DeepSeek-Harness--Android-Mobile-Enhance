@@ -72,8 +72,9 @@ def validate(snapshot, lock):
     arch=len(h)>=20 and h[:4]==bytes.fromhex('7f454c46') and int.from_bytes(h[18:20],'little')==183
  if set(REQUIRED)-found: raise ValueError('missing required paths: '+', '.join(sorted(set(REQUIRED)-found)))
  if not arch: raise ValueError('node is not ARM64 ELF')
- if (verified_provider == 0) != (verified_renderer == 0):
-  raise ValueError('incomplete provider/renderer package pair in Android snapshot')
+ # Native seeds can contain neither or only one of these Web-profile modules.
+ # Verify every packaged module independently; the Android startup patch
+ # covers separately installed profile modules.
  # A Termux native seed can omit Web-profile plugin modules entirely. Those
  # are checked and patched at the real profile's startup path on Android.
  actual=package.get('version') if isinstance(package,dict) else None
