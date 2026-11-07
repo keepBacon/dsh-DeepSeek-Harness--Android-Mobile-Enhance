@@ -17,6 +17,9 @@ jobs:
           set -euo pipefail
           bash scripts/validate-termux-tool-catalog.sh --online
 
+      - name: Verify packaged MCP ESM import closure
+        run: python3 scripts/validate-ci-mobile-esm-closure.py
+
       - name: Shell syntax
         shell: bash
         run: |
