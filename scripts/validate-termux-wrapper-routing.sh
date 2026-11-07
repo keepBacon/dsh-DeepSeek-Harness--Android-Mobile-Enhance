@@ -23,8 +23,8 @@ grep -Fq 'DSH_TERMUX_GUEST_SETUP_FAILED' "$TMP/generated-termux-run"
 grep -Fq 'GUEST="$REAL_ROOT/.dsh-proot-guest"' "$TMP/generated-termux-run"
 # The current PRoot launcher deliberately uses bind-only relocation; no -r.
 grep -Fq -- '-b "$GUEST/data/data/com.termux:/data/data/com.termux"' "$TMP/generated-termux-run"
-grep -Fq 'first_bytes=' "$TMP/generated-termux-run"
-grep -Fq 'exec "$REAL_PREFIX/bin/python3" "$REAL_PREFIX/bin/$CMD"' "$TMP/generated-termux-run"
+grep -Fq 'exec /system/bin/sh "$REAL_PREFIX/libexec/dsh-mobile/android-exec.sh"' "$TMP/generated-termux-run"
+grep -Fq 'export TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=force' "$TMP/generated-termux-run"
 
 cat > "$PREFIX_DIR/libexec/dsh/termux-run" <<'EOF'
 #!/usr/bin/env sh
@@ -55,6 +55,7 @@ grep -Fq 'for tool_cmd in bash apt apt-get' "$SOURCE"
 ENGINE="$ROOT/app/src/main/java/com/dshmobile/shell/EngineManager.kt"
 grep -Fq '"DSH_SIDEBAR_SHELL" to File(usrDir, "libexec/dsh/wrappers/bash")' "$ENGINE"
 grep -Fq '"SHELL" to File(usrDir, "libexec/dsh/wrappers/bash")' "$ENGINE"
-grep -Fq 'unset LD_PRELOAD TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE TERMUX_EXEC__EXECVE_CALL__INTERCEPT' "$SOURCE"
+grep -Fq 'exec /system/bin/sh "$prefix/libexec/dsh-mobile/android-exec.sh"' "$PREFIX_DIR/libexec/dsh/termux-wrapper"
+grep -Fq 'for cli in "$stage/usr/bin/"*; do' "$SOURCE"
 
 echo '[OK] Termux relocation-wrapper routing'
