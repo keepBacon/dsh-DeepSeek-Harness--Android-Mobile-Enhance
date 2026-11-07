@@ -12,7 +12,7 @@ import tempfile
 
 DEFAULTS = {
     "maxResponseBytes": ("16777216", {"5000000", "5_000_000", "5e6", "5E6"}),
-    "maxBodyChars": ("400000", {"100000", "100_000", "1e5", "1E5", "1e+5", "1E+5"}),
+    "maxBodyChars": ("400000", {"100000", "100_000", "1e5", "1E5", "1e+5", "1E+5", "1000000", "1e6"}),
 }
 NUMBER = r"(?:\d[\d_]*(?:\.\d+)?(?:[eE][+\-]?\d+)?)"
 
@@ -62,7 +62,7 @@ def patch(stage):
         if len(matches) != 1:
             raise ValueError(f"tool-web render cap anchor changed: {file}")
         old = matches[0].group("value")
-        if old.replace("_", "").lower() not in {"200000", "2e5", "2e+5", "400000"}:
+        if old.replace("_", "").lower() not in {"200000", "2e5", "2e+5", "400000", "1000000", "1e6"}:
             raise ValueError(f"unexpected tool-web render cap {old}")
         source = pattern.sub(lambda m: m.group("prefix") + "400000", source)
         file.write_text(source)
