@@ -55,6 +55,7 @@ SCRIPT_MAP = {
     "dsh-lua-analysis-core.mjs": "dsh-lua-analysis-core.mjs",
     "dsh-luau-runner.mjs": "dsh-luau-runner.mjs",
     "dsh-android-sandbox-runner.sh": "android-sandbox-runner.sh",
+    "dsh-android-exec.sh": "android-exec.sh",
 }
 
 def get(url):
@@ -246,6 +247,7 @@ def overlay_sources(stage, source):
             raise ValueError("missing host-neutral source " + filename)
         shutil.copy2(src, mobile / dest)
     (mobile / "android-sandbox-runner.sh").chmod(0o755)
+    (mobile / "android-exec.sh").chmod(0o755)
     (mobile / "toolbox-mcp.mjs").chmod(0o755)
     (mobile / "basic-toolbox-mcp.mjs").chmod(0o755)
     builder = (source / "scripts/embed-termux-tools.sh").read_text()
@@ -261,9 +263,13 @@ def overlay_sources(stage, source):
         wrapper.chmod(0o755)
     wrappers = stage / "usr/libexec/dsh/wrappers"
     wrappers.mkdir(parents=True, exist_ok=True)
-    for command in ("bash", "python3", "python", "pip3", "pip",
-                    "apt", "apt-get", "apt-cache", "apt-config",
-                    "dpkg", "dpkg-query", "dpkg-deb", "pkg"):
+    # Every packaged CLI must resolve through the same SELinux-safe bridge.
+    # The earlier 13-command-only list left nested Bash commands unwrapped.
+    for command in sorted({path.name for path in (stage / "usr/bin").iterdir()
+                           if path.is_file() and re.fullmatch(r"[A-Za-z0-9._+\\-]+", path.name)} |
+                          {"bash", "python3", "python", "pip3", "pip",
+                           "apt", "apt-get", "apt-cache", "apt-config",
+                           "dpkg", "dpkg-query", "dpkg-deb", "pkg"}):
         alias = wrappers / command
         if alias.is_symlink():
             alias.unlink()
