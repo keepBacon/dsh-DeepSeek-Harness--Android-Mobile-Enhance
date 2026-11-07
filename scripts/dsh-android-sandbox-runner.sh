@@ -44,8 +44,13 @@ fi
 # Preserve the selected sandbox mode and requested workspace; only the
 # executable startup is bridged through the system interpreter. No change to
 # DSH approvals, allowed paths, or sandbox-file-policy containment.
+# DSH subprocess intentionally scrubs DSH_* environment variables, but
+# preserves TERMUX__PREFIX. Resolve the app-private bridge from that stable
+# prefix so both terminal-bash and one-shot subprocesses remain executable.
+prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
 bridge="${DSH_ANDROID_EXEC_BRIDGE:-}"
-if [ "${DSH_ANDROID_STANDALONE:-0}" = "1" ] && [ -f "$bridge" ]; then
+[ -n "$bridge" ] || bridge="$prefix/libexec/dsh-mobile/android-exec.sh"
+if [ -f "$bridge" ]; then
   exec /system/bin/sh "$bridge" "$@"
 fi
 exec "$@"
