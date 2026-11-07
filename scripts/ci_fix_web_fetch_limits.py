@@ -61,10 +61,14 @@ def find_package_files(stage, package):
             continue
     return sorted(set(matches))
 
-def patch(stage):
+def patch(stage, allow_missing=False):
     provider = find_package_files(stage, "dsh-web-fetch-http")
-    if not provider:
-        raise ValueError("dsh-web-fetch-http published provider not found in APK runtime")
+    render = find_package_files(stage, "dsh-tool-web")
+    if not provider or not render:
+        if allow_missing and not provider and not render:
+            print("[OK] Web provider/renderer not shipped in Termux seed; patching installed Web profile at engine start")
+            return
+        raise ValueError("Incomplete web_fetch module graph in APK snapshot (provider=" + str(len(provider)) + ", renderer=" + str(len(render)) + ")")
     for file in provider:
         source = file.read_text()
         for name, (target, values) in DEFAULTS.items():
@@ -73,9 +77,6 @@ def patch(stage):
         for name, (target, _) in DEFAULTS.items():
             if not re.search(re.escape(name) + r"\s*:\s*z\.number\(\)\.default\(\s*" + target + r"\s*\)", file.read_text()):
                 raise ValueError(f"web_fetch {name} default failed verification")
-    render = find_package_files(stage, "dsh-tool-web")
-    if not render:
-        raise ValueError("dsh-tool-web renderer not found in APK runtime")
     for file in render:
         source = file.read_text()
         pattern = re.compile(r"(?P<prefix>\b(?:const|let|var)\s+DEFAULT_FETCH_MAX_OUTPUT_CHARS\s*=\s*)(?P<value>" + NUMBER + ")")
@@ -114,6 +115,11 @@ def self_test():
         assert len(find_package_files(stage, "dsh-web-fetch-http")) == 1
         assert len(find_package_files(stage, "dsh-tool-web")) == 1
         patch(stage)
+        # A seed that only embeds CLI/Termux binaries must not fail before
+        # user-profile packages have been installed by DSH.
+        for name in ('dsh-web-fetch-http', 'dsh-tool-web'):
+            shutil.rmtree(nested / name)
+        patch(stage, allow_missing=True)
         try:
             replace_default("maxBodyChars: z.number().default(12345)", "maxBodyChars", "400000", DEFAULTS["maxBodyChars"][1])
         except ValueError:
@@ -132,6 +138,6 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         self_test()
     elif len(sys.argv) == 2:
-        patch(Path(sys.argv[1]))
+        patch(Path(sys.argv[1]), allow_missing=True)
     else:
         raise SystemExit("usage: ci_fix_web_fetch_limits.py <stage-root> | --self-test")
