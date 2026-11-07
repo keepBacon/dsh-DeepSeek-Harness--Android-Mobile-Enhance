@@ -1142,6 +1142,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "lib/libtermux-exec-ld-preload.so") to "usr/lib/libtermux-exec-ld-preload.so",
       File(rootUsr, "bin/bash") to "usr/bin/bash",
       File(rootUsr, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
+      File(rootUsr, "libexec/dsh-mobile/android-exec.sh") to "usr/libexec/dsh-mobile/android-exec.sh",
       File(rootUsr, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
       File(rootUsr, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js") to "usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js",
@@ -1817,6 +1818,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // app UID. sandbox-local is patched to use this explicit partial runner
       // while fs-sandbox remains the workspace write-containment authority.
       "DSH_ANDROID_SANDBOX_RUNNER" to File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh").absolutePath,
+      "DSH_ANDROID_EXEC_BRIDGE" to File(usrDir, "libexec/dsh-mobile/android-exec.sh").absolutePath,
+      "DSH_ANDROID_TERMUX_RUN" to File(usrDir, "libexec/dsh/termux-run").absolutePath,
       "DSH_PICK_TOKEN" to (pickToken ?: ""),
       // DSH's in-Web plugin manager launches pnpm as a child of this Host.
       // Keep peer dependency resolution aligned with the shipped profile:
@@ -3136,6 +3139,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       preloadBin to "usr/lib/libtermux-exec-ld-preload.so",
       File(usrDir, "bin/bash") to "usr/bin/bash",
       File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
+      File(usrDir, "libexec/dsh-mobile/android-exec.sh") to "usr/libexec/dsh-mobile/android-exec.sh",
       File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
       File(usrDir, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js") to "usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js",
