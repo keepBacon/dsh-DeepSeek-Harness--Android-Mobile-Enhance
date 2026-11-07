@@ -529,29 +529,28 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
     changed = true
   }
   if (!txt.includes(execMarker)) {
-    // The one-shot subprocess seam normally passes argv[0] directly to
-    // libuv spawn. App-private binaries and scripts are noexec on modern
-    // Android, including the danger-full-access mode that skips confine().
-    const anchor = /(?:const|let)\s+\[\s*program\s*,\s*\.\.\.args\s*\]\s*=\s*spec\.argv\s*;?/
-    const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
+    // The published index bundle exposes Runtime.spawn(spec), while the
+    // underlying spawn.ts function is folded into a different bundle chunk.
+    // Transform its API request, preserving the entire spec and exact argv.
+    // This covers both ordinary and non-confined Bash/CLI child launches.
+    const anchor = /spawnSubprocess\(\s*spec\s*,\s*this\.internals\s*\)/g
+    const matches = txt.match(anchor) ?? []
     if (matches.length !== 1) {
-      const sample = [...txt.matchAll(/[^\n]{0,110}spec\.argv[^\n]{0,160}/g)]
+      const sample = [...txt.matchAll(/[^\n]{0,90}spawnSubprocess[^\n]{0,170}/g)]
         .slice(0, 6).map(m => m[0])
-      throw new Error('subprocess-local spawnSubprocess anchor changed (' + matches.length +
-        '): ' + file + ' candidates=' + JSON.stringify(sample))
+      throw new Error('subprocess-local Runtime.spawn anchor changed (' +
+        matches.length + '): ' + file + ' candidates=' + JSON.stringify(sample))
     }
-    txt = txt.replace(anchor, match => [
-      match.replace(/^(?:const|let)/, 'let'),
+    txt = txt.replace(anchor, [
+      'spawnSubprocess((() => {',
       '  // ' + execMarker,
-      '  if (process.env.DSH_ANDROID_STANDALONE === "1") {',
-      '    const prefix = process.env.TERMUX__PREFIX || process.env.PREFIX || "";',
-      '    const helper = prefix + "/libexec/dsh-mobile/android-exec.sh";',
-      '    if (prefix && program !== "/system/bin/sh" && program !== "/system/bin/env" &&',
-      '        !String(program).startsWith("/system/") && !String(program).startsWith("/apex/")) {',
-      '      args = [helper, program, ...args];',
-      '      program = "/system/bin/sh";',
-      '    }',
-      '  }'
+      '  if (process.env.DSH_ANDROID_STANDALONE !== "1") return spec;',
+      '  const prefix = process.env.TERMUX__PREFIX || process.env.PREFIX || "";',
+      '  if (!prefix || !Array.isArray(spec.argv) || spec.argv.length === 0) return spec;',
+      '  const program = String(spec.argv[0]);',
+      '  if (program.startsWith("/system/") || program.startsWith("/apex/")) return spec;',
+      '  return { ...spec, argv: ["/system/bin/sh", prefix + "/libexec/dsh-mobile/android-exec.sh", ...spec.argv] };',
+      '})(), this.internals)',
     ].join('\n'))
     changed = true
   }
