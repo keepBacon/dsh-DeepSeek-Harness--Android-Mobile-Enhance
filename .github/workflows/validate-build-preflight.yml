@@ -45,6 +45,13 @@ jobs:
           node "$cli" doctor --json > "$tmp/doctor.json"
           node -e 'const d=require(process.argv[1]);if(!d.node?.ok||!Array.isArray(d.roles))process.exit(3)' "$tmp/doctor.json"
 
+      - name: Android system linker execution and complete Termux wrapper routing
+        run: |
+          bash -n scripts/embed-termux-tools.sh
+          bash -n scripts/dsh-android-exec.sh
+          bash scripts/test-android-linker-bridge.sh
+          bash scripts/validate-termux-wrapper-routing.sh
+
       - name: Shell syntax
         shell: bash
         run: |
