@@ -38,6 +38,7 @@ try{
     'const a=process.argv.slice(2)',
     'const isRead=a.includes("-u")',
     'if(isRead && a.includes("https://example.com/fallback") && !a.includes("--engine")){console.error("remote engine unavailable");process.exit(2)}',
+    'if(isRead && a.includes("https://example.com/relay") && a.includes("--engine")){console.error("local engine unavailable");process.exit(2)}',
     'const entry={status:"ok",source:isRead?"web":"x",summary:JSON.stringify({cwd:process.cwd(),nodeOptions:process.env.NODE_OPTIONS??null,args:a}),content:isRead?"original read_page executed":undefined,items:[{title:"Original X post",url:"https://example.com/post/1",snippet:"sample"}],links:[],uncertainty:[],warnings:[]}',
     'console.log(JSON.stringify({results:[entry]}))'
   ].join('\n'))
@@ -55,6 +56,11 @@ try{
   assert.ok(plainArgs.includes('--engine'))
   assert.equal(plainArgs[plainArgs.indexOf('--engine')+1],'local')
   assert.equal(plainArgs[plainArgs.indexOf('--timeout')+1],'18000')
+  const cloud=await registered.get('read_page').execute({url:'https://example.com/relay'}, {signal:AbortSignal.timeout(10000)})
+  const cloudArgs=JSON.parse(cloud.summary).args
+  assert.equal(cloudArgs.includes('--engine'),false,'plain URL must have bounded cloud fallback if local fails')
+  assert.equal(cloudArgs[cloudArgs.indexOf('--deadline')+1],'32000')
+
   const read=await registered.get('read_page').execute({url:'https://example.com/docs',query:'scope'}, {signal:AbortSignal.timeout(10000)})
   assert.equal(read.content,'original read_page executed')
   const x=await registered.get('x_search').execute({query:'some topic',max_results:3},{signal:AbortSignal.timeout(10000)})
