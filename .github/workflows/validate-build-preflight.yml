@@ -49,8 +49,9 @@ jobs:
         run: |
           bash -n scripts/embed-termux-tools.sh
           bash -n scripts/dsh-android-exec.sh
-          bash -x scripts/test-android-linker-bridge.sh
-          bash -x scripts/validate-termux-wrapper-routing.sh
+          bash scripts/test-android-linker-bridge.sh
+          bash scripts/test-android-sandbox-linker-routing.sh
+          bash scripts/validate-termux-wrapper-routing.sh
 
       - name: Shell syntax
         shell: bash
