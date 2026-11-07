@@ -3,7 +3,8 @@
 // Exercises the real DSH plugin's original read_page and x_search execute()
 // methods with a deterministic local CLI stub (no network/API keys).
 import assert from 'node:assert/strict'
-import {spawnSync} from 'node:child_process'
+import {spawnSync,spawn} from 'node:child_process'
+import {createServer} from 'node:http'
 import {cp, mkdtemp, mkdir, readFile, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join, resolve} from 'node:path'
@@ -86,6 +87,34 @@ try{
     assert.ok(item,'published doctor missing role '+role)
     assert.ok(Array.isArray(item.candidates),'role must have structured candidates')
   }
+  // Exercise the REAL built-in ModSearch local HTTP engine, not the CLI mock.
+  // --allow-private-network is deliberately restricted to this loopback test;
+  // production read_page does NOT pass this flag and retains upstream SSRF guards.
+  const server=createServer((req,res)=>{
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8'})
+    res.end('<html><head><title>DSH Test Page</title></head><body><h1>Real Local Fetch</h1><p>Deterministic page content token q7z2</p></body></html>')
+  })
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+  try{
+    const url='http://127.0.0.1:'+server.address().port+'/'
+    const real=spawn(process.execPath,[join(packageDir,'dist/main.js'),'-u',url,'--engine','local','--allow-private-network','--timeout','10000','--deadline','15000'],{
+      env:{...process.env,NODE_OPTIONS:''},cwd:appCwd,stdio:['ignore','pipe','pipe']
+    })
+    let stdout='',stderr=''
+    real.stdout.on('data',v=>stdout+=v)
+    real.stderr.on('data',v=>stderr+=v)
+    const exit=await Promise.race([
+      new Promise((resolve,reject)=>{real.once('error',reject);real.once('close',code=>resolve(code))}),
+      new Promise((_,reject)=>setTimeout(()=>{real.kill('SIGKILL');reject(new Error('real ModSearch local fetch timed out'))},15000))
+    ])
+    assert.equal(exit,0,stderr.slice(0,1200))
+    const data=JSON.parse(stdout)
+    assert.equal(data.results?.[0]?.status,'ok')
+    assert.match(JSON.stringify(data.results?.[0]),/Deterministic page content token q7z2/)
+  }finally{
+    await new Promise(resolve=>server.close(resolve))
+  }
+
   console.log('[OK] published @liustack/modsearch '+pkg.version+': read_page, x_search, CLI doctor and original DSH plugin')
 }finally{
  for(const name of envNames){if(previous[name]===undefined)delete process.env[name];else process.env[name]=previous[name]}
