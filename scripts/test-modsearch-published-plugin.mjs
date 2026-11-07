@@ -36,6 +36,7 @@ try{
   await writeFile(cli,[
     'const a=process.argv.slice(2)',
     'const isRead=a.includes("-u")',
+    'if(isRead && a.includes("https://example.com/fallback") && !a.includes("--engine")){console.error("remote engine unavailable");process.exit(2)}',
     'const entry={status:"ok",source:isRead?"web":"x",summary:JSON.stringify({cwd:process.cwd(),nodeOptions:process.env.NODE_OPTIONS??null,args:a}),content:isRead?"original read_page executed":undefined,items:[{title:"Original X post",url:"https://example.com/post/1",snippet:"sample"}],links:[],uncertainty:[],warnings:[]}',
     'console.log(JSON.stringify({results:[entry]}))'
   ].join('\n'))
@@ -67,6 +68,11 @@ try{
   assert.ok(readArgs.args.includes('https://example.com/docs'))
   assert.equal(readArgs.args.includes('--engine'),false,'focused read should retain original cloud route')
   assert.equal(readArgs.args[readArgs.args.indexOf('--deadline')+1],'32000')
+  const fallback=await registered.get('read_page').execute({url:'https://example.com/fallback',query:'focus'}, {signal:AbortSignal.timeout(10000)})
+  const fallbackArgs=JSON.parse(fallback.summary).args
+  assert.equal(fallbackArgs[fallbackArgs.indexOf('--engine')+1],'local')
+  assert.ok(fallback.warnings.some(x=>x.includes('without query-specific synthesis')))
+
   assert.ok(xArgs.args.includes('--source'))
   assert.ok(xArgs.args.includes('x'))
   const doctor=spawnSync(process.execPath,[join(packageDir,'dist/main.js'),'doctor','--json'],{encoding:'utf8',timeout:15000,env:{...process.env,NODE_OPTIONS:''},cwd:appCwd})
