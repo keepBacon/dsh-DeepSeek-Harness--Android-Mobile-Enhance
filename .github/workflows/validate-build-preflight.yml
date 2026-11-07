@@ -26,6 +26,23 @@ jobs:
           node --check app/src/main/assets/modsearch-android-compat.mjs
           node scripts/test-modsearch-cli-recovery.mjs
 
+      - name: Stage and verify the published ModSearch CLI recovery bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          mkdir -p "$tmp/work" "$tmp/stage"
+          PYTHONPATH=scripts python3 - "$tmp/stage" "$tmp/work" <<'PY'
+          import sys
+          from pathlib import Path
+          from ci_modsearch_recovery import stage_modsearch
+          stage_modsearch(Path(sys.argv[1]), Path(sys.argv[2]))
+          PY
+          cli="$tmp/stage/usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js"
+          node "$cli" doctor --json > "$tmp/doctor.json"
+          node -e 'const d=require(process.argv[1]);if(!d.node?.ok||!Array.isArray(d.roles))process.exit(3)' "$tmp/doctor.json"
+
       - name: Shell syntax
         shell: bash
         run: |
