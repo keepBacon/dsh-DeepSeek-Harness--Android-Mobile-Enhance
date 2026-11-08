@@ -87,7 +87,11 @@ function recoverOriginalPublishedCli(home, name) {
     const publishedMeta = JSON.parse(readFileSync(join(payload,'package.json'),'utf8'))
     if (publishedMeta.name !== '@liustack/modsearch' || publishedMeta.version !== '5.10.11')
       throw new Error('bundled ModSearch plugin identity mismatch')
+    if (!scoped(home, realpathSync(profile)))
+      return {restored:[], warning:'profile-outside-app-home'}
     mkdirSync(dirname(location),{recursive:true})
+    if (!scoped(home, realpathSync(dirname(location))))
+      return {restored:[], warning:'plugin-parent-outside-app-home'}
     cpSync(payload,location,{recursive:true,force:false,errorOnExist:true,dereference:false})
     recoveredPackage = true
   }
