@@ -10,6 +10,7 @@ const CACHE_TTL_MS = 20 * 60 * 1000
 const CACHE_MAX_FILES = 12
 const CACHE_MAX_BYTES = 128 * 1024 * 1024
 const PAGE_TIMEOUT_MS = 30000
+const inFlight = new Map() // Deduplicate concurrent reads of the same URL/cache key.
 
 function checkedUrl(input) {
   if (typeof input !== 'string' || input.length > 16384) throw new Error('url must be a string <= 16384 chars')
@@ -70,6 +71,7 @@ async function fetchComplete(url, bodyPath, metaPath) {
   let handle = null, received = 0
   try {
     const response = await fetch(url, {signal: controller.signal, redirect: 'follow', headers: {'User-Agent': 'DSH-Mobile-ReadPage/1.0'}})
+    if (!response.ok) throw new Error('HTTP_PAGE_ERROR: upstream returned status '+response.status)
     const type = response.headers.get('content-type') || ''
     if (type && !/^(text\/|application\/(?:json|xml|javascript|xhtml\+xml)|[^;]+\+(?:json|xml))/i.test(type)) {
       throw new Error('unsupported page content type: ' + type)
@@ -118,7 +120,19 @@ export async function readWebPage(args = {}) {
       }
     } catch { /* Missing/incomplete cache entry means fetch again. */ }
   }
-  if (!meta) meta = await fetchComplete(url.href, bodyPath, metaPath)
+  if (!meta) {
+    // Many workers may request the same page concurrently. Publish the full
+    // response once; all waiters then read a single verified body/meta pair.
+    let pending = inFlight.get(key)
+    if (!pending) {
+      pending = fetchComplete(url.href, bodyPath, metaPath)
+      inFlight.set(key, pending)
+      pending.finally(() => {
+        if (inFlight.get(key) === pending) inFlight.delete(key)
+      }).catch(() => {}) // Do not create an unhandled rejecting cleanup promise.
+    }
+    meta = await pending
+  }
   const bytes = await readFile(bodyPath)
   const charset = /charset\s*=\s*["']?([A-Za-z0-9._-]+)/i.exec(meta.contentType || '')?.[1] || 'utf-8'
   let raw
