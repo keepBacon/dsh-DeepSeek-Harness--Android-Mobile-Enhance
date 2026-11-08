@@ -25,24 +25,49 @@ case "$magic" in
     ;;
   '#!'*)
     first_line="$("$head_cmd" -n 1 "$target" 2>/dev/null || true)"
-    interpreter="${first_line#\#!}"
-    interpreter="${interpreter# }"
-    interpreter="${interpreter%% *}"
+    # Android's `head` can return CRLF source files. Parse the interpreter
+    # token independently of optional shebang flags; never use eval/word
+    # splitting on the user's script path or command arguments.
+    first_line="${first_line%"$(printf '\r')"}"
+    shebang="${first_line#\#!}"
+    shebang="${shebang# }"
+    interpreter="${shebang%% *}"
+    options=""
+    if [ "$interpreter" != "$shebang" ]; then options="${shebang#"$interpreter"}"; options="${options# }"; fi
     name="${interpreter##*/}"
     case "$name" in
       sh) exec /system/bin/sh "$target" "$@" ;;
       bash|dash|zsh|python|python3|node|perl|ruby|env)
         [ "$name" != python ] || name=python3
         if [ "$name" = env ]; then
-          env_command="${first_line#*env }"
-          env_command="${env_command%% *}"
+          # The common `env -S python3` and `env python3` forms are both
+          # supported. Reject other inline flags instead of silently
+          # dropping them or executing an unexpected interpreter.
+          case "$options" in '-S '*) options="${options#-S }" ;; esac
+          env_command="${options%% *}"
           case "$env_command" in
-            bash|dash|zsh|python3|node|perl|ruby) name="$env_command" ;;
+            bash|dash|zsh|python|python3|node|perl|ruby) name="$env_command" ;;
             *) echo "DSH_ANDROID_EXEC_UNSUPPORTED_ENV_SHEBANG: $target" >&2; exit 126 ;;
           esac
+          [ "$name" != python ] || name=python3
+          if [ "$options" != "$env_command" ]; then
+            echo "DSH_ANDROID_EXEC_UNSUPPORTED_ENV_FLAGS: $target" >&2
+            exit 126
+          fi
+          options=""
         fi
         [ -f "$prefix/bin/$name" ] || { echo "DSH_ANDROID_EXEC_INTERPRETER_MISSING: $name" >&2; exit 127; }
-        exec "$linker" "$prefix/bin/$name" "$target" "$@"
+        # Honor one common shebang interpreter flag without lossy
+        # splitting. Reject arbitrary multi-token arguments (env -S
+        # quoting semantics require the real env parser).
+        case "$options" in
+          '') exec "$linker" "$prefix/bin/$name" "$target" "$@" ;;
+          -*)
+            case "$options" in *' '*|*'	'*) echo "DSH_ANDROID_EXEC_UNSUPPORTED_SHEBANG_FLAGS: $target" >&2; exit 126 ;; esac
+            exec "$linker" "$prefix/bin/$name" "$options" "$target" "$@"
+            ;;
+          *) echo "DSH_ANDROID_EXEC_UNSUPPORTED_SHEBANG_FLAGS: $target" >&2; exit 126 ;;
+        esac
         ;;
       *) echo "DSH_ANDROID_EXEC_UNSUPPORTED_SHEBANG: $target" >&2; exit 126 ;;
     esac

@@ -473,24 +473,34 @@ async function call(name,a={}){
     const shell=probes.shellViaProot;
     const shellLog=shell ? [shell.stderr,shell.stdout].join('\n') : '';
     const invalidScratch=/can't canonicalize[^\\n]*\/data\/data\/com\.termux\/files\/usr\/tmp|can't create temporary directory|PROOT_TMP_DIR/i.test(shellLog);
+    // Direct wrapper execution is the default on Android. PRoot is an
+    // optional relocation fallback, not a prerequisite for Bash health.
+    // Never label a working direct shell as failed only because PRoot fails.
+    const directOk=cliProbes.bash?.ok===true&&cliProbes.bashExternal?.ok===true;
     const diagnosis=!files.runtimeRoot?.exists?'DSH_RUNTIME_MISSING'
       :!files.bash?.exists?'DSH_BASH_MISSING'
-      :!files.proot?.exists?'DSH_PROOT_MISSING'
-      :!files.prootHostTemp?.isDirectory?'DSH_HOST_TMP_MISSING'
+      :a.probeExecutables===false?'DSH_SHELL_NOT_PROBED'
+      :directOk?'DIRECT_BASH_EXTERNAL_OK'
+      :cliProbes.bash?.ok===true?'BASH_CHILD_EXEC_FAILED'
+      :cliProbes.bash?.timedOut?'BASH_START_TIMEOUT'
+      :'BASH_DIRECT_FAILED';
+    const prootDiagnosis=!files.proot?.exists?'PROOT_MISSING_OPTIONAL'
+      :!files.prootHostTemp?.isDirectory?'PROOT_HOST_TMP_MISSING'
       :invalidScratch?'PROOT_HOST_TMP_CANONICALIZATION_FAILED'
       :!shell?'PROOT_NOT_PROBED'
       :shell.ok && shell.stdout.includes('DSH_SHELL_OK')?'PROOT_BASH_OK'
       :'PROOT_BASH_FAILED';
     return {mode:'diagnostic',executionIdentity:typeof process.getuid==='function'?process.getuid():null,paths,files,probes,cliProbes,
-      diagnosis,hostLegacyTermuxPresent:legacy,expectedProotTmpDir:paths.prootHostTemp,
-      warning:'PROOT_TMP_DIR must resolve to the real app HOME/tmp before entering the guest. A missing com.termux path alone does not imply user data was uninstalled.'};
+      diagnosis,prootDiagnosis,hostLegacyTermuxPresent:legacy,expectedProotTmpDir:paths.prootHostTemp,
+      warning:'Direct-mode Bash is authoritative. PRoot is optional; it does not determine shell health. Unsupported app-data ELF execution is diagnosed by the linker bridge.'};
   }
   case 'modsearch_health': {
     const profile=a.profile==='headless'?'headless':'web';
     const home=process.env.HOME||process.cwd();
     const root=resolve(home,'.dsh/profiles',profile,'node_modules/@liustack/modsearch');
+    const bundledCli=resolve(PREFIX,'share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js');
     const report={profile,installed:false,cliPresent:false,pluginPresent:false,
-      npmDependencies:{},doctor:null,action:'none'};
+      bundledCliAvailable:false,cliSource:null,npmDependencies:{},doctor:null,action:'none'};
     let manifest;
     try {
       manifest=JSON.parse(await readFile(resolve(root,'package.json'),'utf8'));
@@ -510,13 +520,19 @@ async function call(name,a={}){
     const isFile=async path=>{try {return (await stat(path)).isFile()}catch{return false}};
     report.pluginPresent=await isFile(plugin);
     report.cliPresent=await isFile(cli);
-    if(!report.cliPresent||!report.pluginPresent) {
-      report.action='Reinstall @liustack/modsearch from npm (GitHub source checkout does not contain dist/main.js)';
+    report.bundledCliAvailable=await isFile(bundledCli);
+    const fallbackEnabled=!report.cliPresent&&report.version==='5.10.11'&&report.bundledCliAvailable;
+    const cliToRun=fallbackEnabled?bundledCli:cli;
+    report.cliSource=report.cliPresent?'profile':fallbackEnabled?'apk-recovery':null;
+    if(!report.cliSource||!report.pluginPresent) {
+      report.action=!report.pluginPresent
+        ?'Original ModSearch DSH plugin entry is missing; inspect modsearch-compat.log'
+        :'Published ModSearch CLI is unavailable; inspect APK recovery bundle and modsearch-compat.log';
       return report;
     }
     // Resolve using precisely the location Node uses for its bare imports.
     // A plugin can register tools while its external CLI lacks commander/undici.
-    const localRequire=createRequire(cli);
+    const localRequire=createRequire(cliToRun);
     for(const dependency of Object.keys(manifest.dependencies||{})){
       try { localRequire.resolve(dependency); report.npmDependencies[dependency]='ok' }
       catch { report.npmDependencies[dependency]='missing' }
@@ -528,7 +544,7 @@ async function call(name,a={}){
     if(a.runDoctor!==false){
       const safeEnv={...process.env};
       delete safeEnv.NODE_OPTIONS;
-      const r=await runProcess(resolve(PREFIX,'bin/node'),[cli,'doctor','--json'],{
+      const r=await runProcess(resolve(PREFIX,'bin/node'),[cliToRun,'doctor','--json'],{
         env:safeEnv,cwd:home,timeoutMs:10000,maxOutputBytes:32768
       });
       // Do not return raw doctor output: environment/config diagnostics can
