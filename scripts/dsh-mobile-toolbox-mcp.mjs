@@ -257,11 +257,13 @@ async function startManagedFrida(a,targetArgs,userScript=''){
  const source="console.log('__DSH_READY__'+JSON.stringify({pid:Process.id,arch:Process.arch,platform:Process.platform}));\n"+userScript+"\nsetInterval(function(){},1000);\n"
  await writeFile(scriptPath,source,{mode:0o600})
  const args=[...fridaDeviceArgs(a),...targetArgs,'-q','-l',scriptPath]
- const child=spawn(toolWrapped('frida'),args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
+ const launch=androidToolLaunch(toolWrapped('frida'),args,process.env)
+ const child=spawn(launch.command,launch.args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
  const session={id,child,tmpRoot,closed:false,lines:[],ready:null,pid:null,target:targetArgs.join(' ')}
  FRIDA_SESSIONS.set(id,session)
  const feed=chunk=>{for(const line of chunk.toString('utf8').split(/\r?\n/)){if(!line)continue;session.lines.push(line);if(session.lines.length>1000)session.lines.splice(0,session.lines.length-1000);const at=line.indexOf('__DSH_READY__');if(at>=0){try{session.ready=JSON.parse(line.slice(at+'__DSH_READY__'.length));session.pid=session.ready.pid}catch{}}}}
  child.stdout.on('data',feed);child.stderr.on('data',feed)
+ child.on('error',error=>{session.lines.push('Frida launch error: '+error.message);session.closed=true;FRIDA_SESSIONS.delete(id);rm(tmpRoot,{recursive:true,force:true}).catch(()=>{})})
  child.on('close',()=>{session.closed=true;FRIDA_SESSIONS.delete(id);rm(tmpRoot,{recursive:true,force:true}).catch(()=>{})})
  const timeout=int(a.timeoutMs,5000,500,30000),started=Date.now()
  while(!session.ready&&!session.closed&&Date.now()-started<timeout)await new Promise(r=>setTimeout(r,50))
@@ -331,7 +333,8 @@ async function startDebugSession(){
  const args=['--interpreter=mi2','-q','-nx','--data-directory='+resolve(PREFIX,'share/gdb')]
  // A child can fail after spawn() returns, emitting an asynchronous 'error'.
  // Without a listener Node terminates the entire stdio MCP server (connection closed).
- const child=spawn(bin,args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
+ const launch=androidToolLaunch(bin,args,process.env)
+ const child=spawn(launch.command,launch.args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
  const session={id,child,closed:false,failure:null,buffer:'',lines:[],pending:new Map(),stopWaiters:new Set(),token:0,attachedPid:null}
  DEBUG_SESSIONS.set(id,session)
  const feed=chunk=>{
