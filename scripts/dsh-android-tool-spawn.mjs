@@ -17,7 +17,8 @@ export function androidToolLaunch(command, args=[], env=process.env) {
  const home=env.HOME||''
  const privateBinary=isAbsolute(command)&&(inside(command,prefix)||inside(command,home))
  const standalone=env.DSH_ANDROID_STANDALONE==='1'
- if(!standalone&&!privateBinary) return direct
+ const androidPrefix=prefix.startsWith('/data/data/') || prefix.startsWith('/data/user/')
+ if(!standalone && !(androidPrefix && privateBinary)) return direct
  // Android's own executables already have an executable system mount.
  // Do not recursively re-wrap the shell used to launch our bridge.
  if(command.startsWith('/system/')||command.startsWith('/apex/')) return direct
