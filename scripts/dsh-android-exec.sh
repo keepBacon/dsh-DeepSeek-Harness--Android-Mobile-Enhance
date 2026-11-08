@@ -28,7 +28,7 @@ case "$magic" in
     # Android's `head` can return CRLF source files. Parse the interpreter
     # token independently of optional shebang flags; never use eval/word
     # splitting on the user's script path or command arguments.
-    first_line="${first_line%"$(printf '\\r')"}"
+    first_line="${first_line%"$(printf '\r')"}"
     shebang="${first_line#\#!}"
     shebang="${shebang# }"
     interpreter="${shebang%% *}"
