@@ -226,6 +226,8 @@ function eachPackage(name, relFile, fn, { mandatory = false, requiredIfPresent =
   // Preflight inspects only the actual loader. Other mandatory patches must
   // not execute against an incomplete test fixture or mutate the runtime.
   if (process.env.DSH_COMPAT_PREFLIGHT_ONLY === '1') return
+  const selected = process.env.DSH_COMPAT_ONLY_PACKAGES?.split(',').filter(Boolean)
+  if (selected?.length && !selected.includes(name)) return
   const packages = byName.get(name) ?? []
   if (!packages.length) {
     if (mandatory) throw new Error(`mandatory package not found: ${name}`)

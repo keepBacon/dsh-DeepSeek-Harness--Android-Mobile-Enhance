@@ -1851,6 +1851,17 @@ class EngineManager(private val context: Context, private val pickToken: String?
       env["GIT_SSH_VARIANT"] = "ssh"
       env["GIT_SSH_COMMAND"] = sshCommand(batchMode = true)
     }
+    // An installed source-form ModSearch plugin can register read_page/x_search
+    // while ../dist/main.js is absent. Its upstream cliPath() supports this
+    // override. Use the APK's exact published CLI only for matching versions;
+    // do not change existing plugin versions or credentials.
+    val modsearchManifest = installedPackageManifest("@liustack/modsearch", "web")
+    val modsearchOriginal = File(profileDir("web"), "node_modules/@liustack/modsearch/dist/main.js")
+    val modsearchBundled = File(usrDir, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js")
+    if (modsearchManifest.isFile && !modsearchOriginal.isFile && modsearchBundled.isFile &&
+      installedPackageVersion("@liustack/modsearch", "", "web") == "5.10.11") {
+      env["MODSEARCH_DSH_CLI"] = modsearchBundled.absolutePath
+    }
     if (!ShellState.safeModeEnabled(context)) env.putAll(mcpConfigManager.secretEnvironment())
     return env
   }
