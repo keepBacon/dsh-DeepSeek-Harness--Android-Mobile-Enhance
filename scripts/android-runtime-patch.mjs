@@ -573,10 +573,17 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
   if (!txt.includes(marker)) {
     const anchor = /((?:const|let|var)\s+DEFAULT_BASH_SHELL\s*=\s*)["']\/bin\/bash["']/
     const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
-    if (matches.length !== 1) throw new Error('terminal-bash DEFAULT_BASH_SHELL anchor changed: ' + file)
-    txt = txt.replace(anchor, (_m, prefix) =>
-      prefix + 'process.env.DSH_ANDROID_STANDALONE === "1" ? (process.env.DSH_SIDEBAR_SHELL || process.env.SHELL || "/bin/bash") : "/bin/bash" /* ' + marker + ' */')
-    changed = true
+    if (matches.length !== 1) {
+      if (!process.env.DSH_COMPAT_ONLY_PACKAGES || matches.length !== 0)
+        throw new Error('terminal-bash DEFAULT_BASH_SHELL anchor changed: ' + file)
+      // The signed seed already has its own Bash default rewrite. Do not
+      // touch it; only update the PTY argv bridge below.
+      warn('preserving old seed terminal-bash default: ' + file)
+    } else {
+      txt = txt.replace(anchor, (_m, prefix) =>
+        prefix + 'process.env.DSH_ANDROID_STANDALONE === "1" ? (process.env.DSH_SIDEBAR_SHELL || process.env.SHELL || "/bin/bash") : "/bin/bash" /* ' + marker + ' */')
+      changed = true
+    }
   }
   if (!txt.includes(bridgeMarker)) {
     // node-pty uses execve(argv[0]). An app-private wrapper script is subject
@@ -584,7 +591,12 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
     // Launch /system/bin/sh with the Termux runner as an argument instead.
     const anchor = /(?:const|let|var)\s+argv\s*=\s*\[\s*config\.shellPath\s*,\s*\.\.\.config\.shellArgs\s*\]\s*;?/
     const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
-    if (matches.length !== 1) throw new Error('terminal-bash spawnArgv anchor changed: ' + file)
+    if (matches.length !== 1) {
+      const sample = [...txt.matchAll(/[^\n]{0,140}(?:shellPath|shellArgs|spawnArgv|argv =)[^\n]{0,160}/g)]
+        .slice(0, 8).map(m => m[0])
+      throw new Error('terminal-bash spawnArgv anchor changed (' + matches.length +
+        '): ' + file + ' candidates=' + JSON.stringify(sample))
+    }
     txt = txt.replace(anchor, match => match + '\n    // ' + bridgeMarker + '\n' + [
       "    if (process.env.DSH_ANDROID_STANDALONE === \"1\" && config.shellDialect === \"bash\") {",
       "      const runner = process.env.DSH_ANDROID_TERMUX_RUN;",
