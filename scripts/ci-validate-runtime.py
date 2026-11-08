@@ -10,6 +10,7 @@ REQUIRED = (
  'usr/libexec/dsh-mobile/android-sandbox-runner.sh',
  'usr/libexec/dsh-mobile/android-exec.sh',
  'usr/libexec/dsh-mobile/toolbox-mcp.mjs',
+ 'usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs',
  'usr/libexec/dsh-mobile/dsh-web-page-reader.mjs',
  'usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js',
  'usr/share/dsh-modsearch-recovery/node_modules/commander/package.json',
