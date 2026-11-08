@@ -20,6 +20,7 @@ assert.match(basicTools,/function fileMagicEnv\(\)/);
 assert.match(basicTools,/const env=opts\.env\|\|process\.env/);
 assert.match(basicTools,/androidToolLaunch\(cmd,args,env\)/);
 assert.match(read('scripts/dsh-android-tool-spawn.mjs'),/DSH_ANDROID_STANDALONE/);
+execFileSync(process.execPath,['--test',new URL('./test-android-mcp-tool-launch.mjs',import.meta.url).pathname],{stdio:'inherit'});
 assert.match(nativeBuild,/"gzip"/);
 assert.match(nativeBuild,/file is packaged without the magic\.mgc database/);
 assert.match(nativeBuild,/standalone archive codec 7zz missing/);
