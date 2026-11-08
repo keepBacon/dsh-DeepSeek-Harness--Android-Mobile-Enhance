@@ -90,7 +90,7 @@ function fileMagicEnv(){
  const chosen=candidates.find(p=>existsSync(p))
  return chosen?{...process.env,MAGIC:chosen}:process.env
 }
-async function strict(cmd,args=[],opts={}){const r=await run(cmd,args,opts);if(r.exitCode!==0)throw new Error(cmd+' failed: '+(r.stderr||r.stdout));return r.stdout}
+async function strict(cmd,args=[],opts={}){const r=await run(cmd,args,opts);if(r.timedOut)throw new Error(cmd+' timed out after '+(opts.timeout||30000)+'ms');if(r.exitCode!==0)throw new Error(cmd+' failed ('+(r.exitCode??r.signal??'spawn')+'): '+(r.stderr||r.stdout||'no output'));return r.stdout}
 async function sha(path,alg='sha256'){
  const hash=createHash(alg)
  for await(const chunk of createReadStream(path))hash.update(chunk)
@@ -247,9 +247,78 @@ async function call(name,a={}){
   case 'image_info':{const f=await checkedPath(a.path),o=await strict('magick',['identify','-format','%m\n%w\n%h\n%z\n%[colorspace]\n',f.path]),v=o.split(/\r?\n/);return{path:f.path,format:v[0],width:+v[1],height:+v[2],depth:+v[3],colorspace:v[4]}}
   case 'media_info':{const f=await checkedPath(a.path);return{path:f.path,info:JSON.parse(await strict('ffprobe',['-v','error','-show_format','-show_streams','-of','json',f.path],{timeout:30000}))}}
   case 'pdf_info':{const f=await checkedPath(a.path);return{path:f.path,...trim(await strict('pdfinfo',[f.path]),200)}}
-  case 'archive_extract':{const f=await checkedPath(a.path),d=userPath(a.destination),tmp=d+'.dsh-tmp-'+Date.now();if(await exists(d)&&!bool(a.overwrite,false))throw new Error('destination exists');await mkdir(tmp,{recursive:true});try{await strict(archiveBinary(),['x','-y','-o'+tmp,f.path],{timeout:120000});let count=0,total=0;async function scan(dir){for(const e of await readdir(dir,{withFileTypes:true})){count++;if(count>int(a.maxEntries,5000,1,20000))throw new Error('archive entry limit exceeded');const p=resolve(dir,e.name),s=await lstat(p);if(s.isSymbolicLink())throw new Error('archive symlink rejected');if(s.isDirectory())await scan(p);else if(s.isFile()){total+=s.size;if(total>int(a.maxTotalBytes,1073741824,1048576,4294967296))throw new Error('archive size limit exceeded')}}}await scan(tmp);if(await exists(d))await rm(d,{recursive:true,force:true});await rename(tmp,d);return{archive:f.path,destination:d,entries:count,totalBytes:total}}catch(e){await rm(tmp,{recursive:true,force:true}).catch(()=>{});throw e}}
+  case 'archive_extract':{
+   const f=await checkedPath(a.path),d=userPath(a.destination),overwrite=bool(a.overwrite,false);
+   const limitEntries=int(a.maxEntries,5000,1,20000);
+   const limitBytes=int(a.maxTotalBytes,1073741824,1048576,4294967296);
+   const current=await lstat(d).catch(e=>{if(e.code==='ENOENT')return null;throw e});
+   if(current?.isSymbolicLink())throw new Error('refusing symlink destination');
+   if(current&&!overwrite)throw new Error('destination exists');
+   const tmp=d+'.dsh-tmp-'+process.pid+'-'+randomBytes(8).toString('hex');
+   const backup=d+'.dsh-archive-backup-'+process.pid+'-'+randomBytes(8).toString('hex');
+   await mkdir(dirname(d),{recursive:true});
+   await mkdir(tmp);
+   let backupPending=false,installed=false;
+   try{
+    await strict(archiveBinary(),['x','-y','-o'+tmp,f.path],{timeout:120000});
+    let count=0,total=0;
+    async function scan(dir){
+     for(const e of await readdir(dir,{withFileTypes:true})){
+      count++;
+      if(count>limitEntries)throw new Error('archive entry limit exceeded');
+      const p=resolve(dir,e.name),s=await lstat(p);
+      if(s.isSymbolicLink())throw new Error('archive symlink rejected');
+      if(s.isDirectory())await scan(p);
+      else if(s.isFile()){total+=s.size;if(total>limitBytes)throw new Error('archive size limit exceeded')}
+     }
+    }
+    await scan(tmp);
+    const existing=await lstat(d).catch(e=>{if(e.code==='ENOENT')return null;throw e});
+    if(existing?.isSymbolicLink())throw new Error('refusing symlink destination');
+    if(existing&&!overwrite)throw new Error('destination exists');
+    if(existing){await rename(d,backup);backupPending=true}
+    try{await rename(tmp,d);installed=true}
+    catch(error){
+     if(backupPending){
+      try{await rename(backup,d);backupPending=false}
+      catch(restore){throw new Error('archive publish failed: '+error.message+'; restore failed: '+restore.message+'; preserved backup='+backup)}
+     }
+     throw error;
+    }
+    let warning=null;
+    if(backupPending){
+     try{await rm(backup,{recursive:true,force:true});backupPending=false}
+     catch(error){warning='Previous destination remains at '+backup+': '+error.message}
+    }
+    return{archive:f.path,destination:d,entries:count,totalBytes:total,...(warning?{warning}:{})};
+   }finally{if(!installed)await rm(tmp,{recursive:true,force:true}).catch(()=>{})}
+  }
   case 'archive_create':{const root=(await checkedDir(a.cwd||'.')).path,out=userPath(a.output),fmt=a.format||'zip',ps=[];for(const raw of a.paths||[]){const p=await realpath(resolve(root,text(raw,'path'))),rel=relative(root,p);if(rel===''||rel==='..'||rel.startsWith('..'+sep)||isAbsolute(rel))throw new Error('path escapes archive root');ps.push(rel)}if(!ps.length)throw new Error('paths empty');if(await exists(out)){if(!bool(a.overwrite,false))throw new Error('output exists');await rm(out,{force:true})}await mkdir(dirname(out),{recursive:true});if(fmt==='tar.gz')await strict('tar',['-czf',out,'--',...ps],{cwd:root,timeout:120000});else await strict(archiveBinary(),['a',fmt==='7z'?'-t7z':'-tzip','-y',out,...ps],{cwd:root,timeout:120000});return{path:out,format:fmt}}
-  case 'http_download':{const url=text(a.url,'url'),u=new URL(url);if(!['http:','https:'].includes(u.protocol))throw new Error('only http/https supported');const d=userPath(a.destination);if(await exists(d)&&!bool(a.overwrite,false))throw new Error('destination exists');await mkdir(dirname(d),{recursive:true});await strict('curl',['-fL','--max-filesize',String(int(a.maxBytes,268435456,1,1073741824)),'-o',d,url],{timeout:120000});return{path:d,size:(await stat(d)).size}}
+  case 'http_download':{
+   const url=text(a.url,'url'),u=new URL(url);
+   if(!['http:','https:'].includes(u.protocol))throw new Error('only http/https supported');
+   const d=userPath(a.destination),overwrite=bool(a.overwrite,false);
+   const limit=int(a.maxBytes,268435456,1,1073741824);
+   await mkdir(dirname(d),{recursive:true});
+   const before=await lstat(d).catch(e=>{if(e.code==='ENOENT')return null;throw e});
+   if(before?.isSymbolicLink())throw new Error('refusing symlink destination');
+   if(before&&!before.isFile())throw new Error('destination is not a regular file');
+   if(before&&!overwrite)throw new Error('destination exists');
+   const tmp=d+'.dsh-download-'+process.pid+'-'+randomBytes(8).toString('hex');
+   try{
+    await writeFile(tmp,'',{flag:'wx',mode:0o600});
+    // Never stream an incomplete download into the visible destination.
+    await strict('curl',['-fL','--max-filesize',String(limit),'-o',tmp,url],{timeout:120000});
+    const actual=await stat(tmp);
+    if(!actual.isFile()||actual.size>limit)throw new Error('download exceeds configured byte limit');
+    const latest=await lstat(d).catch(e=>{if(e.code==='ENOENT')return null;throw e});
+    if(latest?.isSymbolicLink())throw new Error('refusing symlink destination');
+    if(latest&&!latest.isFile())throw new Error('destination is not a regular file');
+    if(overwrite)await rename(tmp,d);
+    else await link(tmp,d); // EEXIST if another process created the destination.
+    return{path:d,size:actual.size};
+   }finally{await rm(tmp,{force:true}).catch(()=>{})}
+  }
   case 'tls_inspect':{const h=text(a.host,'host'),p=int(a.port,443,1,65535),x=await run('openssl',['s_client','-connect',h+':'+p,'-servername',h,'-showcerts','-brief'],{timeout:15000});return{host:h,port:p,ok:x.exitCode===0,...trim(x.stdout+'\n'+x.stderr,500)}}
   case 'certificate_info':{const f=await checkedPath(a.path);let x=await run('openssl',['x509','-in',f.path,'-noout','-subject','-issuer','-serial','-dates','-fingerprint','-sha256']);if(x.exitCode!==0)x=await run('openssl',['x509','-inform','DER','-in',f.path,'-noout','-subject','-issuer','-serial','-dates','-fingerprint','-sha256']);if(x.exitCode!==0)throw new Error(x.stderr||x.stdout);return{path:f.path,...trim(x.stdout,100)}}
   case 'line_endings':{const f=await checkedPath(a.path),s=await readFile(f.path,'utf8'),crlf=(s.match(/\r\n/g)||[]).length,lf=(s.match(/(?<!\r)\n/g)||[]).length;if(a.convertTo&&!bool(a.dryRun,true)){const next=a.convertTo==='CRLF'?s.replace(/\r?\n/g,'\r\n'):s.replace(/\r\n/g,'\n');await writeFile(f.path,next)}return{path:f.path,crlf,lf,mixed:crlf>0&&lf>0,converted:a.convertTo||null,dryRun:bool(a.dryRun,true)}}
