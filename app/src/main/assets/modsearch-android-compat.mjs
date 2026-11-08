@@ -70,8 +70,27 @@ function verifyManifest(dir){
 function recoverOriginalPublishedCli(home, name) {
   const recovery = process.env.DSH_ANDROID_MODSEARCH_RECOVERY
   if (process.env.DSH_ANDROID_STANDALONE !== '1' || !recovery) return {restored:[]}
-  const location = resolve(home, '.dsh', 'profiles', name, 'node_modules', '@liustack', 'modsearch')
-  if (!existsSync(location)) return {restored:[]}
+  const profile = resolve(home, '.dsh', 'profiles', name)
+  const location = join(profile, 'node_modules', '@liustack', 'modsearch')
+  let recoveredPackage = false
+  // Repair an absent npm tree only if the preserved profile explicitly
+  // declares this exact plugin release. Never enroll a new plugin implicitly.
+  if (!existsSync(location)) {
+    if (lstatExists(location)) return {restored:[], warning:'broken-plugin-symlink'}
+    const declared = join(profile, 'package.json')
+    if (!existsSync(declared)) return {restored:[]}
+    const info = JSON.parse(readFileSync(declared, 'utf8'))
+    const requested = info.dependencies?.['@liustack/modsearch']
+    if (!['5.10.11','^5.10.11','~5.10.11'].includes(requested))
+      return {restored:[], warning:'undeclared-or-different-version'}
+    const payload = join(resolve(recovery), '@liustack','modsearch')
+    const publishedMeta = JSON.parse(readFileSync(join(payload,'package.json'),'utf8'))
+    if (publishedMeta.name !== '@liustack/modsearch' || publishedMeta.version !== '5.10.11')
+      throw new Error('bundled ModSearch plugin identity mismatch')
+    mkdirSync(dirname(location),{recursive:true})
+    cpSync(payload,location,{recursive:true,force:false,errorOnExist:true,dereference:false})
+    recoveredPackage = true
+  }
   const installed = realpathSync(location)
   if (!scoped(home, installed)) return {restored:[], warning:'plugin-outside-app-home'}
   const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'))
@@ -84,7 +103,7 @@ function recoverOriginalPublishedCli(home, name) {
   if (publishedManifest.name !== manifest.name || publishedManifest.version !== manifest.version) {
     throw new Error('ModSearch recovery resource identity mismatch')
   }
-  const restored = []
+  const restored = recoveredPackage ? ['package'] : []
   const destinationDist = join(installed, 'dist')
   if (!existsSync(join(destinationDist, 'main.js'))) {
     // Existing non-directory nodes and symlinked destination paths must not
