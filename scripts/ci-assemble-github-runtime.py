@@ -358,7 +358,8 @@ def main():
         # Termux builder to the DSH graph that will actually ship in the APK.
         subprocess.run(
             ["node", str(args.repo / "scripts/android-runtime-patch.mjs"), str(stage / "usr")],
-            check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.1.5-rc.2"})
+            check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.1.5-rc.2",
+                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-sandbox-local"})
         patch_web_fetch_limits(stage)
         stage_modsearch(stage, workspace)
         install_typescript(stage, workspace)
