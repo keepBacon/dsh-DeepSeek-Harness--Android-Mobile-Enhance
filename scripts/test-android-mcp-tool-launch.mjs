@@ -38,5 +38,6 @@ test('No false Android wrapping for other absolute paths, missing HOME or deskto
  assert.equal(androidToolLaunch('/tmp/other-tool',[],env).bridged,false)
  assert.equal(androidToolLaunch('/data/unrelated/tool',[],env).bridged,false)
  assert.equal(androidToolLaunch('git',[],{PREFIX:'/usr/local',DSH_ANDROID_STANDALONE:'0'}).bridged,false)
+ assert.equal(androidToolLaunch('/usr/local/bin/git',[],{PREFIX:'/usr/local',DSH_ANDROID_STANDALONE:'0'}).bridged,false)
  assert.equal(androidToolLaunch('git',[],{DSH_ANDROID_STANDALONE:'1'}).bridged,false)
 })
