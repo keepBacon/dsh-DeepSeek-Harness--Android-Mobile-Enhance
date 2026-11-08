@@ -40,6 +40,22 @@ PY
 out="$(/bin/sh "$bridge" "$TMP/workspace/script.py" 'one' 'two with spaces')"
 test "$out" = "one|two with spaces"
 
+# Script dispatch must preserve a one-token shebang option, and handle
+# env -S plus Windows line endings without trying to execve app-data scripts.
+printf '#!/usr/bin/env -S python3\nimport sys\nprint("env-S|"+"|".join(sys.argv[1:]))\n' > "$TMP/workspace/env-s.py"
+out="$(/bin/sh "$bridge" "$TMP/workspace/env-s.py" 'argument with spaces')"
+test "$out" = 'env-S|argument with spaces'
+
+printf '#!%s/bin/python3 -B\r\nimport sys\r\nprint("flag|"+"|".join(sys.argv[1:]))\r\n' "$TMP/usr" > "$TMP/workspace/flag-crlf.py"
+out="$(/bin/sh "$bridge" "$TMP/workspace/flag-crlf.py" 'two words')"
+test "$out" = 'flag|two words'
+
+printf '#!/usr/bin/env -S python3 -I\nprint("must not execute")\n' > "$TMP/workspace/unsafe-flags.py"
+if /bin/sh "$bridge" "$TMP/workspace/unsafe-flags.py" >/dev/null 2>&1; then
+  echo '[FAIL] unsupported multi-token env shebang was silently accepted' >&2
+  exit 1
+fi
+
 printf 'plain text, not a command\n' > "$TMP/workspace/not-elf"
 if /bin/sh "$bridge" "$TMP/workspace/not-elf" >/dev/null 2>&1; then
   echo '[FAIL] bridge must reject non-executable text' >&2
