@@ -58,6 +58,7 @@ try {
   assert.equal(await readFile(join(profile,'dist/main.js'),'utf8'),'console.log("recoverable-cli")')
   assert.equal(await readFile(join(profile,'user-plugin-notes.txt'),'utf8'),'keep exactly')
   assert.match(await readFile(join(profile,'dsh/index.js'),'utf8'),/bounded original read_page local fallback/)
+  assert.match(await readFile(join(profile,'dsh/index.js'),'utf8'),/linker-safe original CLI spawn/)
   assert.equal((repairModsearch(home,true).results.find(x=>x.profile==='web')).status,'already-patched')
   // The profile still declares the exact package, but node_modules was
   // removed: reinstate the original published plugin without editing profile.
