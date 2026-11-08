@@ -7,6 +7,7 @@ import { codeAstTools, codeAstCall } from './dsh-code-engine-ast.mjs'
 import { codeWorkflowTools, codeWorkflowCall } from './dsh-code-engine-workflow.mjs'
 import { luaTools, luaCall } from './dsh-lua-tools.mjs'
 import { spawn } from 'node:child_process'
+import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
 import { readWebPage, readPageTool } from './dsh-web-page-reader.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
@@ -137,16 +138,7 @@ async function runProcess(command,args=[],opts={}){
  return await new Promise((resolvePromise)=>{
   const started=Date.now()
   let child
-  // Model tools may request direct app-private ELF paths instead of wrappers.
-  // Use /system/bin/sh as the executable; the bridge invokes linker64 for
-  // Android ELF and the correct interpreter for Termux scripts.
-  const root=env.TERMUX__PREFIX||env.PREFIX||''
-  const bridge=env.DSH_ANDROID_EXEC_BRIDGE||
-    (root?resolve(root,'libexec/dsh-mobile/android-exec.sh'):null)
-  const bridgeNeeded=Boolean(bridge && root) &&
-    (bin.startsWith(root+'/') || bin.startsWith((env.HOME||'')+'/'))
-  const launch=bridgeNeeded?'/system/bin/sh':bin
-  const launchArgs=bridgeNeeded?[bridge,bin,...argv]:argv
+  const {command:launch,args:launchArgs}=androidToolLaunch(bin,argv,env)
   try{child=spawn(launch,launchArgs,{cwd,env,shell:false,stdio:['ignore','pipe','pipe']})}catch(error){resolvePromise({exitCode:null,signal:null,stdout:'',stderr:String(error),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
   let stdout=Buffer.alloc(0),stderr=Buffer.alloc(0),truncated=false,timedOut=false,spawnError=null
   const capture=(current,chunk)=>{const b=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);if(current.length>=maxOutput){truncated=true;return current}const room=maxOutput-current.length;if(b.length>room)truncated=true;return Buffer.concat([current,b.subarray(0,room)])}
