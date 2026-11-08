@@ -1,7 +1,7 @@
 name: Build DSH on GitHub (Android ARM64, no Termux)
 on:
   push:
-    branches: [main, fix/modsearch-direct-child-spawn-linker-20261108]
+    branches: [main]
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
