@@ -13,6 +13,7 @@ const MARKER='DSH Android modsearch: stable app-private CLI cwd'
 const ENV_MARKER='DSH Android modsearch: clean inherited NODE_OPTIONS for CLI'
 
 const READ_MARKER='DSH Android modsearch: bounded original read_page local fallback'
+const SPAWN_MARKER='DSH Android modsearch: linker-safe original CLI spawn'
 // Inserted only into the ORIGINAL plugin. Do not bypass its URL/private-network
 // restrictions: the local provider keeps the upstream SSRF checks and redirects.
 const READ_HELPER = [
@@ -177,6 +178,17 @@ function patchPlugin(file) {
     const count=next.split(OLD).length-1
     if(count!==1)return 'unexpected-spawn-shape-'+count
     next=next.replace(OLD,NEW)
+  }
+  if(!next.includes(SPAWN_MARKER)){
+    // This plugin uses its own child_process.spawn(), bypassing the DSH
+    // subprocess provider. Android app-data ELF execve may be denied even
+    // after the CLI path is repaired. Preserve the plugin's one original
+    // spawn route and its exact argv/env/signal semantics.
+    const anchor='spawnHidden(command, args, {'
+    if(next.split(anchor).length!==2)return 'unexpected-original-cli-spawn'
+    next=next.replace(anchor,
+      'spawnHidden(process.env.DSH_ANDROID_STANDALONE === "1" && process.env.DSH_ANDROID_EXEC_BRIDGE ? "/system/bin/sh" : command, ' +
+      '(process.env.DSH_ANDROID_STANDALONE === "1" && process.env.DSH_ANDROID_EXEC_BRIDGE ? [process.env.DSH_ANDROID_EXEC_BRIDGE, command, ...args] : args), { // '+SPAWN_MARKER)
   }
   if(!next.includes(ENV_MARKER)){
     const oldEnv='function childEnv() {'
