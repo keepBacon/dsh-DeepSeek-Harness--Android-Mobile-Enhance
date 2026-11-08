@@ -184,7 +184,7 @@ function patchPlugin(file) {
     // subprocess provider. Android app-data ELF execve may be denied even
     // after the CLI path is repaired. Preserve the plugin's one original
     // spawn route and its exact argv/env/signal semantics.
-    const anchor=/spawnHidden\\(\\s*command\\s*,\\s*args\\s*,\\s*\\{/g
+    const anchor=/spawnHidden\(\s*command\s*,\s*args\s*,\s*\{/g
     if([...next.matchAll(anchor)].length!==1)return 'unexpected-original-cli-spawn'
     next=next.replace(anchor,
       'spawnHidden(process.env.DSH_ANDROID_STANDALONE === "1" && process.env.DSH_ANDROID_EXEC_BRIDGE ? "/system/bin/sh" : command, ' +
