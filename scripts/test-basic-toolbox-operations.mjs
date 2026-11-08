@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import {mkdtemp,mkdir,writeFile,readFile,rm,symlink} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
+import {createServer} from 'node:http'
 import {join} from 'node:path'
 import {basicToolCall} from './dsh-basic-toolbox-mcp.mjs'
 const root=await mkdtemp(join(tmpdir(),'dsh-basic-ops-'))
@@ -55,5 +56,39 @@ try{
  assert.equal(ok.files.length,2)
  assert.equal(await readFile(source,'utf8'),'new text')
  assert.equal(await readFile(second,'utf8'),'new text')
+ // Failed downloads must never leave a partial visible file or replace old bytes.
+ const downloaded=join(root,'downloaded.bin')
+ await writeFile(downloaded,'old download')
+ const server=createServer((req,res)=>{
+  if(req.url==='/fail'){res.writeHead(503);res.end('upstream unavailable');return}
+  if(req.url==='/large'){res.writeHead(200,{'Content-Type':'application/octet-stream'});res.end('x'.repeat(2048));return}
+  res.writeHead(200,{'Content-Type':'application/octet-stream'});res.end('new payload')
+ })
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve)})
+ try{
+  const base='http://127.0.0.1:'+server.address().port
+  await assert.rejects(call('http_download',{url:base+'/fail',destination:downloaded,overwrite:true}),/curl failed/)
+  assert.equal(await readFile(downloaded,'utf8'),'old download')
+  await assert.rejects(call('http_download',{url:base+'/large',destination:downloaded,overwrite:true,maxBytes:16}),/curl failed|download exceeds/)
+  assert.equal(await readFile(downloaded,'utf8'),'old download')
+  await assert.rejects(call('http_download',{url:base+'/ok',destination:downloaded}),/destination exists/)
+  assert.equal((await call('http_download',{url:base+'/ok',destination:downloaded,overwrite:true})).size,11)
+  assert.equal(await readFile(downloaded,'utf8'),'new payload')
+  const fresh=join(root,'fresh-download.txt')
+  assert.equal((await call('http_download',{url:base+'/ok',destination:fresh})).size,11)
+  assert.equal(await readFile(fresh,'utf8'),'new payload')
+ }finally{server.closeAllConnections();await new Promise(done=>server.close(done))}
+ // Archive failures leave the old destination intact, including its children.
+ const archive=join(root,'not-an-archive.7z'),extract=join(root,'extracted')
+ await writeFile(archive,'not a valid archive')
+ await mkdir(extract)
+ await writeFile(join(extract,'keep.txt'),'original')
+ await assert.rejects(call('archive_extract',{path:archive,destination:extract,overwrite:true}))
+ assert.equal(await readFile(join(extract,'keep.txt'),'utf8'),'original')
+ // The destination cannot be traversed through an existing symlink.
+ const extractLink=join(root,'extract-symlink')
+ await symlink(extract,extractLink)
+ await assert.rejects(call('archive_extract',{path:archive,destination:extractLink,overwrite:true}),/symlink/)
+ assert.equal(await readFile(join(extract,'keep.txt'),'utf8'),'original')
  console.log('[DSH] basic file tools regression: OK')
 }finally{await rm(root,{recursive:true,force:true})}

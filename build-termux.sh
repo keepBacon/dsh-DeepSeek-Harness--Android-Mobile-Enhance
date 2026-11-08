@@ -108,6 +108,7 @@ dsh_static_build_preflight() {
   [ -f "$ROOT/scripts/android-runtime-patch.mjs" ] || { echo "[DSH] Missing android-runtime-patch.mjs" >&2; fail=1; }
   [ -f "$ROOT/scripts/dsh-android-sandbox-runner.sh" ] || { echo "[DSH] Missing dsh-android-sandbox-runner.sh" >&2; fail=1; }
   [ -f "$ROOT/scripts/dsh-android-exec.sh" ] || { echo "[DSH] Missing dsh-android-exec.sh" >&2; fail=1; }
+  node --test "$ROOT/scripts/test-android-mcp-tool-launch.mjs" || fail=1
   bash -n "$ROOT/scripts/dsh-android-exec.sh" || fail=1;
   bash -n "$ROOT/scripts/dsh-android-sandbox-runner.sh" || fail=1;
   [ -f "$ROOT/scripts/dsh-runtime-family.mjs" ] || { echo "[DSH] Missing dsh-runtime-family.mjs" >&2; fail=1; }
@@ -1571,6 +1572,7 @@ install_mobile_mcp_toolbox() {
   [ -f "$MOBILE_MCP_TOOLBOX" ] || { echo "[DSH] Missing mobile MCP toolbox source"; exit 8; }
   mkdir -p "$(dirname "$dest")"
   cp "$MOBILE_MCP_TOOLBOX" "$dest"
+  cp "$ROOT/scripts/dsh-android-tool-spawn.mjs" "$(dirname "$dest")/dsh-android-tool-spawn.mjs"
   cp "$ROOT/scripts/dsh-web-page-reader.mjs" "$(dirname "$dest")/dsh-web-page-reader.mjs"
   "$stage/usr/bin/node" --check "$(dirname "$dest")/dsh-web-page-reader.mjs" >/dev/null
   cp "$ROOT/scripts/dsh-code-engine.mjs" "$(dirname "$dest")/dsh-code-engine.mjs"
@@ -1599,6 +1601,7 @@ install_basic_mcp_toolbox() {
   [ -f "$BASIC_MCP_TOOLBOX" ] || { echo "[DSH] Missing basic MCP toolbox source"; exit 8; }
   mkdir -p "$(dirname "$dest")"
   cp "$BASIC_MCP_TOOLBOX" "$dest"
+  cp "$ROOT/scripts/dsh-android-tool-spawn.mjs" "$(dirname "$dest")/dsh-android-tool-spawn.mjs"
   chmod 0755 "$dest"
   "$stage/usr/bin/node" --check "$dest" >/dev/null
   env PATH="$stage/usr/libexec/dsh/wrappers:$stage/usr/bin:/system/bin" LD_LIBRARY_PATH="$stage/usr/lib" TERMUX__PREFIX="$stage/usr" PREFIX="$stage/usr"     "$stage/usr/bin/node" "$dest" --self-test || { echo '[DSH] Basic MCP toolbox self-test failed.'; exit 8; }
@@ -1625,6 +1628,7 @@ validate_dsh_core_plugin_tree() {
   [ -f "$stage/usr/libexec/dsh-mobile/dsh-code-engine-workflow.mjs" ] || { echo "[DSH] Missing Code Engine workflow module"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/dsh-code-engine-journal.mjs" ] || { echo "[DSH] Missing Code Engine journal module"; exit 8; }
   [ -f "$stage/usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs" ] || { echo "[DSH] Missing basic MCP toolbox"; exit 8; }
+  [ -f "$stage/usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs" ] || { echo "[DSH] Missing Android tool launch helper"; exit 8; }
 
   rm -rf "$smoke_home"
   mkdir -p "$smoke_home/tmp"

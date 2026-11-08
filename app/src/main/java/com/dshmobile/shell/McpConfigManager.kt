@@ -33,17 +33,33 @@ class McpConfigManager(
   private val toolboxFile = File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs")
   private val basicToolboxFile = File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs")
 
-  /** The main toolbox imports sibling ESM modules. A missing one crashes stdio
-   * discovery before tools/list; previously the UI still displayed it as ready. */
+  /** Both built-in services share an ESM module tree. Verify transitively:
+   * one absent indirect import can crash startup and lose a whole namespace. */
   private fun missingToolboxModules(): List<String> {
-    if (!toolboxFile.isFile) return listOf("toolbox-mcp.mjs")
-    val source = try { toolboxFile.readText() } catch (_: Throwable) {
-      return listOf("toolbox-mcp.mjs (unreadable)")
+    val importPattern = Regex("""(?:from\s+|import\s*\(\s*)['"]\./([A-Za-z0-9._-]+\.mjs)['"]""")
+    val bridge = File(usrDir, "libexec/dsh-mobile/android-exec.sh")
+    val missing = mutableListOf<String>()
+    if (!bridge.isFile) missing += bridge.name
+    val pending = ArrayDeque<File>()
+    pending.add(toolboxFile)
+    pending.add(basicToolboxFile)
+    val visited = mutableSetOf<String>()
+    while (pending.isNotEmpty()) {
+      val entry = pending.removeFirst()
+      if (!visited.add(entry.absolutePath)) continue
+      if (!entry.isFile) {
+        missing += entry.name
+        continue
+      }
+      val source = try { entry.readText() } catch (_: Throwable) {
+        missing += entry.name + " (unreadable)"
+        continue
+      }
+      for (match in importPattern.findAll(source)) {
+        pending.add(File(entry.parentFile, match.groupValues[1]))
+      }
     }
-    val importPattern = Regex("""from\s+['"]\./([A-Za-z0-9._-]+\.mjs)['"]""")
-    return importPattern.findAll(source)
-      .map { it.groupValues[1] }.distinct()
-      .filter { !File(toolboxFile.parentFile, it).isFile }.toList()
+    return missing.distinct()
   }
 
   fun toolboxEnabled(): Boolean = readRootSafe().optBoolean("toolboxEnabled", true)
@@ -336,8 +352,15 @@ class McpConfigManager(
     append("  config:\n")
     append("    serverName: mobile_tools\n")
     append("    transport: stdio\n")
-    append("    command: ").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append('\n')
-    append("    args: [").append(JSONObject.quote(toolboxFile.absolutePath)).append("]\n")
+    // MCP client child_process uses execve; Android app-private Node is
+    // not directly executable on all devices. Start via the system-shell
+    // bridge exactly as the DSH Host does for its own Node process.
+    append("    command: ").append(JSONObject.quote("/system/bin/sh")).append('\n')
+    append("    args: ").append(JSONArray(listOf(
+      File(usrDir, "libexec/dsh-mobile/android-exec.sh").absolutePath,
+      File(usrDir, "bin/node").absolutePath,
+      toolboxFile.absolutePath
+    )).toString()).append('\n')
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
@@ -365,8 +388,12 @@ class McpConfigManager(
     append("  config:\n")
     append("    serverName: basic_tools\n")
     append("    transport: stdio\n")
-    append("    command: ").append(JSONObject.quote(File(usrDir, "bin/node").absolutePath)).append('\n')
-    append("    args: [").append(JSONObject.quote(basicToolboxFile.absolutePath)).append("]\n")
+    append("    command: ").append(JSONObject.quote("/system/bin/sh")).append('\n')
+    append("    args: ").append(JSONArray(listOf(
+      File(usrDir, "libexec/dsh-mobile/android-exec.sh").absolutePath,
+      File(usrDir, "bin/node").absolutePath,
+      basicToolboxFile.absolutePath
+    )).toString()).append('\n')
     append("    env:\n")
     append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
     append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')

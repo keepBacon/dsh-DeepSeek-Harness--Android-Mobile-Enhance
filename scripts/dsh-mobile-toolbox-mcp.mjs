@@ -7,6 +7,7 @@ import { codeAstTools, codeAstCall } from './dsh-code-engine-ast.mjs'
 import { codeWorkflowTools, codeWorkflowCall } from './dsh-code-engine-workflow.mjs'
 import { luaTools, luaCall } from './dsh-lua-tools.mjs'
 import { spawn } from 'node:child_process'
+import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
 import { readWebPage, readPageTool } from './dsh-web-page-reader.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
@@ -137,16 +138,7 @@ async function runProcess(command,args=[],opts={}){
  return await new Promise((resolvePromise)=>{
   const started=Date.now()
   let child
-  // Model tools may request direct app-private ELF paths instead of wrappers.
-  // Use /system/bin/sh as the executable; the bridge invokes linker64 for
-  // Android ELF and the correct interpreter for Termux scripts.
-  const root=env.TERMUX__PREFIX||env.PREFIX||''
-  const bridge=env.DSH_ANDROID_EXEC_BRIDGE||
-    (root?resolve(root,'libexec/dsh-mobile/android-exec.sh'):null)
-  const bridgeNeeded=Boolean(bridge && root) &&
-    (bin.startsWith(root+'/') || bin.startsWith((env.HOME||'')+'/'))
-  const launch=bridgeNeeded?'/system/bin/sh':bin
-  const launchArgs=bridgeNeeded?[bridge,bin,...argv]:argv
+  const {command:launch,args:launchArgs}=androidToolLaunch(bin,argv,env)
   try{child=spawn(launch,launchArgs,{cwd,env,shell:false,stdio:['ignore','pipe','pipe']})}catch(error){resolvePromise({exitCode:null,signal:null,stdout:'',stderr:String(error),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
   let stdout=Buffer.alloc(0),stderr=Buffer.alloc(0),truncated=false,timedOut=false,spawnError=null
   const capture=(current,chunk)=>{const b=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);if(current.length>=maxOutput){truncated=true;return current}const room=maxOutput-current.length;if(b.length>room)truncated=true;return Buffer.concat([current,b.subarray(0,room)])}
@@ -265,11 +257,13 @@ async function startManagedFrida(a,targetArgs,userScript=''){
  const source="console.log('__DSH_READY__'+JSON.stringify({pid:Process.id,arch:Process.arch,platform:Process.platform}));\n"+userScript+"\nsetInterval(function(){},1000);\n"
  await writeFile(scriptPath,source,{mode:0o600})
  const args=[...fridaDeviceArgs(a),...targetArgs,'-q','-l',scriptPath]
- const child=spawn(toolWrapped('frida'),args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
+ const launch=androidToolLaunch(toolWrapped('frida'),args,process.env)
+ const child=spawn(launch.command,launch.args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
  const session={id,child,tmpRoot,closed:false,lines:[],ready:null,pid:null,target:targetArgs.join(' ')}
  FRIDA_SESSIONS.set(id,session)
  const feed=chunk=>{for(const line of chunk.toString('utf8').split(/\r?\n/)){if(!line)continue;session.lines.push(line);if(session.lines.length>1000)session.lines.splice(0,session.lines.length-1000);const at=line.indexOf('__DSH_READY__');if(at>=0){try{session.ready=JSON.parse(line.slice(at+'__DSH_READY__'.length));session.pid=session.ready.pid}catch{}}}}
  child.stdout.on('data',feed);child.stderr.on('data',feed)
+ child.on('error',error=>{session.lines.push('Frida launch error: '+error.message);session.closed=true;FRIDA_SESSIONS.delete(id);rm(tmpRoot,{recursive:true,force:true}).catch(()=>{})})
  child.on('close',()=>{session.closed=true;FRIDA_SESSIONS.delete(id);rm(tmpRoot,{recursive:true,force:true}).catch(()=>{})})
  const timeout=int(a.timeoutMs,5000,500,30000),started=Date.now()
  while(!session.ready&&!session.closed&&Date.now()-started<timeout)await new Promise(r=>setTimeout(r,50))
@@ -339,7 +333,8 @@ async function startDebugSession(){
  const args=['--interpreter=mi2','-q','-nx','--data-directory='+resolve(PREFIX,'share/gdb')]
  // A child can fail after spawn() returns, emitting an asynchronous 'error'.
  // Without a listener Node terminates the entire stdio MCP server (connection closed).
- const child=spawn(bin,args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
+ const launch=androidToolLaunch(bin,args,process.env)
+ const child=spawn(launch.command,launch.args,{env:process.env,cwd:process.cwd(),shell:false,stdio:['pipe','pipe','pipe']})
  const session={id,child,closed:false,failure:null,buffer:'',lines:[],pending:new Map(),stopWaiters:new Set(),token:0,attachedPid:null}
  DEBUG_SESSIONS.set(id,session)
  const feed=chunk=>{

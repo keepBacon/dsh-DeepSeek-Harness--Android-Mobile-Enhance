@@ -85,6 +85,8 @@ jobs:
           node scripts/validate-agent-preset-parity.mjs --self-test
           node --check app/src/main/assets/dsh-tool-call-monitor.js
           node scripts/test-mobile-database-contract.mjs
+          node scripts/test-android-mcp-registration-contract.mjs
+          node scripts/test-dsh-web-page-reader.mjs
           node scripts/test-basic-toolbox-operations.mjs
           node scripts/test-mobile-toolbox-dispatch.mjs
           node --test scripts/test-lua-workflow.mjs
@@ -119,6 +121,7 @@ jobs:
           cp scripts/dsh-mobile-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/toolbox-mcp.mjs"
           cp scripts/dsh-web-page-reader.mjs "$stage/libexec/dsh-mobile/dsh-web-page-reader.mjs"
           cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
+          cp scripts/dsh-android-tool-spawn.mjs "$stage/libexec/dsh-mobile/dsh-android-tool-spawn.mjs"
           cp scripts/dsh-code-engine*.mjs "$stage/libexec/dsh-mobile/"
           cp scripts/dsh-lua*.mjs "$stage/libexec/dsh-mobile/"
           npm install --prefix "$stage/lib/node_modules/@deepseek-ai/dsh" --no-save --ignore-scripts --no-audit --no-fund @modelcontextprotocol/sdk@1.25.3
