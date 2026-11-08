@@ -11,10 +11,21 @@ process.env.HOME = home
 const payload = 'abc123'.repeat(40000)
 const html = '<html><body><h1>Test &amp; title</h1><p>' + payload + '</p></body></html>'
 let requests = 0
-const server = createServer((_req, res) => {
+const server = createServer((req, res) => {
   requests++
+  if(req.url==='/not-found') {
+    res.writeHead(404, {'content-type':'text/html; charset=utf-8'})
+    res.end('<html>not found</html>')
+    return
+  }
+  if(req.url==='/unavailable') {
+    res.writeHead(503, {'content-type':'text/plain'})
+    res.end('retry later')
+    return
+  }
   res.writeHead(200, {'content-type':'text/html; charset=utf-8'})
-  res.end(html)
+  if(req.url==='/concurrent') setTimeout(()=>res.end(html),30)
+  else res.end(html)
 })
 try {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -39,6 +50,22 @@ try {
   assert.equal(parsed.cached, true)
   await readWebPage({url,refresh:true,maxChars:100})
   assert.equal(requests, 2)
+  // A failed fetch is never served as successful cached content.
+  for(const status of [404,503]){
+    const endpoint=status===404?'/not-found':'/unavailable'
+    const before=requests
+    await assert.rejects(readWebPage({url:'http://127.0.0.1:'+server.address().port+endpoint}),new RegExp('HTTP_PAGE_ERROR.*'+status))
+    await assert.rejects(readWebPage({url:'http://127.0.0.1:'+server.address().port+endpoint}),new RegExp('HTTP_PAGE_ERROR.*'+status))
+    assert.equal(requests,before+2,'failed HTTP responses must not be cached')
+  }
+  // Concurrent reads share a single complete download, rather than racing
+  // separate body/metadata renames in the same process.
+  const concurrentUrl='http://127.0.0.1:'+server.address().port+'/concurrent'
+  const before=requests
+  const concurrent=await Promise.all(Array.from({length:8},()=>readWebPage({url:concurrentUrl,format:'html',maxChars:120})))
+  assert.equal(requests,before+1,'concurrent read_page requests must fetch once')
+  assert.ok(concurrent.every(p=>p.content===html.slice(0,120)))
+  assert.equal((await readWebPage({url:concurrentUrl})).cached,true)
   console.log('[OK] paginated read_page: ' + windows + ' windows, 240k+ source chars, cached')
 } finally {
   await new Promise(resolve => server.close(resolve))
