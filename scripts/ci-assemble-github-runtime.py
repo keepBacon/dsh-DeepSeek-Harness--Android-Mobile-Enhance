@@ -353,13 +353,16 @@ def main():
         unpack_seed(args.seed, stage)
         manifest = fetch_packages(stage, workspace)
         overlay_sources(stage, args.repo)
-        # The GitHub native builder reuses a published DSH seed that predates
-        # this Bash PTY linker fix. Apply the same compatibility patch as the
-        # Termux builder to the DSH graph that will actually ship in the APK.
+        # The GitHub native builder reuses an already-patched DSH seed.
+        # Only update its PTY and sandbox launcher entrypoints. The seed's
+        # subprocess-local bundle does not contain the upstream containment
+        # anchor used by the full fresh-install patch; rerunning that rewrite
+        # aborts signed assembly. Keep the original patched module intact and
+        # rely on the Termux execution bridge for nested CLI commands.
         subprocess.run(
             ["node", str(args.repo / "scripts/android-runtime-patch.mjs"), str(stage / "usr")],
             check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.1.5-rc.2",
-                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-sandbox-local"})
+                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local"})
         patch_web_fetch_limits(stage)
         stage_modsearch(stage, workspace)
         install_typescript(stage, workspace)
