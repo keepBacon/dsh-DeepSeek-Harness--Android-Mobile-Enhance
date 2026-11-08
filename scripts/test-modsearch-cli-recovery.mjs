@@ -42,6 +42,9 @@ try {
   await packageFile(published,'@liustack/modsearch','5.10.11')
   await mkdir(join(published,'dist'),{recursive:true})
   await writeFile(join(published,'dist/main.js'),'console.log("recoverable-cli")')
+  await mkdir(join(published,'dsh'),{recursive:true})
+  await writeFile(join(published,'dsh/index.js'),body)
+  await writeFile(join(published,'package.json'),JSON.stringify({name:'@liustack/modsearch',version:'5.10.11',dependencies:{commander:'^13.1.0',undici:'^7.29.0'}}))
   for(const [name,version] of [['commander','13.1.0'],['undici','7.29.0']]){
     await packageFile(join(resources,name),name,version,{main:'index.js'})
     await writeFile(join(resources,name,'index.js'),'export const loaded=true')
@@ -56,6 +59,17 @@ try {
   assert.equal(await readFile(join(profile,'user-plugin-notes.txt'),'utf8'),'keep exactly')
   assert.match(await readFile(join(profile,'dsh/index.js'),'utf8'),/bounded original read_page local fallback/)
   assert.equal((repairModsearch(home,true).results.find(x=>x.profile==='web')).status,'already-patched')
+  // The profile still declares the exact package, but node_modules was
+  // removed: reinstate the original published plugin without editing profile.
+  const headless=join(home,'.dsh/profiles/headless')
+  await mkdir(headless,{recursive:true})
+  const declaration=JSON.stringify({dependencies:{'@liustack/modsearch':'^5.10.11'},custom:'preserve'})
+  await writeFile(join(headless,'package.json'),declaration)
+  const missing=repairModsearch(home,true).results.find(x=>x.profile==='headless')
+  assert.equal(missing.status,'patched',JSON.stringify(missing))
+  assert.ok(missing.restored.includes('package'))
+  assert.equal(await readFile(join(headless,'package.json'),'utf8'),declaration)
+  assert.equal((repairModsearch(home,true).results.find(x=>x.profile==='headless')).status,'already-patched')
   // Same app environment must not touch incompatible installed versions.
   await writeFile(join(profile,'package.json'),JSON.stringify({name:'@liustack/modsearch',version:'5.11.0'}))
   const ignored=repairModsearch(home,true).results.find(x=>x.profile==='web')
