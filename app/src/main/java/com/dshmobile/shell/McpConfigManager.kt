@@ -33,13 +33,20 @@ class McpConfigManager(
   private val toolboxFile = File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs")
   private val basicToolboxFile = File(usrDir, "libexec/dsh-mobile/basic-toolbox-mcp.mjs")
 
-  /** A missing ESM import in EITHER built-in server crashes tools/list and
-   * makes the namespace disappear for newly created workers. Do not label a
-   * half-installed runtime as healthy merely because its entrypoints exist. */
+  /** Both built-in services share an ESM module tree. Verify transitively:
+   * one absent indirect import can crash startup and lose a whole namespace. */
   private fun missingToolboxModules(): List<String> {
-    val importPattern = Regex("""from\s+['"]\./([A-Za-z0-9._-]+\.mjs)['"]""")
+    val importPattern = Regex("""(?:from\s+|import\s*\(\s*)['"]\./([A-Za-z0-9._-]+\.mjs)['"]""")
+    val bridge = File(usrDir, "libexec/dsh-mobile/android-exec.sh")
     val missing = mutableListOf<String>()
-    for (entry in listOf(toolboxFile, basicToolboxFile)) {
+    if (!bridge.isFile) missing += bridge.name
+    val pending = ArrayDeque<File>()
+    pending.add(toolboxFile)
+    pending.add(basicToolboxFile)
+    val visited = mutableSetOf<String>()
+    while (pending.isNotEmpty()) {
+      val entry = pending.removeFirst()
+      if (!visited.add(entry.absolutePath)) continue
       if (!entry.isFile) {
         missing += entry.name
         continue
@@ -49,8 +56,7 @@ class McpConfigManager(
         continue
       }
       for (match in importPattern.findAll(source)) {
-        val module = match.groupValues[1]
-        if (!File(entry.parentFile, module).isFile) missing += module
+        pending.add(File(entry.parentFile, match.groupValues[1]))
       }
     }
     return missing.distinct()
