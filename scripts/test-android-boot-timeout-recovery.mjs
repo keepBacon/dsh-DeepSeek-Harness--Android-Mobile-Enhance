@@ -17,6 +17,8 @@ assert.match(flow,/if \(forceRestartUnready\) EngineManager\.beginMaintenance\(\
 assert.match(flow,/if \(forceRestartUnready\) EngineManager\.endMaintenance\(\)/)
 assert.match(flow,/engineManager\.startEngine\(runtimeAlreadyChecked = true\)/)
 assert.match(engine,/fun isEngineProcessAlive\(\)/)
+assert.match(engine,/fun recordGatewayStartupTimeout\(\)/)
+assert.match(flow,/engineManager\.recordGatewayStartupTimeout\(\)/)
 assert.match(service,/if \(EngineManager\.isMaintenanceMode\(\)\) return@scheduleWithFixedDelay/)
 const safeStart=start.indexOf('val safeMode = ShellState.safeModeEnabled(context)')
 const compatStart=start.indexOf('ensurePluginWorkspaceCompat("web")')
