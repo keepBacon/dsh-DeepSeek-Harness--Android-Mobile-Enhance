@@ -6180,6 +6180,7 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { showWeb() }
           return@Thread
         }
+        if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
         runOnUiThread {
           showEngineFailure(if (engineManager.isEngineProcessAlive()) "引擎启动超时" else "引擎启动后退出")
         }
