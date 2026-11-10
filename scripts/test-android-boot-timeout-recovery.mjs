@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+// Android startup recovery source contract. The APK device test must still
+// verify actual startup timing and whether any plugin is stalling the gateway.
+import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
+const activity=read('app/src/main/java/com/dshmobile/shell/MainActivity.kt')
+const engine=read('app/src/main/java/com/dshmobile/shell/EngineManager.kt')
+const service=read('app/src/main/java/com/dshmobile/shell/EngineService.kt')
+const start=engine.slice(engine.indexOf('  fun startEngine('),engine.indexOf('  /** True while the engine child',engine.indexOf('  fun startEngine(')))
+const flow=activity.slice(activity.indexOf('  private fun startEngineFlow('),activity.indexOf('  /**\n   * Wait for the verified DSH HTTP listener'))
+assert.match(activity,/setOnClickListener \{ startEngineFlow\(forceRestartUnready = true\) \}/)
+assert.match(flow,/if \(EngineProbe\.check\(250\)\.optBoolean\("running", false\)\)/)
+assert.match(flow,/if \(forceRestartUnready && engineManager\.isEngineProcessAlive\(\)\)/)
+assert.match(flow,/if \(!engineManager\.stopEngine\(\)\)/)
+assert.match(flow,/if \(forceRestartUnready\) EngineManager\.beginMaintenance\(\)/)
+assert.match(flow,/if \(forceRestartUnready\) EngineManager\.endMaintenance\(\)/)
+assert.match(flow,/engineManager\.startEngine\(runtimeAlreadyChecked = true\)/)
+assert.match(engine,/fun isEngineProcessAlive\(\)/)
+assert.match(service,/if \(EngineManager\.isMaintenanceMode\(\)\) return@scheduleWithFixedDelay/)
+const safeStart=start.indexOf('val safeMode = ShellState.safeModeEnabled(context)')
+const compatStart=start.indexOf('ensurePluginWorkspaceCompat("web")')
+const safeIf=start.indexOf('if (!safeMode)')
+const profileStart=start.indexOf('prepareSafeModeProfile()')
+assert.ok(safeStart>=0 && safeIf>safeStart && compatStart>safeIf && profileStart>compatStart)
+const block=start.slice(safeIf,profileStart)
+assert.ok(block.includes('applyAndroidModsearchCompat()'))
+assert.ok(block.includes('applyAndroidWebFetchCompat()'))
+assert.ok(block.includes('applyAndroidCodexModelPickerCompat("web")'))
+assert.ok(!flow.includes('backupAndResetProfilePatch('))
+assert.ok(!flow.includes('disableAllThirdParty'))
+console.log('[DSH] boot timeout retry and isolated safe-mode plugin startup contracts: OK')
