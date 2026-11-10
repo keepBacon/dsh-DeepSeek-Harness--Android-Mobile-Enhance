@@ -1056,6 +1056,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * been completely extracted and validated. User HOME is never touched here.
    */
   fun clearBrokenRuntime() {
+    // Never lose the process handle or invalidate the installed runtime while
+    // a previous Host is still running (e.g. Android SIGKILL did not reap it).
+    if (isEngineProcessAlive()) {
+      throw java.io.IOException("旧 DSH 进程仍在运行，已取消运行时替换；请先在 Android 设置中强行停止应用")
+    }
     try { runtimeIdMarker.delete() } catch (_: Throwable) {}
     ACTIVE_PROCESS.set(null)
     engineProcess = null
@@ -1639,6 +1644,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   /** Start the dsh web engine from the embedded snapshot. */
   fun startEngine(port: Int = 3080, runtimeAlreadyChecked: Boolean = false): Boolean {
+    // A stop from another EngineManager instance must not race with launch.
+    val stopGeneration = STOP_GENERATION.get()
     if (!runtimeAlreadyChecked) {
       val health = runtimeHealth()
       if (!health.ok) {
@@ -1696,11 +1703,26 @@ class EngineManager(private val context: Context, private val pickToken: String?
         "web", "--patch", mcpPatch.absolutePath, "--port", port.toString(), "--no-open",
       )
       engineLogFile.parentFile?.mkdirs()
-      engineLogFile.writeText("")
       val env = engineEnv(preload).toMutableMap()
       if (safeMode) env["DSH_ANDROID_SAFE_MODE"] = "1"
-      engineProcess = startWithArgs(args, env)
-      ACTIVE_PROCESS.set(engineProcess)
+      // Serialize process launch with stop and reject any boot attempt that
+      // was already in preflight when a stop was requested.
+      synchronized(PROCESS_LIFECYCLE_LOCK) {
+        if (stopGeneration != STOP_GENERATION.get()) {
+          LAST_START_ERROR = "引擎启动期间收到停止请求；已取消过期的启动尝试"
+          return false
+        }
+        val previous = ACTIVE_PROCESS.get()
+        if (previous?.isAlive == true) {
+          LAST_START_ERROR = "旧 DSH 进程尚未退出；拒绝启动第二个 Host"
+          return false
+        }
+        // Only clear the log when a new process is actually being launched.
+        engineLogFile.writeText("")
+        val child = startWithArgs(args, env)
+        engineProcess = child
+        ACTIVE_PROCESS.set(child)
+      }
 
       // Catch only truly immediate linker/loader failures here. The Activity
       // polls both the HTTP endpoint and child liveness at high frequency, so
@@ -3222,30 +3244,45 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * both safer and more portable than relying on java.lang.Process.pid(),
    * which is not part of Android API 36.
    */
-  fun stopEngine(graceMillis: Long = 3_000, forceMillis: Long = 2_000): Boolean {
-    val local = engineProcess
-    engineProcess = null
-    val shared = ACTIVE_PROCESS.getAndSet(null)
-    val processes = linkedSetOf<Process>()
-    if (local != null) processes += local
-    if (shared != null) processes += shared
-    var stopped = true
-    for (process in processes) {
-      try {
-        if (!process.isAlive) continue
-        process.destroy()
-        if (!process.waitFor(graceMillis, TimeUnit.MILLISECONDS) && process.isAlive) {
-          process.destroyForcibly()
-          if (!process.waitFor(forceMillis, TimeUnit.MILLISECONDS) && process.isAlive) stopped = false
+  fun stopEngine(graceMillis: Long = 3_000, forceMillis: Long = 2_000): Boolean =
+    synchronized(PROCESS_LIFECYCLE_LOCK) {
+      // Bump the generation even if there is no process: a slow concurrent
+      // startup may still be preparing plugins and must not launch afterwards.
+      STOP_GENERATION.incrementAndGet()
+      val local = engineProcess
+      val shared = ACTIVE_PROCESS.get()
+      val processes = linkedSetOf<Process>()
+      if (local != null) processes += local
+      if (shared != null) processes += shared
+      var stopped = true
+      for (process in processes) {
+        try {
+          if (process.isAlive) {
+            process.destroy()
+            if (!process.waitFor(graceMillis, TimeUnit.MILLISECONDS) && process.isAlive) {
+              process.destroyForcibly()
+              process.waitFor(forceMillis, TimeUnit.MILLISECONDS)
+            }
+          }
+          if (process.isAlive) {
+            // Critical: retain handles on failure so a later retry or the
+            // watchdog still knows the old Host is present. Never start two.
+            stopped = false
+            Log.e(TAG, "DSH process survived graceful and forced termination")
+          } else {
+            ACTIVE_PROCESS.compareAndSet(process, null)
+            if (engineProcess === process) engineProcess = null
+          }
+        } catch (t: Throwable) {
+          stopped = false
+          Log.w(TAG, "failed to stop embedded DSH process; retaining handle", t)
         }
-      } catch (t: Throwable) {
-        stopped = false
-        Log.w(TAG, "failed to stop embedded DSH process", t)
       }
+      if (!stopped) {
+        LAST_START_ERROR = "旧 DSH 进程在 SIGTERM / SIGKILL 后仍未退出，已保留进程引用并阻止重启。请在 Android 设置 → 应用 → DSH 中执行‘强行停止’，不要清除数据。"
+      }
+      stopped
     }
-    if (!stopped) LAST_START_ERROR = "DSH 进程未能在超时内完全退出"
-    return stopped
-  }
 
   companion object {
     private const val TAG = "dsh-engine"
@@ -3259,6 +3296,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
      * PID to coordinate lifecycle operations.
      */
     private val ACTIVE_PROCESS = java.util.concurrent.atomic.AtomicReference<Process?>(null)
+    private val PROCESS_LIFECYCLE_LOCK = Any()
+    private val STOP_GENERATION = java.util.concurrent.atomic.AtomicLong(0)
 
     /** One managed localhost dev server for browser-preview workflows. */
     private val DEV_SERVER_PROCESS = java.util.concurrent.atomic.AtomicReference<Process?>(null)

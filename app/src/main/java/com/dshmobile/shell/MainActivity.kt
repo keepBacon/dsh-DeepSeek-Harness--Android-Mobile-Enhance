@@ -5074,7 +5074,10 @@ class MainActivity : ComponentActivity() {
                 .filter { it.isNotBlank() }
                 .joinToString("\n\n"),
             )
-            engineManager.stopEngine()
+            if (!engineManager.stopEngine()) {
+              runOnUiThread { showEngineFailure("旧引擎未退出，已停止自动恢复") }
+              return@Thread
+            }
             started = engineManager.startEngine(runtimeAlreadyChecked = true)
             if (started) running = waitForEngineReady(45_000L)
           }
@@ -6146,7 +6149,10 @@ class MainActivity : ComponentActivity() {
               "保留会话、配置、API Key 与插件清单，仅重建 APK 内置 /usr。",
             )
           }
-          engineManager.stopEngine()
+          if (!engineManager.stopEngine()) {
+            runOnUiThread { showEngineFailure("旧引擎尚未退出，已取消自动运行时修复") }
+            return@Thread
+          }
           engineManager.clearBrokenRuntime()
           val repaired = engineManager.extractSnapshot { done, _ ->
             runOnUiThread {
@@ -6220,18 +6226,25 @@ class MainActivity : ComponentActivity() {
     if (!engineFlowRunning.compareAndSet(false, true)) return
     EngineManager.beginMaintenance()
     Thread {
+      var safeToRestart = false
       try {
         runOnUiThread {
           showStartingState("正在修复运行时…", "保留会话/配置，仅重建 APK 内置运行时。")
         }
         try { stopService(Intent(this, EngineService::class.java)) } catch (_: Throwable) {}
-        engineManager.stopEngine()
+        if (!engineManager.stopEngine()) {
+          runOnUiThread { showEngineFailure("旧引擎仍在运行，已取消运行时修复") }
+          return@Thread
+        }
         engineManager.clearBrokenRuntime()
+        safeToRestart = true
+      } catch (t: Throwable) {
+        runOnUiThread { showEngineFailure("运行时修复失败：" + (t.message ?: t.javaClass.simpleName)) }
       } finally {
         EngineManager.endMaintenance()
         engineFlowRunning.set(false)
       }
-      runOnUiThread { startEngineFlow() }
+      if (safeToRestart) runOnUiThread { startEngineFlow() }
     }.start()
   }
 
