@@ -1667,13 +1667,18 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // This must run before the Host starts, not only before Android-native
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
-      ensurePluginWorkspaceCompat("web")
-      applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
-      applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
-      applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
-      applyAndroidWebFetchCompat().forEach { Log.i(TAG, "[web_fetch compat] $it") }
-      applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
       val safeMode = ShellState.safeModeEnabled(context)
+      // Recovery uses an isolated profile. Never run the normal web profile
+      // repair helpers during a safe-mode boot: they can touch the user's
+      // plugin tree and delay startup even though those plugins are disabled.
+      if (!safeMode) {
+        ensurePluginWorkspaceCompat("web")
+        applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
+        applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
+        applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
+        applyAndroidWebFetchCompat().forEach { Log.i(TAG, "[web_fetch compat] $it") }
+        applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
+      }
       val safeProfile = if (safeMode) prepareSafeModeProfile() else null
       val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode)
       val args = if (safeProfile != null) arrayOf(
