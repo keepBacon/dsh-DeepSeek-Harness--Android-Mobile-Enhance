@@ -1727,6 +1727,21 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
+  /** Preserve an actionable reason when Node survives but the Web listener
+   * never becomes ready. A plugin warning alone is not proof of the cause. */
+  fun recordGatewayStartupTimeout() {
+    if (!isEngineProcessAlive()) return
+    val probe = EngineProbe.check(1000)
+    LAST_START_ERROR = buildString {
+      append("DSH Host 进程仍在运行，但 Web Gateway 在启动期限内未就绪。")
+      append(" HTTP 状态：").append(probe.optInt("httpCode", -1))
+      append("；探测耗时：").append(probe.optLong("latencyMs", -1)).append(" ms")
+      val reason = probe.optString("error", "").take(350)
+      if (reason.isNotBlank()) append("；连接结果：").append(reason)
+      append("。可先进入安全模式隔离插件；或点击重试，仅重启无响应进程。")
+    }
+  }
+
   /** True while the engine child started in this app process is still alive. */
   fun isEngineProcessAlive(): Boolean {
     val process = ACTIVE_PROCESS.get() ?: engineProcess ?: return false
