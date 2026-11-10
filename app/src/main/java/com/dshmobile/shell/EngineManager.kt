@@ -1667,13 +1667,18 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // This must run before the Host starts, not only before Android-native
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
-      ensurePluginWorkspaceCompat("web")
-      applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
-      applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
-      applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
-      applyAndroidWebFetchCompat().forEach { Log.i(TAG, "[web_fetch compat] $it") }
-      applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
       val safeMode = ShellState.safeModeEnabled(context)
+      // Recovery uses an isolated profile. Never run the normal web profile
+      // repair helpers during a safe-mode boot: they can touch the user's
+      // plugin tree and delay startup even though those plugins are disabled.
+      if (!safeMode) {
+        ensurePluginWorkspaceCompat("web")
+        applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
+        applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
+        applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
+        applyAndroidWebFetchCompat().forEach { Log.i(TAG, "[web_fetch compat] $it") }
+        applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
+      }
       val safeProfile = if (safeMode) prepareSafeModeProfile() else null
       val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode)
       val args = if (safeProfile != null) arrayOf(
@@ -1719,6 +1724,21 @@ class EngineManager(private val context: Context, private val pickToken: String?
       false
     } finally {
       STARTING.set(false)
+    }
+  }
+
+  /** Preserve an actionable reason when Node survives but the Web listener
+   * never becomes ready. A plugin warning alone is not proof of the cause. */
+  fun recordGatewayStartupTimeout() {
+    if (!isEngineProcessAlive()) return
+    val probe = EngineProbe.check(1000)
+    LAST_START_ERROR = buildString {
+      append("DSH Host 进程仍在运行，但 Web Gateway 在启动期限内未就绪。")
+      append(" HTTP 状态：").append(probe.optInt("httpCode", -1))
+      append("；探测耗时：").append(probe.optLong("latencyMs", -1)).append(" ms")
+      val reason = probe.optString("error", "").take(350)
+      if (reason.isNotBlank()) append("；连接结果：").append(reason)
+      append("。可先进入安全模式隔离插件；或点击重试，仅重启无响应进程。")
     }
   }
 

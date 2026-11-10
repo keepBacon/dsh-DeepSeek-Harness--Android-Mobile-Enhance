@@ -6014,7 +6014,10 @@ class MainActivity : ComponentActivity() {
     }
     val retry = Button(this).apply {
       text = "重试"
-      setOnClickListener { startEngineFlow() }
+      // An existing Node process can remain alive after Gateway startup hangs.
+      // A plain startEngine() call reuses it forever; explicit retry must first
+      // replace that unresponsive process without touching HOME or profiles.
+      setOnClickListener { startEngineFlow(forceRestartUnready = true) }
     }
     val safeMode = Button(this).apply {
       text = if (ShellState.safeModeEnabled(this@MainActivity)) "关闭安全模式并重启" else "进入安全模式并重启"
@@ -6084,8 +6087,10 @@ class MainActivity : ComponentActivity() {
    * bundled runtime, self-heal an incomplete /usr extraction, and start DSH.
    * No external Termux installation is required.
    */
-  private fun startEngineFlow() {
+  private fun startEngineFlow(forceRestartUnready: Boolean = false) {
     if (!engineFlowRunning.compareAndSet(false, true)) return
+    // Keep the service watchdog from racing an explicit stop/start retry.
+    if (forceRestartUnready) EngineManager.beginMaintenance()
     runOnUiThread { showStartingState("正在连接 DeepSeek Harness…") }
     Thread {
       try {
@@ -6096,6 +6101,17 @@ class MainActivity : ComponentActivity() {
           applyShizukuKeepAlive()
           runOnUiThread { showWeb() }
           return@Thread
+        }
+
+        if (forceRestartUnready && engineManager.isEngineProcessAlive()) {
+          runOnUiThread {
+            showStartingState("正在重新启动无响应的 DSH 引擎…",
+              "仅重启本机引擎进程，保留会话、插件、API Key 与文件。")
+          }
+          if (!engineManager.stopEngine()) {
+            runOnUiThread { showEngineFailure("旧引擎未能完全停止，已取消再次启动") }
+            return@Thread
+          }
         }
 
         if (!engineManager.engineReady) {
@@ -6164,10 +6180,12 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { showWeb() }
           return@Thread
         }
+        if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
         runOnUiThread {
           showEngineFailure(if (engineManager.isEngineProcessAlive()) "引擎启动超时" else "引擎启动后退出")
         }
       } finally {
+        if (forceRestartUnready) EngineManager.endMaintenance()
         engineFlowRunning.set(false)
       }
     }.start()
