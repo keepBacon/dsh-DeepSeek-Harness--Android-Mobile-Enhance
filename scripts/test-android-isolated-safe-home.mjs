@@ -1,0 +1,20 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+const src=readFileSync(new URL('../app/src/main/java/com/dshmobile/shell/EngineManager.kt',import.meta.url),'utf8')
+const safe=src.slice(src.indexOf('  private fun ensureSafeDshHome()'),src.indexOf('  /** Start the dsh web engine from the embedded snapshot. */'))
+const start=src.slice(src.indexOf('  fun startEngine('),src.indexOf('  /** Preserve an actionable reason'))
+const env=src.slice(src.indexOf('  private fun engineEnv('),src.indexOf('  /** Package-manager env extends'))
+assert.match(src,/private val safeDshHomeDir = File\(context\.filesDir, "dsh-safe-home"\)/)
+assert.match(safe,/Files\.isSymbolicLink\(safeDshHomeDir\.toPath\(\)\)/)
+assert.match(safe,/val dir = File\(ensureSafeDshHome\(\), "profiles\/\$name"\)/)
+assert.match(safe,/JSONArray\(\)\.put\("@deepseek-ai\/dsh-base"\)\.put\("@deepseek-ai\/dsh-web-app"\)/)
+assert.match(safe,/val text = "- id: skill-filesystem/)
+for(const forbidden of ['homeDir, ".dsh/profiles', 'homePatch.readLines()', 'disabledIds.add(', 'backupAndResetProfilePatch(', 'dshDataDir'])assert.ok(!safe.includes(forbidden), 'safe-mode boot must not inspect or mutate user global configuration: '+forbidden)
+assert.match(env,/private fun engineEnv\(preload: File = preloadBin, isolatedSafeHome: Boolean = false\)/)
+assert.match(env,/"DSH_HOME" to \(if \(isolatedSafeHome\) ensureSafeDshHome\(\) else ensureDshDataHome\(\)\)\.absolutePath/)
+assert.match(start,/val safeProfile = if \(safeMode\) prepareSafeModeProfile\(\) else null/)
+assert.match(start,/val env = engineEnv\(preload, isolatedSafeHome = safeMode\)\.toMutableMap\(\)/)
+assert.match(start,/if \(safeMode\) env\["DSH_ANDROID_SAFE_MODE"\] = "1"/)
+assert.match(start,/val mcpPatch = mcpConfigManager\.ensureRuntimePatch\(safeMode\)/)
+console.log('[DSH] isolated safe-mode DSH_HOME without user plugin patch, credentials or sessions: OK')
