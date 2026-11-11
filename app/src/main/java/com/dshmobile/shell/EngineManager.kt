@@ -67,6 +67,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private val dshBin = File(usrDir, "lib/node_modules/@deepseek-ai/dsh/lib/bin.js")
   private val preloadBin = File(usrDir, "lib/libtermux-exec-ld-preload.so")
   private val engineLogFile = File(context.filesDir, "engine.log")
+  // Own Android-only boot workspace; never reads the normal user's global patches.
+  private val safeDshHomeDir = File(context.filesDir, "dsh-safe-home")
   private var engineProcess: Process? = null
   private val pluginLogFile = File(context.filesDir, "plugin-install.log")
   private val profileCheckLogFile = File(context.filesDir, "profile-check.log")
@@ -1570,13 +1572,23 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   /**
-   * Safe mode runs a dedicated, Android-owned profile. The user's web profile,
-   * dependencies, bundle enablement, sessions and credentials remain untouched.
-   * The base + web-app bundles are necessary for settings and plugin management.
+   * The DSH launcher unconditionally loads `$DSH_HOME/cordis.patch.yml` for
+   * every profile, even for a named safe profile. A profile override alone
+   * cannot isolate faulty installed user plugins. Use an Android-owned DSH_HOME
+   * with no links to the user's .dsh, profiles, credentials, or global patch.
+   * The user's actual data remains in the original home and is never moved.
    */
+  private fun ensureSafeDshHome(): File {
+    if (java.nio.file.Files.isSymbolicLink(safeDshHomeDir.toPath()))
+      throw java.io.IOException("安全模式专用目录意外是符号链接，拒绝进入")
+    if (!safeDshHomeDir.isDirectory && !safeDshHomeDir.mkdirs())
+      throw java.io.IOException("无法创建独立安全模式数据目录")
+    return safeDshHomeDir
+  }
+
   private fun prepareSafeModeProfile(): Pair<String, File> {
     val name = "android-safe-web"
-    val dir = File(homeDir, ".dsh/profiles/$name")
+    val dir = File(ensureSafeDshHome(), "profiles/$name")
     if (!dir.isDirectory && !dir.mkdirs()) throw java.io.IOException("无法创建安全模式 profile")
     val bundles = JSONArray().put("@deepseek-ai/dsh-base").put("@deepseek-ai/dsh-web-app")
     val manifest = JSONObject()
@@ -1584,60 +1596,20 @@ class EngineManager(private val context: Context, private val pickToken: String?
       .put("private", true)
       .put("dependencies", JSONObject())
       .put("dsh", JSONObject().put("profile", JSONObject().put("bundles", bundles)))
-    // This is our own temporary profile, never profiles/web/package.json.
     val manifestFile = File(dir, "package.json")
     val contents = manifest.toString(2) + "\n"
-    if (!manifestFile.isFile || manifestFile.readText() != contents) {
+    if (!manifestFile.isFile || manifestFile.readText() != contents)
       writeTextAtomic(manifestFile, contents)
-    }
     val profilePatch = File(dir, "cordis.patch.yml")
-    if (!profilePatch.isFile || profilePatch.readText() != "[]\n") {
+    if (!profilePatch.isFile || profilePatch.readText() != "[]\n")
       writeTextAtomic(profilePatch, "[]\n")
-    }
 
-    // The DSH_HOME-level patch is shared between profiles. Mask extra plugin
-    // rows from that layer without touching user files. The profile-level user
-    // patch is already excluded by launching the isolated safe profile.
-    val homePatch = File(homeDir, ".dsh/cordis.patch.yml")
-    val disabledIds = linkedSetOf<String>()
-    if (homePatch.isFile) {
-      val lines = homePatch.readLines()
-      val rowId = Regex("""^\s*-\s+id:\s*['"]?([A-Za-z0-9_.:-]+)['"]?(?:\s+#.*)?\s*$""")
-      val rowName = Regex("""^\s*name:\s*['"]?([^\s'"#]+)""")
-      val insert = Regex("""^(\s*)-\s+insert:\s*$""")
-      var insertIndent = -1
-      for (i in lines.indices) {
-        val line = lines[i]
-        val indent = line.takeWhile { it == ' ' }.length
-        val begin = insert.matchEntire(line)
-        if (begin != null) {
-          insertIndent = begin.groupValues[1].length
-          continue
-        }
-        val match = rowId.matchEntire(line) ?: continue
-        val insideInsert = insertIndent >= 0 && indent > insertIndent
-        if (indent <= insertIndent) insertIndent = -1
-        val name = lines.drop(i + 1).take(8).takeWhile {
-          !rowId.matches(it) && !insert.matches(it)
-        }.firstNotNullOfOrNull { rowName.find(it)?.groupValues?.get(1) }
-        // Direct overrides of built-in rows remain intact unless they mount an
-        // MCP or a non-core module; inserted rows are user extensions.
-        if (insideInsert || name?.contains("dsh-mcp-client") == true ||
-          (name != null && !name.startsWith("@deepseek-ai/"))) {
-          disabledIds.add(match.groupValues[1])
-        }
-      }
-    }
+    // Safe DSH_HOME has no global user patch. Do not inspect or rewrite
+    // the normal DSH_HOME/cordis.patch.yml; a plugin may have inserted any
+    // valid YAML entry there, including rows without a simple "id".
     val overlay = File(context.filesDir, "mcp/android-safe-mode.patch.yml")
     overlay.parentFile?.mkdirs()
-    val text = buildString {
-      // Also suppress host-plane Skills (preset Skills are gated at their
-      // runtime module entrypoints by DSH_ANDROID_SAFE_MODE).
-      append("- id: skill-filesystem\n  disabled: true\n")
-      append("- id: tool-skill\n  disabled: true\n")
-      disabledIds.filterNot { it == "skill-filesystem" || it == "tool-skill" }
-        .forEach { id -> append("- id: ").append(JSONObject.quote(id)).append("\n  disabled: true\n") }
-    }
+    val text = "- id: skill-filesystem\n  disabled: true\n- id: tool-skill\n  disabled: true\n"
     writeTextAtomic(overlay, text)
     return name to overlay
   }
@@ -1703,7 +1675,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         "web", "--patch", mcpPatch.absolutePath, "--port", port.toString(), "--no-open",
       )
       engineLogFile.parentFile?.mkdirs()
-      val env = engineEnv(preload).toMutableMap()
+      val env = engineEnv(preload, isolatedSafeHome = safeMode).toMutableMap()
       if (safeMode) env["DSH_ANDROID_SAFE_MODE"] = "1"
       // Serialize process launch with stop and reject any boot attempt that
       // was already in preflight when a stop was requested.
@@ -1797,7 +1769,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   /** Environment used by the DSH web engine and bundled command-line tools. */
-  private fun engineEnv(preload: File = preloadBin): Map<String, String> {
+  private fun engineEnv(preload: File = preloadBin, isolatedSafeHome: Boolean = false): Map<String, String> {
     File(homeDir, ".ssh").mkdirs()
     val xdgConfig = File(homeDir, ".config").apply { mkdirs() }
     val xdgData = File(homeDir, ".local/share").apply { mkdirs() }
@@ -1835,7 +1807,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // shell. The plugin checks DSH_SIDEBAR_SHELL before $SHELL.
       "DSH_SIDEBAR_SHELL" to File(usrDir, "libexec/dsh/wrappers/bash").absolutePath,
       "SHELL" to File(usrDir, "libexec/dsh/wrappers/bash").absolutePath,
-      "DSH_HOME" to ensureDshDataHome().absolutePath,
+      "DSH_HOME" to (if (isolatedSafeHome) ensureSafeDshHome() else ensureDshDataHome()).absolutePath,
       "TMPDIR" to File(homeDir, "tmp").apply { mkdirs() }.absolutePath,
       "XDG_CACHE_HOME" to nodeCacheDir.absolutePath,
       // Node 22+ persists V8 module compile artifacts here. Older Node
