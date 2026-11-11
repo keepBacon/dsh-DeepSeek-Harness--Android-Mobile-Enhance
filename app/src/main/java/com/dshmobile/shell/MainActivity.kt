@@ -5027,6 +5027,68 @@ class MainActivity : ComponentActivity() {
    * Desktop-like profile transaction boundary: stop the Host, mutate profile,
    * then start the same embedded Host and surface exact diagnostics.
    */
+  /**
+   * Recovery-screen safe mode is a persisted NEXT-BOOT choice, not a profile
+   * mutation. A stuck old Node process must not prevent writing this preference.
+   * If Android refuses to terminate that process, report the required system
+   * force-stop instead of rolling the preference back to the broken profile.
+   *
+   * Normal in-Web settings still use runProfileMutation() to preserve the
+   * transactional semantics of live settings changes.
+   */
+  private fun switchRecoverySafeMode(enabled: Boolean) {
+    if (engineFlowRunning.get() || !profileMutationRunning.compareAndSet(false, true)) {
+      showSimpleMessage("操作进行中", "引擎操作尚未结束，暂时无法切换安全模式。")
+      return
+    }
+    EngineManager.beginMaintenance()
+    showStartingState(if (enabled) "正在准备安全模式…" else "正在恢复正常模式…",
+      "先保存下次启动配置；如果旧进程无法停止，将提示系统强行停止，不会修改插件与会话。")
+    Thread {
+      var saved = false
+      var stopped = false
+      var running = false
+      try {
+        saved = ShellState.setSafeModeEnabled(this, enabled)
+        if (!saved) {
+          runOnUiThread { showEngineFailure("无法持久化安全模式设置，原配置未修改") }
+          return@Thread
+        }
+        // Persist first, even when the old Host will not terminate.
+        try { stopService(Intent(this, EngineService::class.java)) } catch (_: Throwable) {}
+        stopped = engineManager.stopEngine()
+        if (!stopped) {
+          runOnUiThread {
+            showEngineFailure("安全模式设置已保存，但旧进程未退出；请在 Android 系统设置中对 DSH 执行‘强行停止’，然后重新打开")
+            showSimpleMessage("需由 Android 停止旧进程",
+              (if (enabled) "下次启动的安全模式已保存。" else "下次启动的正常模式已保存。") +
+                "请打开 Android 设置 → 应用 → DSH → 强行停止，然后重新打开 DSH；不要清除数据。")
+          }
+          return@Thread
+        }
+        val started = engineManager.startEngine()
+        running = started && waitForEngineReady()
+        if (running) {
+          startEngineService()
+          applyShizukuKeepAlive()
+          runOnUiThread { showWeb() }
+        } else {
+          if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
+          runOnUiThread {
+            showEngineFailure(if (enabled) "已进入安全模式，但 Web Gateway 仍未就绪" else "已恢复正常模式，但 Web Gateway 仍未就绪")
+          }
+        }
+      } catch (t: Throwable) {
+        runOnUiThread {
+          showEngineFailure("安全模式切换异常：" + (t.message ?: t.javaClass.simpleName))
+        }
+      } finally {
+        EngineManager.endMaintenance()
+        profileMutationRunning.set(false)
+      }
+    }.start()
+  }
+
   private fun runProfileMutation(
     title: String,
     detail: String = "",
@@ -6033,14 +6095,7 @@ class MainActivity : ComponentActivity() {
             else "将重启 DSH，恢复之前安装和启用的插件、Skills 与 MCP。")
           .setNegativeButton("取消", null)
           .setPositiveButton("继续") { _, _ ->
-            runProfileMutation(
-              if (enabled) "正在进入安全模式…" else "正在退出安全模式…",
-              rollbackOnBootFailure = { ShellState.setSafeModeEnabled(this@MainActivity, !enabled) },
-            ) {
-              if (ShellState.setSafeModeEnabled(this@MainActivity, enabled))
-                PluginCommandResult(true, 0, if (enabled) "已进入安全模式" else "已退出安全模式")
-              else PluginCommandResult(false, -3, "无法保存安全模式设置")
-            }
+            switchRecoverySafeMode(enabled)
           }
           .show()
       }

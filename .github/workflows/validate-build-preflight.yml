@@ -87,6 +87,7 @@ jobs:
           node scripts/test-mobile-database-contract.mjs
           node scripts/test-android-mcp-registration-contract.mjs
           node scripts/test-android-boot-timeout-recovery.mjs
+          node scripts/test-android-offline-safe-mode.mjs
           node scripts/test-android-engine-stop-contract.mjs
           node scripts/test-dsh-web-page-reader.mjs
           node scripts/test-basic-toolbox-operations.mjs
