@@ -1933,7 +1933,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       installedPackageVersion("@liustack/modsearch", "", "web") == "5.10.11") {
       env["MODSEARCH_DSH_CLI"] = modsearchBundled.absolutePath
     }
-    if (!ShellState.safeModeEnabled(context)) env.putAll(mcpConfigManager.secretEnvironment())
+    if (!ShellState.safeModeEnabled(context) && !ShellState.normalMcpDiagnosticEnabled(context))
+      env.putAll(mcpConfigManager.secretEnvironment())
     return env
   }
 
