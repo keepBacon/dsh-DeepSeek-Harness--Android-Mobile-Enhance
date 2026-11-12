@@ -14,6 +14,7 @@ assert.match(state,/fun setNormalMcpDiagnosticEnabled\(context: Context, enabled
 assert.match(state,/\.edit\(\)\.putBoolean\(NORMAL_MCP_DIAGNOSTIC, enabled\)\.commit\(\)/)
 assert.match(engine,/val noMcpDiagnostic = !safeMode && ShellState\.normalMcpDiagnosticEnabled\(context\)/)
 assert.match(engine,/mcpConfigManager\.ensureRuntimePatch\(safeMode \|\| noMcpDiagnostic\)/)
+assert.match(engine,/!ShellState\.safeModeEnabled\(context\) && !ShellState\.normalMcpDiagnosticEnabled\(context\)/)
 assert.match(mcp,/if \(!safeMode\) \{/)
 assert.match(mcp,/"\[\]\\n"/)
 assert.match(engine,/private val bootStageFile = File\(context\.filesDir, "engine-boot-stage\.txt"\)/)
