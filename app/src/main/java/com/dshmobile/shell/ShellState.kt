@@ -10,6 +10,7 @@ object ShellState {
   private const val LAST_WORKSPACE_PATH = "last-workspace-path"
   private const val INTERFACE_MODE = "interface-mode"
   private const val SAFE_MODE = "safe-mode"
+  private const val NORMAL_MCP_DIAGNOSTIC = "normal-mcp-diagnostic-disabled"
 
   const val UI_MODE_MOBILE = "mobile"
   const val UI_MODE_NATIVE = "native"
@@ -54,6 +55,16 @@ object ShellState {
   fun setSafeModeEnabled(context: Context, enabled: Boolean): Boolean =
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       .edit().putBoolean(SAFE_MODE, enabled).commit()
+
+  /** Diagnostic launch preference. Changes only Android-managed MCP overlay,
+   * never the user\'s persisted server definitions or plugin manifests.
+   * Synchronous commit survives the system force-stop needed for a stuck Host. */
+  fun normalMcpDiagnosticEnabled(context: Context): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(NORMAL_MCP_DIAGNOSTIC, false)
+
+  fun setNormalMcpDiagnosticEnabled(context: Context, enabled: Boolean): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit().putBoolean(NORMAL_MCP_DIAGNOSTIC, enabled).commit()
 
   /**
    * Stable private token used by the Android directory-picker bridge and the
