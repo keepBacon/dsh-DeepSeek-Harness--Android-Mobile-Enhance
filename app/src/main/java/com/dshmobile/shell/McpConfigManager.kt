@@ -382,7 +382,7 @@ class McpConfigManager(
     // MCP apply() awaits connection.ready even if failOnStartupError=false.
     // Bound handshake + initial tools/list so one stuck server cannot hold the
     // whole Cordis plugin tree before the Web Gateway binds its listener.
-    append("    startupTimeoutMs: 5000\\n")
+    append("    startupTimeoutMs: 5000\n")
     append("    failOnStartupError: false")
   }
 
@@ -417,7 +417,7 @@ class McpConfigManager(
     // MCP apply() awaits connection.ready even if failOnStartupError=false.
     // Bound handshake + initial tools/list so one stuck server cannot hold the
     // whole Cordis plugin tree before the Web Gateway binds its listener.
-    append("    startupTimeoutMs: 5000\\n")
+    append("    startupTimeoutMs: 5000\n")
     append("    failOnStartupError: false")
   }
 
@@ -447,7 +447,7 @@ class McpConfigManager(
     // MCP apply() awaits connection.ready even if failOnStartupError=false.
     // Bound handshake + initial tools/list so one stuck server cannot hold the
     // whole Cordis plugin tree before the Web Gateway binds its listener.
-    append("    startupTimeoutMs: 5000\\n")
+    append("    startupTimeoutMs: 5000\n")
     append("    failOnStartupError: false")
   }
 
