@@ -1,0 +1,13 @@
+'use strict';
+const A=require('node:assert/strict'),S=require('../app/src/main/assets/labs/spatial-v4.js'),B=require('../app/src/main/assets/labs/spatial-core.js');
+const V=B.V,s=S.defaultScene();
+s.items=[];s.plots=[];s.agents=[{id:'actor',role:'target',position:V(0,1,2),velocity:V(0,0,0),yaw:0,radius:.4}];
+const result=S.step(s,{forward:1,seconds:1});
+A.ok(result.scene.player.position.z<1.5,'player cannot cross actor');
+A.ok(result.motion.impacts.some(x=>x.kind==='agent'&&x.id==='actor'));
+A.ok(result.delta.events.some(x=>x.kind==='collision'&&x.id==='actor'));
+const empty=S.normalize(s);empty.agents=[];
+A.ok(S.step(empty,{forward:1,seconds:1}).scene.player.position.z>3);
+const noCollision=S.normalize(s);noCollision.player.collision.enabled=false;
+A.ok(S.step(noCollision,{forward:1,seconds:1}).scene.player.position.z>3);
+console.log('V4 player vs agent contact, delta and disabled collision: PASS');
