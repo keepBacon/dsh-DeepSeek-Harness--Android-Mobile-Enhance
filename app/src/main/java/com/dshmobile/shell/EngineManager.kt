@@ -1104,9 +1104,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
       }
       val bootStage = try { bootStageFile.readText().take(300) } catch (_: Throwable) { "" }
       if (bootStage.isNotBlank()) {
-        append("\\n\\n--- Android boot stage ---\\n").append(bootStage.trim())
+        append("\n\n--- Android boot stage ---\n").append(bootStage.trim())
         if (!ShellState.safeModeEnabled(context)) {
-          append("\\n--- Normal web profile layers (redacted) ---\\n")
+          append("\n--- Normal web profile layers (redacted) ---\n")
           append(normalProfileLayerDiagnostics())
         }
       }
