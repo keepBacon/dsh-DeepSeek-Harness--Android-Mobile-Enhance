@@ -775,6 +775,18 @@ class MainActivity : ComponentActivity() {
       contentDescription = "安全模式：暂停插件、Skills 和 MCP，保留安装和卸载功能"
     }
     wrap.addView(safeModeSwitch)
+    wrap.addView(Button(this).apply {
+      text = if (ShellState.normalMcpDiagnosticEnabled(this@MainActivity))
+        "正常模式：恢复 Android MCP（下次启动）"
+      else "正常模式：跳过 Android MCP 进行诊断"
+      setOnClickListener {
+        switchNormalMcpDiagnostic(!ShellState.normalMcpDiagnosticEnabled(this@MainActivity))
+      }
+    })
+    wrap.addView(TextView(this).apply {
+      text = "仅在下次正常模式启动时跳过 Android 管理的 MCP 配置；不修改任何 MCP 服务定义、插件或聊天记录。"
+      textSize = 12f
+    })
     wrap.addView(TextView(this).apply {
       text = "启用后重启 DSH，仅启动内置基础功能，暂时不加载额外插件、Skills 或 MCP。仍可管理插件和 Skill 安装包；安装状态和原始启用配置不会被修改。关闭后重启 DSH 恢复。"
       textSize = 12f
@@ -5036,6 +5048,58 @@ class MainActivity : ComponentActivity() {
    * Normal in-Web settings still use runProfileMutation() to preserve the
    * transactional semantics of live settings changes.
    */
+  /**
+   * A reversible diagnostic: preserve every user MCP server and plugin file,
+   * and omit only the Android-managed MCP launch overlay in normal mode.
+   * Persist before stopping the old Node process so a system force-stop does
+   * not undo this independent test.
+   */
+  private fun switchNormalMcpDiagnostic(enabled: Boolean) {
+    if (engineFlowRunning.get() || !profileMutationRunning.compareAndSet(false, true)) {
+      showSimpleMessage("操作进行中", "请先结束当前引擎操作")
+      return
+    }
+    EngineManager.beginMaintenance()
+    showStartingState("正在准备正常模式 MCP 对照诊断…",
+      "不会更改插件、API Key、MCP 服务器定义和历史会话")
+    Thread {
+      try {
+        if (!ShellState.setNormalMcpDiagnosticEnabled(this, enabled)) {
+          runOnUiThread { showEngineFailure("无法保存 MCP 对照诊断选择") }
+          return@Thread
+        }
+        if (!ShellState.setSafeModeEnabled(this, false)) {
+          runOnUiThread { showEngineFailure("无法切换到正常模式；MCP 诊断选择已保存") }
+          return@Thread
+        }
+        try { stopService(Intent(this, EngineService::class.java)) } catch (_: Throwable) {}
+        if (!engineManager.stopEngine()) {
+          runOnUiThread {
+            showEngineFailure("已保存 MCP 对照设置，旧引擎无法退出")
+            showSimpleMessage("请执行系统强行停止",
+              "Android 设置 → 应用 → DSH → 强行停止，然后重新打开。此次选择已保存，不要清除数据。")
+          }
+          return@Thread
+        }
+        val started = engineManager.startEngine()
+        val ready = started && waitForEngineReady()
+        if (ready) {
+          startEngineService()
+          runOnUiThread { showWeb() }
+        } else {
+          if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
+          runOnUiThread { showEngineFailure("正常模式 MCP 对照启动未就绪") }
+        }
+      } catch (t: Throwable) {
+        runOnUiThread { showEngineFailure("MCP 对照诊断异常：" +
+          (t.message ?: t.javaClass.simpleName)) }
+      } finally {
+        EngineManager.endMaintenance()
+        profileMutationRunning.set(false)
+      }
+    }.start()
+  }
+
   private fun switchRecoverySafeMode(enabled: Boolean) {
     if (engineFlowRunning.get() || !profileMutationRunning.compareAndSet(false, true)) {
       showSimpleMessage("操作进行中", "引擎操作尚未结束，暂时无法切换安全模式。")
@@ -6100,6 +6164,14 @@ class MainActivity : ComponentActivity() {
           .show()
       }
     }
+    val noMcp = Button(this).apply {
+      text = if (ShellState.normalMcpDiagnosticEnabled(this@MainActivity))
+        "恢复正常模式 MCP 并重启"
+      else "正常模式临时跳过 MCP 并重启"
+      setOnClickListener {
+        switchNormalMcpDiagnostic(!ShellState.normalMcpDiagnosticEnabled(this@MainActivity))
+      }
+    }
     val resetConfig = Button(this).apply {
       text = "备份并重置 web 配置"
       setOnClickListener {
@@ -6127,13 +6199,14 @@ class MainActivity : ComponentActivity() {
       }
     }
     recoveryControls.clear()
-    recoveryControls += listOf(repairRuntime, retry, safeMode, resetConfig, rescue, copyDiagnostics)
+    recoveryControls += listOf(repairRuntime, retry, safeMode, noMcp, resetConfig, rescue, copyDiagnostics)
     recoveryControls.forEach { it.visibility = View.GONE }
     guide.addView(engineStatus)
     guide.addView(progressText)
     guide.addView(repairRuntime)
     guide.addView(retry)
     guide.addView(safeMode)
+    guide.addView(noMcp)
     guide.addView(resetConfig)
     guide.addView(rescue)
     guide.addView(copyDiagnostics)
