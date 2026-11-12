@@ -67,6 +67,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private val dshBin = File(usrDir, "lib/node_modules/@deepseek-ai/dsh/lib/bin.js")
   private val preloadBin = File(usrDir, "lib/libtermux-exec-ld-preload.so")
   private val engineLogFile = File(context.filesDir, "engine.log")
+  private val bootStageFile = File(context.filesDir, "engine-boot-stage.txt")
   // Own Android-only boot workspace; never reads the normal user's global patches.
   private val safeDshHomeDir = File(context.filesDir, "dsh-safe-home")
   private var engineProcess: Process? = null
@@ -1101,6 +1102,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
         if (isNotEmpty()) append('\n')
         append(startError)
       }
+      val bootStage = try { bootStageFile.readText().take(300) } catch (_: Throwable) { "" }
+      if (bootStage.isNotBlank()) {
+        append("\\n\\n--- Android boot stage ---\\n").append(bootStage.trim())
+        if (!ShellState.safeModeEnabled(context)) {
+          append("\\n--- Normal web profile layers (redacted) ---\\n")
+          append(normalProfileLayerDiagnostics())
+        }
+      }
       if (tail.isNotBlank()) {
         if (isNotEmpty()) append("\n\n--- engine.log ---\n")
         append(tail)
@@ -1245,6 +1254,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       userHomeInitializedMarker.writeText("1\n")
       if (oldUsrBackedUp) backupUsr.deleteRecursively()
       stageRoot.deleteRecursively()
+      recordBootStage("node-live-awaiting-http-gateway")
       LAST_START_ERROR = ""
       true
     } catch (t: Throwable) {
@@ -1614,6 +1624,44 @@ class EngineManager(private val context: Context, private val pickToken: String?
     return name to overlay
   }
 
+  /** Redacted Android boot breadcrumbs, independent of Node stderr.
+   * Do not log user patches, tokens, plugin manifests or command environment. */
+  private fun recordBootStage(stage: String) {
+    try {
+      bootStageFile.writeText("stage=" + stage + "\\n" +
+        "epochMs=" + System.currentTimeMillis() + "\\n")
+    } catch (t: Throwable) {
+      Log.w(TAG, "failed writing boot breadcrumb", t)
+    }
+  }
+
+  private fun normalProfileLayerDiagnostics(): String {
+    val root = File(homeDir, ".dsh")
+    val web = File(root, "profiles/web")
+    val publicRoot = dshDataDir
+    fun describe(file: File): String =
+      if (!file.isFile) "absent" else "present bytes=" + file.length()
+    val manifest = File(web, "package.json")
+    val counts = try {
+      val profile = JSONObject(manifest.readText()).optJSONObject("dsh")
+        ?.optJSONObject("profile")?.optJSONArray("bundles")
+      var firstParty = 0
+      var additional = 0
+      if (profile != null) for (i in 0 until profile.length()) {
+        if (profile.optString(i).startsWith("@deepseek-ai/")) firstParty++ else additional++
+      }
+      "official=" + firstParty + " additional=" + additional
+    } catch (_: Throwable) { "unreadable" }
+    return buildString {
+      append("web manifest: ").append(describe(manifest)).append(" bundles: ").append(counts)
+      append("\\nweb patch (private): ").append(describe(File(web, "cordis.patch.yml")))
+      append("\\nweb patch (public): ").append(describe(File(publicRoot, "profiles/web/cordis.patch.yml")))
+      append("\\nhome-global patch: ").append(describe(File(root, "cordis.patch.yml")))
+      append("\\nAndroid-managed MCP: ")
+        .append(if (ShellState.normalMcpDiagnosticEnabled(context)) "disabled-for-this-launch" else "normal")
+    }
+  }
+
   /** Start the dsh web engine from the embedded snapshot. */
   fun startEngine(port: Int = 3080, runtimeAlreadyChecked: Boolean = false): Boolean {
     // A stop from another EngineManager instance must not race with launch.
@@ -1626,6 +1674,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         return false
       }
     }
+    recordBootStage("preflight-ok")
     val preload = preloadBin
     // If a child is genuinely alive, both Activity and Service should reuse it
     // while its HTTP listener is still booting. If the old child already died,
@@ -1647,6 +1696,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
       val safeMode = ShellState.safeModeEnabled(context)
+      val noMcpDiagnostic = !safeMode && ShellState.normalMcpDiagnosticEnabled(context)
+      recordBootStage(if (safeMode) "safe-profile" else if (noMcpDiagnostic) "normal-profile-without-android-mcp" else "normal-profile")
       // Recovery uses an isolated profile. Never run the normal web profile
       // repair helpers during a safe-mode boot: they can touch the user's
       // plugin tree and delay startup even though those plugins are disabled.
@@ -1659,7 +1710,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
         applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
       }
       val safeProfile = if (safeMode) prepareSafeModeProfile() else null
-      val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode)
+      recordBootStage("profile-prepared")
+      val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode || noMcpDiagnostic)
+      recordBootStage("mcp-overlay-ready")
       val args = if (safeProfile != null) arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
         // DSH's launcher stops parsing its own options at the first app
@@ -1691,7 +1744,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
         }
         // Only clear the log when a new process is actually being launched.
         engineLogFile.writeText("")
+        recordBootStage("node-spawn-requested")
         val child = startWithArgs(args, env)
+        recordBootStage("node-spawned")
         engineProcess = child
         ACTIVE_PROCESS.set(child)
       }
@@ -1713,6 +1768,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       LAST_START_ERROR = ""
       true
     } catch (t: Throwable) {
+      recordBootStage("android-start-exception")
       LAST_START_ERROR = "启动异常：" + (t.message ?: t.javaClass.simpleName)
       Log.e(TAG, "engine start failed", t)
       false
@@ -1725,6 +1781,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * never becomes ready. A plugin warning alone is not proof of the cause. */
   fun recordGatewayStartupTimeout() {
     if (!isEngineProcessAlive()) return
+    recordBootStage("node-live-http-timeout")
     val probe = EngineProbe.check(1000)
     LAST_START_ERROR = buildString {
       append("DSH Host 进程仍在运行，但 Web Gateway 在启动期限内未就绪。")
