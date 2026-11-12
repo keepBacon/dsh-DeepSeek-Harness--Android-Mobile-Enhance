@@ -86,6 +86,7 @@ jobs:
           node --check app/src/main/assets/dsh-tool-call-monitor.js
           node scripts/test-mobile-database-contract.mjs
           node scripts/test-android-mcp-registration-contract.mjs
+          node scripts/test-android-mcp-startup-deadline.mjs
           node scripts/test-android-boot-timeout-recovery.mjs
           node scripts/test-android-offline-safe-mode.mjs
           node scripts/test-android-isolated-safe-home.mjs

@@ -379,6 +379,10 @@ class McpConfigManager(
     append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
     append("    toolCallTimeoutMs: 60000\n")
+    // MCP apply() awaits connection.ready even if failOnStartupError=false.
+    // Bound handshake + initial tools/list so one stuck server cannot hold the
+    // whole Cordis plugin tree before the Web Gateway binds its listener.
+    append("    startupTimeoutMs: 12000\n")
     append("    failOnStartupError: false")
   }
 
@@ -410,6 +414,10 @@ class McpConfigManager(
     append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
     append("    cwd: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
     append("    toolCallTimeoutMs: 300000\n")
+    // MCP apply() awaits connection.ready even if failOnStartupError=false.
+    // Bound handshake + initial tools/list so one stuck server cannot hold the
+    // whole Cordis plugin tree before the Web Gateway binds its listener.
+    append("    startupTimeoutMs: 12000\n")
     append("    failOnStartupError: false")
   }
 
@@ -436,6 +444,10 @@ class McpConfigManager(
       }
     }
     append("    toolCallTimeoutMs: 60000\n")
+    // MCP apply() awaits connection.ready even if failOnStartupError=false.
+    // Bound handshake + initial tools/list so one stuck server cannot hold the
+    // whole Cordis plugin tree before the Web Gateway binds its listener.
+    append("    startupTimeoutMs: 12000\n")
     append("    failOnStartupError: false")
   }
 
