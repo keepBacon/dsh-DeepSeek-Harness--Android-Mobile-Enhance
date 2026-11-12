@@ -1628,6 +1628,581 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * Do not log user patches, tokens, plugin manifests or command environment. */
   private fun recordBootStage(stage: String) {
     try {
+      bootStageFile.writeText("stage=" + stage + "\n" +
+        "epochMs=" + System.currentTimeMillis() + "\n")
+    } catch (t: Throwable) {
+      Log.w(TAG, "failed writing boot breadcrumb", t)
+    }
+  }
+
+  private fun normalProfileLayerDiagnostics(): String {
+    val root = File(homeDir, ".dsh")
+    val web = File(root, "profiles/web")
+    val publicRoot = dshDataDir
+    fun describe(file: File): String =
+      if (!file.isFile) "absent" else "present bytes=" + file.length()
+    val manifest = File(web, "package.json")
+    val counts = try {
+      val profile = JSONObject(manifest.readText()).optJSONObject("dsh")
+        ?.optJSONObject("profile")?.optJSONArray("bundles")
+      var firstParty = 0
+      var additional = 0
+      if (profile != null) for (i in 0 until profile.length()) {
+        if (profile.optString(i).startsWith("@deepseek-ai/")) firstParty++ else additional++
+      }
+      "official=" + firstParty + " additional=" + additional
+    } catch (_: Throwable) { "unreadable" }
+    return buildString {
+      append("web manifest: ").append(describe(manifest)).append(" bundles: ").append(counts)
+      append("\nweb patch (private): ").append(describe(File(web, "cordis.patch.yml")))
+      append("\nweb patch (public): ").append(describe(File(publicRoot, "profiles/web/cordis.patch.yml")))
+      append("\nhome-global patch: ").append(describe(File(root, "cordis.patch.yml")))
+      append("\nAndroid-managed MCP: ")
+        .append(if (ShellState.normalMcpDiagnosticEnabled(context)) "disabled-for-this-launch" else "normal")
+    }
+  }
+
+  fun engineDiagnostics(maxChars: Int = 6000): String {
+    val health = runtimeHealth()
+    val log = try {
+      if (engineLogFile.isFile) engineLogFile.readText() else ""
+    } catch (_: Throwable) { "" }
+    val tail = if (log.length <= maxChars) log else log.takeLast(maxChars)
+    return buildString {
+      append("DSH ").append(dshVersion())
+      if (compatManifestFile.isFile) append(" · Android compat runtime")
+      if (!health.ok) append("\n").append(health.describe())
+      val startError = LAST_START_ERROR
+      if (startError.isNotBlank()) {
+        if (isNotEmpty()) append('\n')
+        append(startError)
+      }
+      val bootStage = try { bootStageFile.readText().take(300) } catch (_: Throwable) { "" }
+      if (bootStage.isNotBlank()) {
+        append("\n\n--- Android boot stage ---\n").append(bootStage.trim())
+        if (!ShellState.safeModeEnabled(context)) {
+          append("\n--- Normal web profile layers (redacted) ---\n")
+          append(normalProfileLayerDiagnostics())
+        }
+      }
+      if (tail.isNotBlank()) {
+        if (isNotEmpty()) append("\n\n--- engine.log ---\n")
+        append(tail)
+      }
+      compatibilityHint(startError + "\n" + tail)?.let { hint ->
+        append("\n\n--- Android compatibility ---\n").append(hint)
+      }
+    }.trim()
+  }
+
+  /** 进程级启动守卫（MainActivity 与 EngineService 各自 new EngineManager，
+   *  实例字段互不可见——双启动竞态必须用 companion 级 CAS）。 */
+  private val starting: Boolean
+    get() = STARTING.get()
+
+  /**
+   * Extract the bundled snapshot archive into filesDir. Runs on any thread;
+   * callers own the progress UI.
+   * @param onProgress bytesDone, bytesTotal.
+   * @returns true on success.
+   */
+  /**
+   * Runtime archives can contain a bootstrap home/. That tree is install-time
+   * seed data, not an upgrade payload. Once a prior runtime/user profile exists,
+   * HOME is authoritative and must survive APK replacement and runtime repair.
+   */
+  private fun shouldPreserveUserHome(): Boolean {
+    if (userHomeInitializedMarker.isFile || runtimeIdMarker.isFile) return true
+    if (File(dshDataDir, ".migrated-from").isFile) return true
+    val dsh = File(homeDir, ".dsh")
+    val webProfile = File(dsh, "profiles/web")
+    return File(dsh, ".credentials.yaml").isFile ||
+      File(dsh, "sessions").exists() ||
+      File(dsh, "storages").exists() ||
+      File(dsh, "attachments").exists() ||
+      File(dsh, "skills").exists() ||
+      File(webProfile, "package.json").isFile ||
+      File(webProfile, "pnpm-lock.yaml").isFile ||
+      File(webProfile, "node_modules").isDirectory
+  }
+
+  private fun runtimeHealthFilesAt(rootUsr: File): RuntimeHealth {
+    val required = listOf(
+      File(rootUsr, "bin/node") to "usr/bin/node",
+      File(rootUsr, "lib/node_modules/@deepseek-ai/dsh/lib/bin.js") to "@deepseek-ai/dsh/lib/bin.js",
+      File(rootUsr, "lib/libtermux-exec-ld-preload.so") to "usr/lib/libtermux-exec-ld-preload.so",
+      File(rootUsr, "bin/bash") to "usr/bin/bash",
+      File(rootUsr, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
+      File(rootUsr, "libexec/dsh-mobile/android-exec.sh") to "usr/libexec/dsh-mobile/android-exec.sh",
+      File(rootUsr, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
+      File(rootUsr, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js") to "usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js",
+      File(rootUsr, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-v3.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v3.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-v4.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-v4.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-ast.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-ast.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-workflow.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-workflow.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-code-engine-journal.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine-journal.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-lua-tools.mjs") to "usr/libexec/dsh-mobile/dsh-lua-tools.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-lua-case.mjs") to "usr/libexec/dsh-mobile/dsh-lua-case.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-lua-analysis-core.mjs") to "usr/libexec/dsh-mobile/dsh-lua-analysis-core.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-luau-runner.mjs") to "usr/libexec/dsh-mobile/dsh-luau-runner.mjs",
+      File(rootUsr, "libexec/dsh-mobile/basic-toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/basic-toolbox-mcp.mjs",
+      File(rootUsr, "libexec/dsh/wrappers/python3") to "usr/libexec/dsh/wrappers/python3",
+      File(rootUsr, "libexec/dsh/wrappers/pip3") to "usr/libexec/dsh/wrappers/pip3",
+      File(rootUsr, "libexec/dsh/wrappers/pkg") to "usr/libexec/dsh/wrappers/pkg",
+      File(rootUsr, "libexec/dsh/wrappers/apt") to "usr/libexec/dsh/wrappers/apt",
+      File(rootUsr, "libexec/dsh/wrappers/dpkg") to "usr/libexec/dsh/wrappers/dpkg",
+      File(rootUsr, "bin/proot") to "usr/bin/proot",
+    )
+    val missing = required.filterNot { it.first.isFile }.map { it.second }
+    return RuntimeHealth(missing.isEmpty(), missing)
+  }
+
+  private fun seedHomeFromStage(stageHome: File) {
+    if (!stageHome.isDirectory) return
+    if (shouldPreserveUserHome()) return
+    if (!homeDir.exists()) {
+      if (!stageHome.renameTo(homeDir)) {
+        homeDir.mkdirs()
+        copyTree(stageHome, homeDir, emptySet(), overwrite = false)
+      }
+      return
+    }
+    // A pre-existing HOME may contain user-created files even without an old
+    // marker. Never replace it; only seed files that do not already exist.
+    copyTree(stageHome, homeDir, emptySet(), overwrite = false)
+  }
+
+  fun extractSnapshot(onProgress: (Long, Long) -> Unit): Boolean {
+    val stageRoot = File(context.filesDir, ".runtime-stage-" + System.nanoTime())
+    val stageUsr = File(stageRoot, "usr")
+    val stageHome = File(stageRoot, "home")
+    val backupUsr = File(context.filesDir, ".usr-backup-" + System.nanoTime())
+    var oldUsrBackedUp = false
+    var newUsrCommitted = false
+
+    return try {
+      // Never extract directly over the live runtime. A malformed archive,
+      // unsupported symlink or interrupted copy must leave both user data and
+      // the previous /usr untouched.
+      if (!stageRoot.mkdirs()) throw java.io.IOException("无法创建运行时暂存目录")
+
+      val fd = context.assets.openFd("snapshot.tar.xz")
+      SnapshotExtractor.extract(
+        context.assets.open("snapshot.tar.xz"),
+        fd.length,
+        stageRoot,
+        preservedRoots = emptySet(),
+        onProgress = onProgress,
+      )
+
+      val stagedHealth = runtimeHealthFilesAt(stageUsr)
+      if (!stagedHealth.ok) {
+        throw java.io.IOException("暂存运行时不完整：" + stagedHealth.describe())
+      }
+
+      // Seed HOME independently. Existing user HOME is authoritative and is
+      // never renamed/deleted as part of a runtime repair.
+      seedHomeFromStage(stageHome)
+
+      if (usrDir.exists()) {
+        if (backupUsr.exists()) backupUsr.deleteRecursively()
+        if (!usrDir.renameTo(backupUsr)) {
+          throw java.io.IOException("无法备份现有运行时；已取消修复以保护数据")
+        }
+        oldUsrBackedUp = true
+      }
+
+      if (!stageUsr.renameTo(usrDir)) {
+        throw java.io.IOException("无法提交新运行时")
+      }
+      newUsrCommitted = true
+
+      val health = runtimeHealthFilesOnly()
+      if (!health.ok) {
+        throw java.io.IOException("新运行时提交后校验失败：" + health.describe())
+      }
+
+      runtimeIdMarker.writeText(bundledRuntimeId())
+      userHomeInitializedMarker.writeText("1\n")
+      if (oldUsrBackedUp) backupUsr.deleteRecursively()
+      stageRoot.deleteRecursively()
+      recordBootStage("node-live-awaiting-http-gateway")
+      LAST_START_ERROR = ""
+      true
+    } catch (t: Throwable) {
+      // Roll back /usr if commit had started. HOME and public DSH data are never
+      // part of this transaction and therefore cannot be lost here.
+      try {
+        if (newUsrCommitted && usrDir.exists()) usrDir.deleteRecursively()
+        if (oldUsrBackedUp && backupUsr.exists() && !usrDir.exists()) {
+          if (!backupUsr.renameTo(usrDir)) {
+            Log.e(TAG, "runtime rollback rename failed; backup retained at ${backupUsr.absolutePath}")
+          }
+        }
+      } catch (rollback: Throwable) {
+        Log.e(TAG, "runtime rollback failed", rollback)
+      }
+      try { stageRoot.deleteRecursively() } catch (_: Throwable) {}
+      try { runtimeIdMarker.delete() } catch (_: Throwable) {}
+      LAST_START_ERROR = "运行时解压异常：" + (t.message ?: t.javaClass.simpleName)
+      Log.e(TAG, "transactional snapshot extract failed", t)
+      false
+    }
+  }
+
+  /**
+   * 确保公共持久化目录就绪（幂等，后台线程调用）。
+   *
+   * 方案（issue apk#8）：DSH_HOME 本身**必须留在私有域**——dsh 每次启动会在
+   * `$DSH_HOME/profiles/node_modules` 维护 flat-module 回退（每个依赖包一个
+   * symlink 指向引擎安装位置），而公共目录（/storage/emulated/0）FUSE 禁止
+   * 创建 symlink（实测 Permission denied），整体迁移会使引擎必然崩溃。
+   *
+   * 因此采用**数据项级迁移**：把用户数据搬到 Documents/dshdata，并在私有
+   * 原位建立 symlink（app 私有域允许 symlink，实测 OK），dsh 读写跟随
+   * symlink 落到公共目录：
+   *  - settings.yaml：拷贝到公共（settings-file 经 cordis.patch.yml 的
+   *    config.path 直接指向公共文件，规避原子写替换 symlink 的问题）
+   *  - sessions/、storages/、attachments/：整体搬移 + 私有 symlink
+   *    （目录内写文件不会替换目录 symlink）
+   *  - profiles/{web,headless}/cordis.yml + cordis.patch.yml：拷贝到公共
+   *    + 私有替换为 symlink（dsh 启动只读这两个文件）
+   *  - .credentials.yaml（API key）：**不迁移**——公共目录 FUSE 强制 660，
+   *    credentials-local 权限校验会拒绝加载，且 key 暴露给其他应用；
+   *    key 留在私有实体，由 cordis.patch.yml 的 credentials path 指向。
+   * 迁移源在搬移后仅剩 symlink/保留实体，不删除公共副本。
+   */
+  @Synchronized
+  fun ensureDshDataHome(): File {
+    val dshData = dshDataDir
+    val privateDsh = File(homeDir, ".dsh")
+    val marker = File(dshData, ".migrated-from")
+    if (privateDsh.isDirectory && !marker.exists()) {
+      try {
+        dshData.mkdirs()
+        // settings.yaml is copied, never moved: settings-file is configured to
+        // point at the public copy, while rollback must keep the private source.
+        val privateSettings = File(privateDsh, "settings.yaml")
+        val publicSettings = File(dshData, "settings.yaml")
+        if (privateSettings.isFile && !publicSettings.exists()) copyFileIfExists(privateSettings, publicSettings)
+
+        var complete = true
+        complete = relocateDirTransactional(File(privateDsh, "sessions"), File(dshData, "sessions")) && complete
+        complete = relocateDirTransactional(File(privateDsh, "storages"), File(dshData, "storages")) && complete
+        complete = relocateDirTransactional(File(privateDsh, "attachments"), File(dshData, "attachments")) && complete
+
+        for (profile in listOf("web", "headless")) {
+          for (name in listOf("cordis.yml", "cordis.patch.yml")) {
+            complete = relocateReadOnlyFileTransactional(
+              File(privateDsh, "profiles/$profile/$name"),
+              File(dshData, "profiles/$profile/$name"),
+            ) && complete
+          }
+        }
+
+        if (complete) {
+          val tmp = File(dshData, ".migrated-from.tmp-${System.nanoTime()}")
+          tmp.writeText(privateDsh.absolutePath + "\n")
+          if (!tmp.renameTo(marker)) {
+            tmp.copyTo(marker, overwrite = true)
+            tmp.delete()
+          }
+          Log.i(TAG, "dshdata migration committed -> " + dshData.absolutePath)
+        } else {
+          Log.w(TAG, "dshdata migration left uncommitted; private data remains authoritative")
+        }
+      } catch (t: Throwable) {
+        // Migration failure must never make the private DSH tree disappear.
+        // Each destructive step rolls itself back; without the marker the next
+        // launch retries only the still-uncommitted items.
+        Log.e(TAG, "dshdata migration failed", t)
+      }
+    }
+    // Existing public session data is authoritative even when the migration
+    // marker survived but its private link did not (APK data repair/reinstall).
+    // This is strictly additive: never overwrite a real private directory,
+    // replace an existing symlink, or move/delete the public data.
+    repairMissingDataLinks(privateDsh, dshData)
+    return privateDsh
+  }
+
+  /**
+   * Recover visibility of already-migrated user files after a missing private
+   * symlink, including the case where .migrated-from survived reinstall.
+   * Unlike migration, this operation never copies, renames or deletes files.
+   */
+  private fun repairMissingDataLinks(privateDsh: File, publicDsh: File) {
+    if (!publicDsh.isDirectory) return
+    fun linkMissing(relativePath: String, directory: Boolean) {
+      val dst = File(publicDsh, relativePath)
+      if (if (directory) !dst.isDirectory else !dst.isFile) return
+      val src = File(privateDsh, relativePath)
+      if (symlinkPointsTo(src, dst)) return
+      // NOFOLLOW_LINKS differentiates a genuinely absent link from a dangling
+      // or conflicting link. Both conflicts must be preserved for inspection.
+      if (java.nio.file.Files.exists(src.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        Log.w(TAG, "data recovery preserved conflicting private entry: " + src.absolutePath)
+        return
+      }
+      try {
+        if (src.parentFile?.isDirectory != true && src.parentFile?.mkdirs() != true) {
+          throw java.io.IOException("cannot create private parent for " + relativePath)
+        }
+        java.nio.file.Files.createSymbolicLink(src.toPath(), dst.toPath())
+        Log.i(TAG, "reconnected existing DSH data: " + relativePath)
+      } catch (t: Throwable) {
+        Log.w(TAG, "cannot reconnect DSH data " + relativePath + "; original is untouched", t)
+      }
+    }
+    linkMissing("sessions", true)
+    linkMissing("storages", true)
+    linkMissing("attachments", true)
+    for (profile in listOf("web", "headless")) {
+      linkMissing("profiles/$profile/cordis.yml", false)
+      linkMissing("profiles/$profile/cordis.patch.yml", false)
+    }
+  }
+
+  /** Read-only user-data inventory to distinguish invisible archives from
+   * genuinely absent files. No message contents, tokens or paths are exported. */
+  fun sessionDataDiagnostics(): String {
+    val privateDsh = File(homeDir, ".dsh")
+    val publicDsh = dshDataDir
+    fun describe(root: File, label: String): String = buildString {
+      append(label).append(": ")
+      append(if (root.isDirectory) "目录存在" else "目录不可用")
+      for (name in listOf("sessions", "storages", "attachments")) {
+        val entry = File(root, name)
+        val symlink = runCatching { java.nio.file.Files.isSymbolicLink(entry.toPath()) }.getOrDefault(false)
+        val accessible = entry.isDirectory
+        val count = if (accessible) runCatching { entry.list()?.size ?: -1 }.getOrDefault(-1) else -1
+        append("\n  ").append(name).append(": ")
+        append(when {
+          symlink && !accessible -> "链接已损坏或目标不可访问"
+          symlink -> "链接可访问"
+          accessible -> "实体目录存在"
+          else -> "未找到"
+        })
+        if (count >= 0) append("，直接子项 ").append(count)
+      }
+    }
+    val backups = privateDsh.listFiles()?.filter {
+      it.name.startsWith(".sessions.migration-backup-") && it.isDirectory
+    }?.size ?: 0
+    return buildString {
+      append("公共迁移标记：").append(File(publicDsh, ".migrated-from").isFile)
+      append("\n").append(describe(publicDsh, "Documents/dshdata"))
+      append("\n").append(describe(privateDsh, "应用私有 DSH_HOME"))
+      append("\n私有会话迁移备份目录数量：").append(backups)
+      append("\n此检查只读取目录状态，不修改、删除或重建会话。")
+    }
+  }
+
+  /** Copy one file only when present. Source remains untouched. */
+  private fun copyFileIfExists(src: File, dst: File) {
+    if (!src.isFile) return
+    dst.parentFile?.mkdirs()
+    src.copyTo(dst, overwrite = true)
+  }
+
+  private fun symlinkPointsTo(src: File, dst: File): Boolean = try {
+    val p = src.toPath()
+    java.nio.file.Files.isSymbolicLink(p) &&
+      p.parent.resolve(java.nio.file.Files.readSymbolicLink(p)).normalize().toFile().canonicalFile == dst.canonicalFile
+  } catch (_: Throwable) { false }
+
+  /**
+   * Transactional directory migration. The private source is first copied to a
+   * public staging directory. Only after the public copy is complete is the
+   * private directory renamed to a same-filesystem backup and replaced by a
+   * symlink. If symlink creation fails, the private backup is restored before
+   * the public copy is removed.
+   */
+  private fun relocateDirTransactional(src: File, dst: File): Boolean {
+    if (symlinkPointsTo(src, dst)) return true
+
+    // Repair a v0.13.1-style interrupted migration: public data exists while
+    // the private source was deleted before symlink creation succeeded.
+    if (!src.exists() && dst.isDirectory) {
+      src.parentFile?.mkdirs()
+      return try {
+        java.nio.file.Files.createSymbolicLink(src.toPath(), dst.toPath())
+        true
+      } catch (t: Throwable) {
+        Log.w(TAG, "repair symlink failed; restoring private directory ${src.absolutePath}", t)
+        try {
+          src.mkdirs()
+          copyTree(dst, src, emptySet(), overwrite = false)
+        } catch (restore: Throwable) {
+          Log.e(TAG, "failed to restore private directory ${src.absolutePath}", restore)
+        }
+        false
+      }
+    }
+    if (!src.exists()) return true
+    if (!src.isDirectory) return false
+    if (dst.exists()) {
+      // Both trees contain data and there is no reliable ordering signal. Do
+      // not overwrite either side automatically; keep the private tree live.
+      Log.w(TAG, "migration conflict; both source and destination exist: ${src.absolutePath} / ${dst.absolutePath}")
+      return false
+    }
+
+    dst.parentFile?.mkdirs()
+    val stage = File(dst.parentFile, ".${dst.name}.migrate-${System.nanoTime()}")
+    val backup = File(src.parentFile, ".${src.name}.migration-backup-${System.nanoTime()}")
+    return try {
+      stage.mkdirs()
+      copyTree(src, stage, emptySet(), overwrite = true)
+      if (!stage.renameTo(dst)) throw java.io.IOException("无法提交公共迁移目录 ${dst.absolutePath}")
+      if (!src.renameTo(backup)) throw java.io.IOException("无法创建私有迁移备份 ${src.absolutePath}")
+      try {
+        java.nio.file.Files.createSymbolicLink(src.toPath(), dst.toPath())
+      } catch (linkError: Throwable) {
+        try { java.nio.file.Files.deleteIfExists(src.toPath()) } catch (_: Throwable) {}
+        if (!backup.renameTo(src)) {
+          src.mkdirs()
+          copyTree(backup, src, emptySet(), overwrite = true)
+          backup.deleteRecursively()
+        }
+        dst.deleteRecursively()
+        throw linkError
+      }
+      // Preserve the previous physical generation until a separately verified
+      // user-initiated cleanup. It is the only fallback if shared storage goes
+      // missing after the link has been published.
+      Log.i(TAG, "Preserved migration rollback generation: " + backup.absolutePath)
+      true
+    } catch (t: Throwable) {
+      stage.deleteRecursively()
+      if (!src.exists() && backup.exists()) {
+        if (!backup.renameTo(src)) {
+          src.mkdirs()
+          try { copyTree(backup, src, emptySet(), overwrite = true) } catch (_: Throwable) {}
+        }
+      }
+      Log.w(TAG, "transactional directory migration failed: ${src.absolutePath}", t)
+      false
+    }
+  }
+
+  /** Transactional migration for the read-only profile patch/config files. */
+  private fun relocateReadOnlyFileTransactional(src: File, dst: File): Boolean {
+    if (symlinkPointsTo(src, dst)) return true
+    if (!src.exists() && dst.isFile) {
+      src.parentFile?.mkdirs()
+      return try {
+        java.nio.file.Files.createSymbolicLink(src.toPath(), dst.toPath())
+        true
+      } catch (t: Throwable) {
+        try { dst.copyTo(src, overwrite = false) } catch (_: Throwable) {}
+        Log.w(TAG, "repair config symlink failed: ${src.absolutePath}", t)
+        false
+      }
+    }
+    if (!src.exists()) return true
+    if (!src.isFile) return false
+    if (dst.exists()) {
+      Log.w(TAG, "config migration conflict; keeping private file: ${src.absolutePath}")
+      return false
+    }
+
+    dst.parentFile?.mkdirs()
+    val stage = File(dst.parentFile, ".${dst.name}.migrate-${System.nanoTime()}")
+    val backup = File(src.parentFile, ".${src.name}.migration-backup-${System.nanoTime()}")
+    return try {
+      src.copyTo(stage, overwrite = false)
+      if (!stage.renameTo(dst)) throw java.io.IOException("无法提交公共配置 ${dst.absolutePath}")
+      if (!src.renameTo(backup)) throw java.io.IOException("无法备份私有配置 ${src.absolutePath}")
+      try {
+        java.nio.file.Files.createSymbolicLink(src.toPath(), dst.toPath())
+      } catch (linkError: Throwable) {
+        try { java.nio.file.Files.deleteIfExists(src.toPath()) } catch (_: Throwable) {}
+        if (!backup.renameTo(src)) backup.copyTo(src, overwrite = true)
+        dst.delete()
+        throw linkError
+      }
+      backup.delete()
+      true
+    } catch (t: Throwable) {
+      stage.delete()
+      if (!src.exists() && backup.exists()) {
+        if (!backup.renameTo(src)) try { backup.copyTo(src, overwrite = true) } catch (_: Throwable) {}
+      }
+      Log.w(TAG, "transactional config migration failed: ${src.absolutePath}", t)
+      false
+    }
+  }
+
+  /** Recursively copy physical directory content without following symlinks. */
+  private fun copyTree(src: File, dst: File, skip: Set<String>, overwrite: Boolean) {
+    val children = src.listFiles()
+      ?: throw java.io.IOException("无法完整读取源目录，禁止继续迁移：" + src.absolutePath)
+    children.forEach { f ->
+      if (f.name in skip) return@forEach
+      val target = File(dst, f.name)
+      if (java.nio.file.Files.isSymbolicLink(f.toPath())) {
+        throw java.io.IOException("迁移目录包含 symlink，拒绝自动搬移：${f.absolutePath}")
+      }
+      if (f.isDirectory) {
+        if (!target.exists()) target.mkdirs()
+        copyTree(f, target, skip, overwrite)
+      } else if (!target.exists() || overwrite) {
+        f.copyTo(target, overwrite = overwrite)
+      }
+    }
+  }
+
+  /**
+   * The DSH launcher unconditionally loads `$DSH_HOME/cordis.patch.yml` for
+   * every profile, even for a named safe profile. A profile override alone
+   * cannot isolate faulty installed user plugins. Use an Android-owned DSH_HOME
+   * with no links to the user's .dsh, profiles, credentials, or global patch.
+   * The user's actual data remains in the original home and is never moved.
+   */
+  private fun ensureSafeDshHome(): File {
+    if (java.nio.file.Files.isSymbolicLink(safeDshHomeDir.toPath()))
+      throw java.io.IOException("安全模式专用目录意外是符号链接，拒绝进入")
+    if (!safeDshHomeDir.isDirectory && !safeDshHomeDir.mkdirs())
+      throw java.io.IOException("无法创建独立安全模式数据目录")
+    return safeDshHomeDir
+  }
+
+  private fun prepareSafeModeProfile(): Pair<String, File> {
+    val name = "android-safe-web"
+    val dir = File(ensureSafeDshHome(), "profiles/$name")
+    if (!dir.isDirectory && !dir.mkdirs()) throw java.io.IOException("无法创建安全模式 profile")
+    val bundles = JSONArray().put("@deepseek-ai/dsh-base").put("@deepseek-ai/dsh-web-app")
+    val manifest = JSONObject()
+      .put("name", "dsh-profile-android-safe-web")
+      .put("private", true)
+      .put("dependencies", JSONObject())
+      .put("dsh", JSONObject().put("profile", JSONObject().put("bundles", bundles)))
+    val manifestFile = File(dir, "package.json")
+    val contents = manifest.toString(2) + "\n"
+    if (!manifestFile.isFile || manifestFile.readText() != contents)
+      writeTextAtomic(manifestFile, contents)
+    val profilePatch = File(dir, "cordis.patch.yml")
+    if (!profilePatch.isFile || profilePatch.readText() != "[]\n")
+      writeTextAtomic(profilePatch, "[]\n")
+
+    // Safe DSH_HOME has no global user patch. Do not inspect or rewrite
+    // the normal DSH_HOME/cordis.patch.yml; a plugin may have inserted any
+    // valid YAML entry there, including rows without a simple "id".
+    val overlay = File(context.filesDir, "mcp/android-safe-mode.patch.yml")
+    overlay.parentFile?.mkdirs()
+    val text = "- id: skill-filesystem\n  disabled: true\n- id: tool-skill\n  disabled: true\n"
+    writeTextAtomic(overlay, text)
+    return name to overlay
+  }
+
+  /** Redacted Android boot breadcrumbs, independent of Node stderr.
+   * Do not log user patches, tokens, plugin manifests or command environment. */
+  private fun recordBootStage(stage: String) {
+    try {
       bootStageFile.writeText("stage=" + stage + "\\n" +
         "epochMs=" + System.currentTimeMillis() + "\\n")
     } catch (t: Throwable) {
