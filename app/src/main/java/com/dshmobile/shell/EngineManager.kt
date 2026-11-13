@@ -1129,7 +1129,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append("\nhome-global patch: ").append(describe(File(root, "cordis.patch.yml")))
       append("\nAndroid-managed MCP: ")
       append(if (ShellState.normalMcpDiagnosticEnabled(context)) "disabled-for-this-launch" else "normal")
-      append("\\nOfficial-only real-home probe: ").append(ShellState.officialOnlyDiagnosticEnabled(context))
+      append("\nOfficial-only real-home probe: ").append(ShellState.officialOnlyDiagnosticEnabled(context))
       append("\n").append(profilePatchPathDiagnostics("web"))
     }
   }
@@ -1684,7 +1684,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       throw java.io.IOException("诊断 profile 名称已被占用，拒绝覆盖用户现有数据")
     if (!dir.isDirectory && !dir.mkdirs())
       throw java.io.IOException("无法创建官方组件诊断 profile")
-    if (!marker.exists()) marker.writeText("android-owned-official-probe-v1\\n")
+    if (!marker.exists()) marker.writeText("android-owned-official-probe-v1\n")
     val bundles = JSONArray().put("@deepseek-ai/dsh-base").put("@deepseek-ai/dsh-web-app")
     val manifest = JSONObject()
       .put("name", "dsh-profile-android-official-probe-web")
@@ -1692,16 +1692,16 @@ class EngineManager(private val context: Context, private val pickToken: String?
       .put("dependencies", JSONObject())
       .put("dsh", JSONObject().put("profile", JSONObject().put("bundles", bundles)))
     val manifestFile = File(dir, "package.json")
-    val desired = manifest.toString(2) + "\\n"
+    val desired = manifest.toString(2) + "\n"
     if (!manifestFile.isFile || manifestFile.readText() != desired)
       writeTextAtomic(manifestFile, desired)
     val profilePatch = File(dir, "cordis.patch.yml")
-    if (!profilePatch.isFile || profilePatch.readText() != "[]\\n")
-      writeTextAtomic(profilePatch, "[]\\n")
+    if (!profilePatch.isFile || profilePatch.readText() != "[]\n")
+      writeTextAtomic(profilePatch, "[]\n")
     // CLI requires a named profile and a separate overlay path, exactly as
     // safe-mode boot does. Do not inherit the normal Web profile's user patch.
     val overlay = File(context.filesDir, "mcp/android-official-probe.patch.yml")
-    writeTextAtomic(overlay, "[]\\n")
+    writeTextAtomic(overlay, "[]\n")
     return name to overlay
   }
 
