@@ -5077,6 +5077,11 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { showEngineFailure("无法保存官方组件对照设置") }
           return@Thread
         }
+        // A control test must never silently retain the previous no-MCP flag.
+        if (!ShellState.setNormalMcpDiagnosticEnabled(this, false)) {
+          runOnUiThread { showEngineFailure("无法恢复默认 MCP 诊断选择") }
+          return@Thread
+        }
         if (!ShellState.setSafeModeEnabled(this, false)) {
           runOnUiThread { showEngineFailure("无法退出安全模式，官方组件测试选择已保存") }
           return@Thread
@@ -5120,6 +5125,11 @@ class MainActivity : ComponentActivity() {
       try {
         if (!ShellState.setNormalMcpDiagnosticEnabled(this, enabled)) {
           runOnUiThread { showEngineFailure("无法保存 MCP 对照诊断选择") }
+          return@Thread
+        }
+        // Explicit normal MCP comparison always boots the real Web profile.
+        if (!ShellState.setOfficialOnlyDiagnosticEnabled(this, false)) {
+          runOnUiThread { showEngineFailure("无法退出官方组件诊断 Profile") }
           return@Thread
         }
         if (!ShellState.setSafeModeEnabled(this, false)) {
