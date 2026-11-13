@@ -1108,10 +1108,19 @@ class EngineManager(private val context: Context, private val pickToken: String?
         ?.optJSONObject("profile")?.optJSONArray("bundles")
       var official = 0
       var extra = 0
+      val extraNames = mutableListOf<String>()
       if (bundles != null) for (i in 0 until bundles.length()) {
-        if (bundles.optString(i).startsWith("@deepseek-ai/")) official++ else extra++
+        val name = bundles.optString(i)
+        if (name.startsWith("@deepseek-ai/")) official++ else {
+          extra++
+          // Never emit raw git URLs, paths, tokens or arbitrary manifest text.
+          // Only conventional npm package IDs are safe for copied diagnostics.
+          if (name.matches(Regex("""(?:@[a-zA-Z0-9._-]+/)?[a-zA-Z0-9._-]{1,80}""")))
+            extraNames += name
+        }
       }
-      "official=" + official + " additional=" + extra
+      "official=" + official + " additional=" + extra +
+        " npmIds=" + (if (extraNames.isEmpty()) "none" else extraNames.joinToString(","))
     } catch (_: Throwable) { "unreadable" }
     return buildString {
       append("web manifest: ").append(describe(manifest)).append(" bundles: ").append(counts)
