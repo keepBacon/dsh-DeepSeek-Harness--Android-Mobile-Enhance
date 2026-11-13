@@ -92,6 +92,7 @@ jobs:
           node scripts/test-android-isolated-safe-home.mjs
           node scripts/test-android-normal-mcp-diagnostic.mjs
           node scripts/test-android-profile-patch-path.mjs
+          node scripts/test-android-official-only-probe.mjs
           node scripts/test-android-engine-stop-contract.mjs
           node scripts/test-dsh-web-page-reader.mjs
           node scripts/test-basic-toolbox-operations.mjs
