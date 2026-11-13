@@ -1120,6 +1120,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append("\nhome-global patch: ").append(describe(File(root, "cordis.patch.yml")))
       append("\nAndroid-managed MCP: ")
       append(if (ShellState.normalMcpDiagnosticEnabled(context)) "disabled-for-this-launch" else "normal")
+      append("\n").append(profilePatchPathDiagnostics("web"))
     }
   }
 
@@ -3045,11 +3046,56 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
-  /** Public/profile-aware config path. The public copy is authoritative after migration. */
+  /**
+   * Select the patch that the DSH launcher ACTUALLY reads:
+   * $DSH_HOME/profiles/<profile>/cordis.patch.yml.  The public copy is only
+   * authoritative when the private path is absent or links to that copy.
+   *
+   * A partial migration may leave TWO regular files here. The old code
+   * always returned the public file for settings edits even when the active
+   * private file was different, silently making "save" ineffective.
+   * Never discard or auto-merge either side of a conflict.
+   */
   fun profilePatchFile(profile: String = "web"): File {
+    val privateFile = File(profileDir(profile), "cordis.patch.yml")
     val publicFile = File(dshDataDir, "profiles/$profile/cordis.patch.yml")
-    if (publicFile.exists()) return publicFile
-    return File(profileDir(profile), "cordis.patch.yml")
+    val isLink = java.nio.file.Files.isSymbolicLink(privateFile.toPath())
+    if (isLink) {
+      if (!symlinkPointsTo(privateFile, publicFile) || !publicFile.isFile)
+        throw java.io.IOException("Profile 补丁的私有符号链接不指向有效公共副本；已拒绝修改，请先检查迁移冲突")
+      // Never atomically replace a symbolic link. Write the link's target.
+      return publicFile
+    }
+    if (privateFile.isFile) {
+      if (publicFile.isFile && privateFile.length() != publicFile.length())
+        Log.w(TAG, "Profile patch private/public migration conflict (profile=$profile); using active private patch; both copies preserved")
+      return privateFile
+    }
+    // The active private path is missing. Preserve the public copy, but
+    // repairMissingDataLinks() will reconnect it before the next normal boot.
+    if (publicFile.isFile) return publicFile
+    return privateFile
+  }
+
+  /** Read-only triage: explains why Web settings and boot may diverge,
+   * without exposing user settings, API tokens or patch contents. */
+  fun profilePatchPathDiagnostics(profile: String = "web"): String {
+    val privateFile = File(profileDir(profile), "cordis.patch.yml")
+    val publicFile = File(dshDataDir, "profiles/$profile/cordis.patch.yml")
+    val linked = java.nio.file.Files.isSymbolicLink(privateFile.toPath())
+    val sameTarget = linked && symlinkPointsTo(privateFile, publicFile)
+    val privateSize = if (privateFile.isFile) privateFile.length() else -1L
+    val publicSize = if (publicFile.isFile) publicFile.length() else -1L
+    return "profile patch routing: private=" + privateSize + "B, public=" +
+      publicSize + "B; privateIsSymlink=" + linked +
+      "; linksToPublic=" + sameTarget +
+      "; selected=" + when {
+        sameTarget -> "public-linked"
+        privateFile.isFile -> "private-active"
+        publicFile.isFile -> "public-fallback"
+        else -> "new-private"
+      } +
+      "; sizeDivergence=" + (privateSize >= 0 && publicSize >= 0 && privateSize != publicSize)
   }
 
   fun readProfilePatch(profile: String = "web"): String {
