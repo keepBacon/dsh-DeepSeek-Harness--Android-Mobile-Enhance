@@ -1129,6 +1129,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append("\nhome-global patch: ").append(describe(File(root, "cordis.patch.yml")))
       append("\nAndroid-managed MCP: ")
       append(if (ShellState.normalMcpDiagnosticEnabled(context)) "disabled-for-this-launch" else "normal")
+      append("\\nOfficial-only real-home probe: ").append(ShellState.officialOnlyDiagnosticEnabled(context))
       append("\n").append(profilePatchPathDiagnostics("web"))
     }
   }
@@ -1670,6 +1671,40 @@ class EngineManager(private val context: Context, private val pickToken: String?
     return name to overlay
   }
 
+  /** Diagnostic clone in the REAL data home. It composes only the two
+   * official bundles; existing web package.json, patches and modules are NEVER
+   * edited. A marker prevents overwriting a user's pre-existing profile. */
+  private fun prepareOfficialOnlyDiagnosticProfile(): Pair<String, File> {
+    val name = "android-official-probe-web-20261113"
+    val dir = File(ensureDshDataHome(), "profiles/$name")
+    val marker = File(dir, ".android-dsh-official-probe")
+    if (java.nio.file.Files.isSymbolicLink(dir.toPath()))
+      throw java.io.IOException("官方组件诊断目录是符号链接，拒绝修改")
+    if (dir.exists() && !marker.isFile)
+      throw java.io.IOException("诊断 profile 名称已被占用，拒绝覆盖用户现有数据")
+    if (!dir.isDirectory && !dir.mkdirs())
+      throw java.io.IOException("无法创建官方组件诊断 profile")
+    if (!marker.exists()) marker.writeText("android-owned-official-probe-v1\\n")
+    val bundles = JSONArray().put("@deepseek-ai/dsh-base").put("@deepseek-ai/dsh-web-app")
+    val manifest = JSONObject()
+      .put("name", "dsh-profile-android-official-probe-web")
+      .put("private", true)
+      .put("dependencies", JSONObject())
+      .put("dsh", JSONObject().put("profile", JSONObject().put("bundles", bundles)))
+    val manifestFile = File(dir, "package.json")
+    val desired = manifest.toString(2) + "\\n"
+    if (!manifestFile.isFile || manifestFile.readText() != desired)
+      writeTextAtomic(manifestFile, desired)
+    val profilePatch = File(dir, "cordis.patch.yml")
+    if (!profilePatch.isFile || profilePatch.readText() != "[]\\n")
+      writeTextAtomic(profilePatch, "[]\\n")
+    // CLI requires a named profile and a separate overlay path, exactly as
+    // safe-mode boot does. Do not inherit the normal Web profile's user patch.
+    val overlay = File(context.filesDir, "mcp/android-official-probe.patch.yml")
+    writeTextAtomic(overlay, "[]\\n")
+    return name to overlay
+  }
+
   /** Start the dsh web engine from the embedded snapshot. */
   fun startEngine(port: Int = 3080, runtimeAlreadyChecked: Boolean = false): Boolean {
     // A stop from another EngineManager instance must not race with launch.
@@ -1704,12 +1739,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
       val safeMode = ShellState.safeModeEnabled(context)
+      val officialProbe = !safeMode && ShellState.officialOnlyDiagnosticEnabled(context)
       val noMcpDiagnostic = !safeMode && ShellState.normalMcpDiagnosticEnabled(context)
-      recordBootStage(if (safeMode) "safe-profile" else if (noMcpDiagnostic) "normal-profile-without-android-mcp" else "normal-profile")
+      recordBootStage(if (safeMode) "safe-profile" else if (officialProbe) "real-home-official-only-profile" else if (noMcpDiagnostic) "normal-profile-without-android-mcp" else "normal-profile")
       // Recovery uses an isolated profile. Never run the normal web profile
       // repair helpers during a safe-mode boot: they can touch the user's
       // plugin tree and delay startup even though those plugins are disabled.
-      if (!safeMode) {
+      if (!safeMode && !officialProbe) {
         ensurePluginWorkspaceCompat("web")
         applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
         applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
@@ -1717,9 +1753,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
         applyAndroidWebFetchCompat().forEach { Log.i(TAG, "[web_fetch compat] $it") }
         applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
       }
-      val safeProfile = if (safeMode) prepareSafeModeProfile() else null
+      val safeProfile = if (safeMode) prepareSafeModeProfile()
+        else if (officialProbe) prepareOfficialOnlyDiagnosticProfile() else null
       recordBootStage("profile-prepared")
-      val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode || noMcpDiagnostic)
+      val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode || officialProbe || noMcpDiagnostic)
       recordBootStage("mcp-overlay-ready")
       val args = if (safeProfile != null) arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
