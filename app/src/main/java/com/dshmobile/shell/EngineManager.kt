@@ -3071,9 +3071,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
         Log.w(TAG, "Profile patch private/public migration conflict (profile=$profile); using active private patch; both copies preserved")
       return privateFile
     }
-    // The active private path is missing. Preserve the public copy, but
-    // repairMissingDataLinks() will reconnect it before the next normal boot.
-    if (publicFile.isFile) return publicFile
+    // If a migration left only the public file, editing it before a link is
+    // repaired would not affect the file actually loaded by the DSH Host.
+    // Do not overwrite the orphaned public copy; create the active private
+    // entry instead, preserving both versions for explicit reconciliation.
+    if (publicFile.isFile)
+      Log.w(TAG, "Public profile patch has no active private link; saving to engine-active private path and preserving public copy")
     return privateFile
   }
 
@@ -3092,7 +3095,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "; selected=" + when {
         sameTarget -> "public-linked"
         privateFile.isFile -> "private-active"
-        publicFile.isFile -> "public-fallback"
+        publicFile.isFile -> "private-missing-public-orphan"
         else -> "new-private"
       } +
       "; sizeDivergence=" + (privateSize >= 0 && publicSize >= 0 && privateSize != publicSize)
