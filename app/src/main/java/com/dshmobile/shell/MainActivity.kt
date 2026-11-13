@@ -776,6 +776,13 @@ class MainActivity : ComponentActivity() {
     }
     wrap.addView(safeModeSwitch)
     wrap.addView(Button(this).apply {
+      text = if (ShellState.officialOnlyDiagnosticEnabled(this@MainActivity))
+        "退出官方组件对照模式" else "原数据目录：仅启动官方组件"
+      setOnClickListener {
+        switchOfficialOnlyDiagnostic(!ShellState.officialOnlyDiagnosticEnabled(this@MainActivity))
+      }
+    })
+    wrap.addView(Button(this).apply {
       text = if (ShellState.normalMcpDiagnosticEnabled(this@MainActivity))
         "正常模式：恢复 Android MCP（下次启动）"
       else "正常模式：跳过 Android MCP 进行诊断"
@@ -5054,6 +5061,53 @@ class MainActivity : ComponentActivity() {
    * Persist before stopping the old Node process so a system force-stop does
    * not undo this independent test.
    */
+  /** Reproduce the normal HOME boot with only shipped Web bundles. No user
+   * web profile or installed third-party bundle is modified or uninstalled. */
+  private fun switchOfficialOnlyDiagnostic(enabled: Boolean) {
+    if (engineFlowRunning.get() || !profileMutationRunning.compareAndSet(false, true)) {
+      showSimpleMessage("操作进行中", "请先结束当前引擎操作")
+      return
+    }
+    EngineManager.beginMaintenance()
+    showStartingState("正在准备原数据目录的官方组件对照启动…",
+      "只新增隔离测试 Profile；原 web、会话、凭据、插件清单均不修改。")
+    Thread {
+      try {
+        if (!ShellState.setOfficialOnlyDiagnosticEnabled(this, enabled)) {
+          runOnUiThread { showEngineFailure("无法保存官方组件对照设置") }
+          return@Thread
+        }
+        if (!ShellState.setSafeModeEnabled(this, false)) {
+          runOnUiThread { showEngineFailure("无法退出安全模式，官方组件测试选择已保存") }
+          return@Thread
+        }
+        try { stopService(Intent(this, EngineService::class.java)) } catch (_: Throwable) {}
+        if (!engineManager.stopEngine()) {
+          runOnUiThread {
+            showEngineFailure("官方组件对照设置已保存，旧进程未退出")
+            showSimpleMessage("需系统强行停止",
+              "请在 Android 设置 → 应用 → DSH 中强行停止，再重新打开。不会删除插件和聊天记录。")
+          }
+          return@Thread
+        }
+        val started = engineManager.startEngine()
+        val ready = started && waitForEngineReady()
+        if (ready) {
+          startEngineService()
+          runOnUiThread { showWeb() }
+        } else {
+          if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
+          runOnUiThread { showEngineFailure("官方组件对照启动仍未就绪") }
+        }
+      } catch (t: Throwable) {
+        runOnUiThread { showEngineFailure("官方组件对照异常：" + (t.message ?: t.javaClass.simpleName)) }
+      } finally {
+        EngineManager.endMaintenance()
+        profileMutationRunning.set(false)
+      }
+    }.start()
+  }
+
   private fun switchNormalMcpDiagnostic(enabled: Boolean) {
     if (engineFlowRunning.get() || !profileMutationRunning.compareAndSet(false, true)) {
       showSimpleMessage("操作进行中", "请先结束当前引擎操作")
@@ -6172,6 +6226,14 @@ class MainActivity : ComponentActivity() {
         switchNormalMcpDiagnostic(!ShellState.normalMcpDiagnosticEnabled(this@MainActivity))
       }
     }
+    val officialProbe = Button(this).apply {
+      text = if (ShellState.officialOnlyDiagnosticEnabled(this@MainActivity))
+        "退出官方组件对照模式并重启"
+      else "原数据目录仅启动官方组件（诊断）"
+      setOnClickListener {
+        switchOfficialOnlyDiagnostic(!ShellState.officialOnlyDiagnosticEnabled(this@MainActivity))
+      }
+    }
     val resetConfig = Button(this).apply {
       text = "备份并重置 web 配置"
       setOnClickListener {
@@ -6199,7 +6261,7 @@ class MainActivity : ComponentActivity() {
       }
     }
     recoveryControls.clear()
-    recoveryControls += listOf(repairRuntime, retry, safeMode, noMcp, resetConfig, rescue, copyDiagnostics)
+    recoveryControls += listOf(repairRuntime, retry, safeMode, noMcp, officialProbe, resetConfig, rescue, copyDiagnostics)
     recoveryControls.forEach { it.visibility = View.GONE }
     guide.addView(engineStatus)
     guide.addView(progressText)
@@ -6207,6 +6269,7 @@ class MainActivity : ComponentActivity() {
     guide.addView(retry)
     guide.addView(safeMode)
     guide.addView(noMcp)
+    guide.addView(officialProbe)
     guide.addView(resetConfig)
     guide.addView(rescue)
     guide.addView(copyDiagnostics)
