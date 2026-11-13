@@ -1108,10 +1108,19 @@ class EngineManager(private val context: Context, private val pickToken: String?
         ?.optJSONObject("profile")?.optJSONArray("bundles")
       var official = 0
       var extra = 0
+      val extraNames = mutableListOf<String>()
       if (bundles != null) for (i in 0 until bundles.length()) {
-        if (bundles.optString(i).startsWith("@deepseek-ai/")) official++ else extra++
+        val name = bundles.optString(i)
+        if (name.startsWith("@deepseek-ai/")) official++ else {
+          extra++
+          // Never emit raw git URLs, paths, tokens or arbitrary manifest text.
+          // Only conventional npm package IDs are safe for copied diagnostics.
+          if (name.matches(Regex("""(?:@[a-zA-Z0-9._-]+/)?[a-zA-Z0-9._-]{1,80}""")))
+            extraNames += name
+        }
       }
-      "official=" + official + " additional=" + extra
+      "official=" + official + " additional=" + extra +
+        " npmIds=" + (if (extraNames.isEmpty()) "none" else extraNames.joinToString(","))
     } catch (_: Throwable) { "unreadable" }
     return buildString {
       append("web manifest: ").append(describe(manifest)).append(" bundles: ").append(counts)
@@ -1120,6 +1129,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append("\nhome-global patch: ").append(describe(File(root, "cordis.patch.yml")))
       append("\nAndroid-managed MCP: ")
       append(if (ShellState.normalMcpDiagnosticEnabled(context)) "disabled-for-this-launch" else "normal")
+      append("\nOfficial-only real-home probe: ").append(ShellState.officialOnlyDiagnosticEnabled(context))
+      append("\n").append(profilePatchPathDiagnostics("web"))
     }
   }
 
@@ -1660,6 +1671,45 @@ class EngineManager(private val context: Context, private val pickToken: String?
     return name to overlay
   }
 
+  /** Diagnostic clone in the REAL data home. It composes only the two
+   * official bundles; existing web package.json, patches and modules are NEVER
+   * edited. A marker prevents overwriting a user's pre-existing profile. */
+  private fun prepareOfficialOnlyDiagnosticProfile(): Pair<String, File> {
+    val name = "android-official-probe-web-20261113"
+    val dir = File(ensureDshDataHome(), "profiles/$name")
+    val marker = File(dir, ".android-dsh-official-probe")
+    if (java.nio.file.Files.isSymbolicLink(dir.toPath()))
+      throw java.io.IOException("官方组件诊断目录是符号链接，拒绝修改")
+    if (java.nio.file.Files.isSymbolicLink(marker.toPath()))
+      throw java.io.IOException("诊断 Profile 所有权标记异常，拒绝修改")
+    if (dir.exists() && (!marker.isFile || marker.readText() != "android-owned-official-probe-v1\n"))
+      throw java.io.IOException("诊断 profile 名称已被占用，拒绝覆盖用户现有数据")
+    if (!dir.isDirectory && !dir.mkdirs())
+      throw java.io.IOException("无法创建官方组件诊断 profile")
+    if (!marker.exists()) marker.writeText("android-owned-official-probe-v1\n")
+    for (filename in listOf("package.json", "cordis.patch.yml"))
+      if (java.nio.file.Files.isSymbolicLink(File(dir, filename).toPath()))
+        throw java.io.IOException("诊断 Profile 中存在符号链接，拒绝修改")
+    val bundles = JSONArray().put("@deepseek-ai/dsh-base").put("@deepseek-ai/dsh-web-app")
+    val manifest = JSONObject()
+      .put("name", "dsh-profile-android-official-probe-web")
+      .put("private", true)
+      .put("dependencies", JSONObject())
+      .put("dsh", JSONObject().put("profile", JSONObject().put("bundles", bundles)))
+    val manifestFile = File(dir, "package.json")
+    val desired = manifest.toString(2) + "\n"
+    if (!manifestFile.isFile || manifestFile.readText() != desired)
+      writeTextAtomic(manifestFile, desired)
+    val profilePatch = File(dir, "cordis.patch.yml")
+    if (!profilePatch.isFile || profilePatch.readText() != "[]\n")
+      writeTextAtomic(profilePatch, "[]\n")
+    // CLI requires a named profile and a separate overlay path, exactly as
+    // safe-mode boot does. Do not inherit the normal Web profile's user patch.
+    val overlay = File(context.filesDir, "mcp/android-official-probe.patch.yml")
+    writeTextAtomic(overlay, "[]\n")
+    return name to overlay
+  }
+
   /** Start the dsh web engine from the embedded snapshot. */
   fun startEngine(port: Int = 3080, runtimeAlreadyChecked: Boolean = false): Boolean {
     // A stop from another EngineManager instance must not race with launch.
@@ -1694,12 +1744,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
       val safeMode = ShellState.safeModeEnabled(context)
+      val officialProbe = !safeMode && ShellState.officialOnlyDiagnosticEnabled(context)
       val noMcpDiagnostic = !safeMode && ShellState.normalMcpDiagnosticEnabled(context)
-      recordBootStage(if (safeMode) "safe-profile" else if (noMcpDiagnostic) "normal-profile-without-android-mcp" else "normal-profile")
+      recordBootStage(if (safeMode) "safe-profile" else if (officialProbe) "real-home-official-only-profile" else if (noMcpDiagnostic) "normal-profile-without-android-mcp" else "normal-profile")
       // Recovery uses an isolated profile. Never run the normal web profile
       // repair helpers during a safe-mode boot: they can touch the user's
       // plugin tree and delay startup even though those plugins are disabled.
-      if (!safeMode) {
+      if (!safeMode && !officialProbe) {
         ensurePluginWorkspaceCompat("web")
         applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
         applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
@@ -1707,9 +1758,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
         applyAndroidWebFetchCompat().forEach { Log.i(TAG, "[web_fetch compat] $it") }
         applyAndroidModsearchCompat().forEach { Log.i(TAG, "[modsearch compat] $it") }
       }
-      val safeProfile = if (safeMode) prepareSafeModeProfile() else null
+      val safeProfile = if (safeMode) prepareSafeModeProfile()
+        else if (officialProbe) prepareOfficialOnlyDiagnosticProfile() else null
       recordBootStage("profile-prepared")
-      val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode || noMcpDiagnostic)
+      val mcpPatch = mcpConfigManager.ensureRuntimePatch(safeMode || officialProbe || noMcpDiagnostic)
       recordBootStage("mcp-overlay-ready")
       val args = if (safeProfile != null) arrayOf(
         nodeBin.absolutePath, "--expose-internals", dshBin.absolutePath,
@@ -3045,11 +3097,59 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
-  /** Public/profile-aware config path. The public copy is authoritative after migration. */
+  /**
+   * Select the patch that the DSH launcher ACTUALLY reads:
+   * $DSH_HOME/profiles/<profile>/cordis.patch.yml.  The public copy is only
+   * authoritative when the private path is absent or links to that copy.
+   *
+   * A partial migration may leave TWO regular files here. The old code
+   * always returned the public file for settings edits even when the active
+   * private file was different, silently making "save" ineffective.
+   * Never discard or auto-merge either side of a conflict.
+   */
   fun profilePatchFile(profile: String = "web"): File {
+    val privateFile = File(profileDir(profile), "cordis.patch.yml")
     val publicFile = File(dshDataDir, "profiles/$profile/cordis.patch.yml")
-    if (publicFile.exists()) return publicFile
-    return File(profileDir(profile), "cordis.patch.yml")
+    val isLink = java.nio.file.Files.isSymbolicLink(privateFile.toPath())
+    if (isLink) {
+      if (!symlinkPointsTo(privateFile, publicFile) || !publicFile.isFile)
+        throw java.io.IOException("Profile 补丁的私有符号链接不指向有效公共副本；已拒绝修改，请先检查迁移冲突")
+      // Never atomically replace a symbolic link. Write the link's target.
+      return publicFile
+    }
+    if (privateFile.isFile) {
+      if (publicFile.isFile && privateFile.length() != publicFile.length())
+        Log.w(TAG, "Profile patch private/public migration conflict (profile=$profile); using active private patch; both copies preserved")
+      return privateFile
+    }
+    // If a migration left only the public file, editing it before a link is
+    // repaired would not affect the file actually loaded by the DSH Host.
+    // Do not overwrite the orphaned public copy; create the active private
+    // entry instead, preserving both versions for explicit reconciliation.
+    if (publicFile.isFile)
+      Log.w(TAG, "Public profile patch has no active private link; saving to engine-active private path and preserving public copy")
+    return privateFile
+  }
+
+  /** Read-only triage: explains why Web settings and boot may diverge,
+   * without exposing user settings, API tokens or patch contents. */
+  fun profilePatchPathDiagnostics(profile: String = "web"): String {
+    val privateFile = File(profileDir(profile), "cordis.patch.yml")
+    val publicFile = File(dshDataDir, "profiles/$profile/cordis.patch.yml")
+    val linked = java.nio.file.Files.isSymbolicLink(privateFile.toPath())
+    val sameTarget = linked && symlinkPointsTo(privateFile, publicFile)
+    val privateSize = if (privateFile.isFile) privateFile.length() else -1L
+    val publicSize = if (publicFile.isFile) publicFile.length() else -1L
+    return "profile patch routing: private=" + privateSize + "B, public=" +
+      publicSize + "B; privateIsSymlink=" + linked +
+      "; linksToPublic=" + sameTarget +
+      "; selected=" + when {
+        sameTarget -> "public-linked"
+        privateFile.isFile -> "private-active"
+        publicFile.isFile -> "private-missing-public-orphan"
+        else -> "new-private"
+      } +
+      "; sizeDivergence=" + (privateSize >= 0 && publicSize >= 0 && privateSize != publicSize)
   }
 
   fun readProfilePatch(profile: String = "web"): String {

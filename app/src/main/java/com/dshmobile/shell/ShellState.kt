@@ -11,6 +11,7 @@ object ShellState {
   private const val INTERFACE_MODE = "interface-mode"
   private const val SAFE_MODE = "safe-mode"
   private const val NORMAL_MCP_DIAGNOSTIC = "normal-mcp-diagnostic-disabled"
+  private const val OFFICIAL_ONLY_DIAGNOSTIC = "official-only-diagnostic-web"
 
   const val UI_MODE_MOBILE = "mobile"
   const val UI_MODE_NATIVE = "native"
@@ -65,6 +66,15 @@ object ShellState {
   fun setNormalMcpDiagnosticEnabled(context: Context, enabled: Boolean): Boolean =
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       .edit().putBoolean(NORMAL_MCP_DIAGNOSTIC, enabled).commit()
+
+  /** Use the actual DSH_HOME with an app-owned official-bundles-only profile.
+   * This never changes the user's normal web profile or its patch. */
+  fun officialOnlyDiagnosticEnabled(context: Context): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(OFFICIAL_ONLY_DIAGNOSTIC, false)
+
+  fun setOfficialOnlyDiagnosticEnabled(context: Context, enabled: Boolean): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit().putBoolean(OFFICIAL_ONLY_DIAGNOSTIC, enabled).commit()
 
   /**
    * Stable private token used by the Android directory-picker bridge and the
