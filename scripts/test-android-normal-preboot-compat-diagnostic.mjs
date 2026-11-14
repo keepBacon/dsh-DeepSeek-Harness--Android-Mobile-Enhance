@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+// A reversible startup-path control for Android Web Gateway hangs.
+// This test checks source contracts; only the affected device can establish
+// whether the full Web profile becomes ready under the new control.
+import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8')
+const engine = read('app/src/main/java/com/dshmobile/shell/EngineManager.kt')
+const activity = read('app/src/main/java/com/dshmobile/shell/MainActivity.kt')
+const state = read('app/src/main/java/com/dshmobile/shell/ShellState.kt')
+const start = engine.slice(engine.indexOf('  fun startEngine('), engine.indexOf('  /** Preserve an actionable reason'))
+const operation = activity.slice(activity.indexOf('  private fun switchNormalPrebootCompatDiagnostic('), activity.indexOf('  private fun switchRecoverySafeMode('))
+const official = activity.slice(activity.indexOf('  private fun switchOfficialOnlyDiagnostic('), activity.indexOf('  private fun switchNormalMcpDiagnostic('))
+const noMcp = activity.slice(activity.indexOf('  private fun switchNormalMcpDiagnostic('), activity.indexOf('  private fun switchNormalPrebootCompatDiagnostic('))
+
+assert.match(state, /private const val NORMAL_PREBOOT_COMPAT_DIAGNOSTIC/)
+assert.match(state, /fun normalPrebootCompatDiagnosticEnabled\(context: Context\): Boolean/)
+assert.match(state, /fun setNormalPrebootCompatDiagnosticEnabled\(context: Context, enabled: Boolean\): Boolean =/)
+assert.match(state, /putBoolean\(NORMAL_PREBOOT_COMPAT_DIAGNOSTIC, enabled\)\.commit\(\)/)
+assert.match(start, /val skipPrebootCompat = !safeMode && !officialProbe && !noMcpDiagnostic &&/)
+assert.match(start, /ShellState\.normalPrebootCompatDiagnosticEnabled\(context\)/)
+assert.match(start, /if \(!safeMode && !officialProbe && !skipPrebootCompat\) \{/)
+assert.match(start, /ensurePluginWorkspaceCompat\("web"\)/)
+for (const compat of ['applyAndroidCodexModelPickerCompat', 'applyAndroidCodexRelayTdzCompat', 'applyAndroidCodexSubagentCompat', 'applyAndroidWebFetchCompat', 'applyAndroidModsearchCompat'])
+  assert.ok(start.includes(compat + '('), 'normal preboot chain must remain intact: ' + compat)
+assert.match(start, /mcpConfigManager\.ensureRuntimePatch\(safeMode \|\| officialProbe \|\| noMcpDiagnostic\)/)
+assert.match(start, /else arrayOf\([\s\S]*?"web", "--patch", mcpPatch\.absolutePath/)
+assert.match(engine, /Normal Web preboot compatibility: /)
+assert.match(engine, /skipped-for-this-launch/)
+assert.match(start, /normal-profile-no-preboot-compat/)
+assert.match(operation, /ShellState\.setNormalPrebootCompatDiagnosticEnabled\(this, enabled\)/)
+for (const name of ['setSafeModeEnabled', 'setOfficialOnlyDiagnosticEnabled', 'setNormalMcpDiagnosticEnabled'])
+  assert.match(operation, new RegExp('ShellState\\.' + name + '\\(this, false\\)'))
+assert.ok(operation.indexOf('setNormalPrebootCompatDiagnosticEnabled(this, enabled)') < operation.indexOf('engineManager.stopEngine()'), 'persist choice before process stop')
+for (const forbidden of ['backupAndResetProfilePatch(', 'removePlugin(', 'installPlugin(', 'deleteRecursively(', 'writeTextAtomic('])
+  assert.ok(!operation.includes(forbidden), 'diagnostic mode must not edit user data: ' + forbidden)
+assert.match(operation, /EngineManager\.beginMaintenance\(\)/)
+assert.match(operation, /EngineManager\.endMaintenance\(\)/)
+assert.match(official, /setNormalPrebootCompatDiagnosticEnabled\(this, false\)/)
+assert.match(noMcp, /setNormalPrebootCompatDiagnosticEnabled\(this, false\)/)
+assert.match(activity, /正常 Web 保留所有插件，跳过启动前兼容处理（诊断）/)
+assert.match(activity, /guide\.addView\(noCompat\)/)
+console.log('[DSH] normal-Web preboot-compat control is reversible and preserves all nine user bundles: OK')
