@@ -1,0 +1,21 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8')
+const patch = read('scripts/android-runtime-patch.mjs')
+const build = read('scripts/ci-assemble-github-runtime.py')
+const engine = read('app/src/main/java/com/dshmobile/shell/EngineManager.kt')
+assert.match(patch, /eachPackage\('@deepseek-ai\/dsh-bash-local', 'lib\/index\.js'/)
+assert.match(patch, /DSH Android compat: model Bash via system linker/)
+assert.match(patch, /const matches = source\.match\(call\) \?\? \[\]/)
+assert.match(patch, /if \(matches\.length !== 1\)/)
+assert.match(patch, /\/system\/bin\/sh/)
+assert.match(patch, /\/libexec\/dsh-mobile\/android-exec\.sh/)
+assert.match(patch, /\/bin\/bash/)
+assert.match(patch, /spec\.command/)
+assert.match(patch, /process\.env\.DSH_ANDROID_STANDALONE === "1"/)
+assert.match(build, /DSH_COMPAT_ONLY_PACKAGES[^\n]*@deepseek-ai\/dsh-bash-local/)
+assert.match(engine, /"DSH_ANDROID_STANDALONE" to "1"/)
+assert.match(engine, /"TERMUX__PREFIX" to usrDir\.absolutePath/)
+assert.match(engine, /"LD_PRELOAD" to preload\.absolutePath/)
+console.log('[DSH] model-facing bash linker bridge source contract: OK')
