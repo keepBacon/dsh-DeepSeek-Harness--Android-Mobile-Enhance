@@ -1132,6 +1132,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append("\nOfficial-only real-home probe: ").append(ShellState.officialOnlyDiagnosticEnabled(context))
       append("\nNormal Web preboot compatibility: ")
       append(if (ShellState.normalPrebootCompatDiagnosticEnabled(context)) "skipped-for-this-launch" else "normal")
+      val lastRecovery = ShellState.lastPrebootTrialRecovery(context)
+      if (lastRecovery.isNotBlank()) append("\nPrevious Web trial auto-recovery: ").append(lastRecovery)
       append("\n").append(profilePatchPathDiagnostics("web"))
     }
   }
@@ -1745,6 +1747,15 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // This must run before the Host starts, not only before Android-native
       // plugin operations: Web marketplace plugins invoke DSH's plugin manager
       // inside the already-running Host and therefore share this profile file.
+      // Persist a one-shot trial marker BEFORE loading the full Web profile.
+      // If the process dies here, the next Activity or sticky Service start
+      // switches back to the proven official-only profile, preserving data.
+      if (!ShellState.safeModeEnabled(context) &&
+          !ShellState.officialOnlyDiagnosticEnabled(context) &&
+          !ShellState.normalMcpDiagnosticEnabled(context) &&
+          ShellState.normalPrebootCompatDiagnosticEnabled(context)) {
+        ShellState.beginPrebootTrial(context)
+      }
       val safeMode = ShellState.safeModeEnabled(context)
       val officialProbe = !safeMode && ShellState.officialOnlyDiagnosticEnabled(context)
       val noMcpDiagnostic = !safeMode && ShellState.normalMcpDiagnosticEnabled(context)
