@@ -10,6 +10,7 @@ on:
       - 'scripts/dsh-mobile-toolbox-mcp.mjs'
       - 'scripts/dsh-bounded-spawn.mjs'
       - 'scripts/dsh-android-exec.sh'
+      - 'scripts/dsh-android-bash-env.sh'
       - 'scripts/dsh-android-sandbox-runner.sh'
       - 'scripts/embed-termux-tools.sh'
       - 'scripts/android-runtime-patch.mjs'
