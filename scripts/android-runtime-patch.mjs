@@ -206,6 +206,7 @@ const wanted = new Set([
   '@deepseek-ai/cordis-plugin-loader',
   '@deepseek-ai/dsh-sandbox-local',
   '@deepseek-ai/dsh-subprocess-local',
+  '@deepseek-ai/dsh-bash-local',
   '@deepseek-ai/dsh-terminal-bash',
   '@deepseek-ai/dsh-web-fetch-http',
   '@deepseek-ai/dsh-tool-web',
