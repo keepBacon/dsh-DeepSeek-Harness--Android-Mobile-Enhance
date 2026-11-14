@@ -1252,6 +1252,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
         process.exitCode = code == null ? 91 : code;
       });
     """.trimIndent()
+    // subprocess-local uses detached POSIX process groups. Android's process
+    // group/session behavior may differ from ProcessBuilder or ordinary spawn.
+    // Keep the non-detached probe as the control, then vary only detached.
+    val nodeDetachedProbe = nodeSubprocessProbe
+      .replace("stdio:['ignore','pipe','pipe'],env:process.env",
+        "detached:true,stdio:['ignore','pipe','pipe'],env:process.env")
+      .replace("NODE_SPAWN_OK", "NODE_DETACHED_OK")
 
     return buildString {
       append("DSH Android native Shell stage diagnostic (read-only)\n")
@@ -1266,7 +1273,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append("\n\n")
       append(check("04 node-child-sandbox", listOf("/system/bin/sh", bridge, node, "-e", nodeSubprocessProbe),
         "NODE_SPAWN_OK", true))
-      append("\n\nNote: these tests isolate native process launches; they do not prove model Shell service registration or its deadline handling.")
+      append("\n\n")
+      append(check("05 node-detached-sandbox", listOf("/system/bin/sh", bridge, node, "-e", nodeDetachedProbe),
+        "NODE_DETACHED_OK", true))
+      append("\n\nNote: stages 04 and 05 change only Node detached process-group startup. A passing stage still does not prove model Shell lifecycle correctness.")
     }
   }
 
