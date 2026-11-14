@@ -586,7 +586,7 @@ eachPackage('@deepseek-ai/dsh-bash-local', 'lib/index.js', (file) => {
   write(file, source)
   checkPatchedJavaScript(file)
   return 'patched'
-}, { mandatory: androidPermissionPresetGuardMandatory })
+}, { requiredIfPresent: true })
 
 // terminal-bash defaults to /bin/bash on POSIX desktops. Android has no /bin
 // Bash; the APK already publishes the relocated embedded shell through
