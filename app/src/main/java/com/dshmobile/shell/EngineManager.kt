@@ -1130,6 +1130,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append("\nAndroid-managed MCP: ")
       append(if (ShellState.normalMcpDiagnosticEnabled(context)) "disabled-for-this-launch" else "normal")
       append("\nOfficial-only real-home probe: ").append(ShellState.officialOnlyDiagnosticEnabled(context))
+      append("\nNormal Web preboot compatibility: ")
+      append(if (ShellState.normalPrebootCompatDiagnosticEnabled(context)) "skipped-for-this-launch" else "normal")
       append("\n").append(profilePatchPathDiagnostics("web"))
     }
   }
@@ -1746,11 +1748,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       val safeMode = ShellState.safeModeEnabled(context)
       val officialProbe = !safeMode && ShellState.officialOnlyDiagnosticEnabled(context)
       val noMcpDiagnostic = !safeMode && ShellState.normalMcpDiagnosticEnabled(context)
-      recordBootStage(if (safeMode) "safe-profile" else if (officialProbe) "real-home-official-only-profile" else if (noMcpDiagnostic) "normal-profile-without-android-mcp" else "normal-profile")
+      val skipPrebootCompat = !safeMode && !officialProbe && !noMcpDiagnostic &&
+        ShellState.normalPrebootCompatDiagnosticEnabled(context)
+      recordBootStage(if (safeMode) "safe-profile" else if (officialProbe) "real-home-official-only-profile" else if (noMcpDiagnostic) "normal-profile-without-android-mcp" else if (skipPrebootCompat) "normal-profile-no-preboot-compat" else "normal-profile")
       // Recovery uses an isolated profile. Never run the normal web profile
       // repair helpers during a safe-mode boot: they can touch the user's
       // plugin tree and delay startup even though those plugins are disabled.
-      if (!safeMode && !officialProbe) {
+      if (!safeMode && !officialProbe && !skipPrebootCompat) {
         ensurePluginWorkspaceCompat("web")
         applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
         applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
