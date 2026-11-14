@@ -9,6 +9,7 @@ REQUIRED = (
  'usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
  'usr/libexec/dsh-mobile/android-sandbox-runner.sh',
  'usr/libexec/dsh-mobile/android-exec.sh',
+ 'usr/libexec/dsh-mobile/android-bash-env.sh',
  'usr/libexec/dsh-mobile/toolbox-mcp.mjs',
  'usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs',
  'usr/libexec/dsh-mobile/dsh-bounded-spawn.mjs',
