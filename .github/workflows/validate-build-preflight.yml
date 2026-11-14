@@ -100,6 +100,7 @@ jobs:
           node scripts/test-dsh-web-page-reader.mjs
           node scripts/test-basic-toolbox-operations.mjs
           node scripts/test-mobile-toolbox-dispatch.mjs
+          node scripts/test-dsh-bounded-spawn.mjs
           node --test scripts/test-lua-workflow.mjs
           node scripts/test-code-engine.mjs
           node scripts/test-code-engine-v3.mjs
