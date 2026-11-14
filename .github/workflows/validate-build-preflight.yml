@@ -102,6 +102,7 @@ jobs:
           node scripts/test-mobile-toolbox-dispatch.mjs
           node scripts/test-dsh-bounded-spawn.mjs
           node scripts/test-android-model-bash-bridge.mjs
+          node scripts/test-android-native-shell-diagnostic.mjs
           node --test scripts/test-lua-workflow.mjs
           node scripts/test-code-engine.mjs
           node scripts/test-code-engine-v3.mjs

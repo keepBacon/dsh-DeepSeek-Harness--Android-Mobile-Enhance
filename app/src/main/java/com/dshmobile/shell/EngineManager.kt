@@ -1157,6 +1157,119 @@ class EngineManager(private val context: Context, private val pickToken: String?
     } catch (_: Throwable) { false }
   }
 
+  /**
+   * One-tap, model-independent Android Shell diagnostic.
+   *
+   * This intentionally starts known read-only commands using Android's Java
+   * ProcessBuilder. The model Shell may be completely broken; this diagnostic
+   * can still tell us which native launch boundary fails without exposing
+   * credentials, copying user files, changing profiles, or restarting Host.
+   */
+  fun nativeShellDiagnostics(): String {
+    val runtime = engineEnv()
+    val prefix = usrDir.absolutePath
+    val bridge = File(usrDir, "libexec/dsh-mobile/android-exec.sh").absolutePath
+    val sandbox = File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh").absolutePath
+    val bash = File(usrDir, "bin/bash").absolutePath
+    val node = File(usrDir, "bin/node").absolutePath
+    val scrubbedRuntime = runtime.filterKeys { name ->
+      !name.startsWith("DSH_", ignoreCase = true) &&
+        !Regex("KEY|PASSWORD|SECRET|TOKEN", RegexOption.IGNORE_CASE).containsMatchIn(name)
+    }
+
+    fun check(label: String, argv: List<String>, marker: String, useRuntime: Boolean): String {
+      val startedAt = System.nanoTime()
+      var child: Process? = null
+      val captured = java.io.ByteArrayOutputStream()
+      try {
+        val builder = ProcessBuilder(argv).directory(homeDir).redirectErrorStream(true)
+        if (useRuntime) {
+          val environment = builder.environment()
+          val removed = environment.keys.filter { name ->
+            name.startsWith("DSH_", ignoreCase = true) ||
+              Regex("KEY|PASSWORD|SECRET|TOKEN", RegexOption.IGNORE_CASE).containsMatchIn(name)
+          }
+          for (name in removed) environment.remove(name)
+          environment.putAll(scrubbedRuntime)
+        }
+        val active = builder.start()
+        child = active
+        val reader = Thread({
+          try {
+            active.inputStream.use { input ->
+              val buffer = ByteArray(1024)
+              while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                synchronized(captured) {
+                  val room = 4096 - captured.size()
+                  if (room > 0) captured.write(buffer, 0, minOf(n, room))
+                }
+              }
+            }
+          } catch (_: Throwable) {}
+        }, "dsh-native-shell-probe-output")
+        reader.isDaemon = true
+        reader.start()
+        val finished = active.waitFor(4500, TimeUnit.MILLISECONDS)
+        if (!finished) {
+          active.destroyForcibly()
+          active.waitFor(900, TimeUnit.MILLISECONDS)
+        }
+        reader.join(300)
+        val output = synchronized(captured) { captured.toString("UTF-8").take(4096).trim() }
+        val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+        val exit = if (active.isAlive) "still-alive" else runCatching { active.exitValue().toString() }.getOrDefault("unknown")
+        val passed = finished && exit == "0" && output.contains(marker)
+        return buildString {
+          append(label).append(": ").append(if (passed) "PASS" else "FAIL")
+          append(" exit=").append(exit)
+          append(" timeout=").append(!finished)
+          append(" elapsedMs=").append(durationMs)
+          if (output.isNotBlank()) append("\n  output: ").append(output.replace("\n", "\n  ").take(1600))
+          else append("\n  output: (none)")
+        }
+      } catch (t: Throwable) {
+        return label + ": EXCEPTION " + t.javaClass.simpleName +
+          " (" + (t.message ?: "").take(300) + ")"
+      } finally {
+        child?.let { active -> if (active.isAlive) runCatching { active.destroyForcibly() } }
+      }
+    }
+
+    val nodeSubprocessProbe = """
+      const { spawn } = require('node:child_process');
+      const prefix = process.env.TERMUX__PREFIX;
+      const runner = prefix + '/libexec/dsh-mobile/android-sandbox-runner.sh';
+      const child = spawn('/system/bin/sh',
+        [runner, 'read-only', process.env.HOME, '--', 'bash', '-c', 'printf NODE_SPAWN_OK'],
+        {stdio:['ignore','pipe','pipe'],env:process.env});
+      child.stdout.on('data', b => process.stdout.write(b));
+      child.stderr.on('data', b => process.stderr.write(b));
+      child.on('error', e => { console.error(e.message); process.exitCode=90; });
+      child.on('exit', (code, signal) => {
+        if (signal) console.error('child signal=' + signal);
+        process.exitCode = code == null ? 91 : code;
+      });
+    """.trimIndent()
+
+    return buildString {
+      append("DSH Android native Shell stage diagnostic (read-only)\n")
+      append("This test does not invoke the model tool or modify the workspace.\n")
+      append("System Android process, embedded ELF, sandbox runner, then Node child spawn.\n")
+      append(check("01 system-sh", listOf("/system/bin/sh", "-c", "printf ANDROID_SH_OK"), "ANDROID_SH_OK", false))
+      append("\n\n")
+      append(check("02 linker-bash", listOf("/system/bin/sh", bridge, bash, "-c", "printf BASH_OK"), "BASH_OK", true))
+      append("\n\n")
+      append(check("03 sandbox-bash", listOf("/system/bin/sh", sandbox, "read-only", homeDir.absolutePath,
+        "--", "bash", "-c", "printf SANDBOX_OK"), "SANDBOX_OK", true))
+      append("\n\n")
+      append(check("04 node-child-sandbox", listOf("/system/bin/sh", bridge, node, "-e", nodeSubprocessProbe),
+        "NODE_SPAWN_OK", true))
+      append("\n\nNote: these tests isolate native process launches; they do not prove model Shell service registration or its deadline handling.")
+    }
+  }
+
   /** Last useful engine diagnostics for the recovery screen. */
   fun engineDiagnostics(maxChars: Int = 6000): String {
     val health = runtimeHealth()

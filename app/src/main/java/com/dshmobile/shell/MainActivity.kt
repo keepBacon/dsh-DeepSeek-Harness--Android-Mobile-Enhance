@@ -889,6 +889,33 @@ class MainActivity : ComponentActivity() {
       textSize = 16f
       setPadding(0, (16 * density).toInt(), 0, (6 * density).toInt())
     })
+    wrap.addView(Button(this).apply {
+      text = "Shell 启动链路自检（只读，不依赖模型）"
+      setOnClickListener {
+        val button = this
+        button.isEnabled = false
+        button.text = "正在检查 Android Shell 启动链路…"
+        Thread {
+          val report = runCatching { engineManager.nativeShellDiagnostics() }
+            .getOrElse { "Shell 自检失败：" + it.javaClass.simpleName + " " + (it.message ?: "") }
+          runOnUiThread {
+            button.isEnabled = true
+            button.text = "Shell 启动链路自检（只读，不依赖模型）"
+            if (!isFinishing && !isDestroyed) {
+              android.app.AlertDialog.Builder(this@MainActivity)
+                .setTitle("Shell 启动链路自检")
+                .setMessage(report)
+                .setPositiveButton("复制结果") { _, _ ->
+                  val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                  clipboard.setPrimaryClip(ClipData.newPlainText("DSH shell diagnostic", report))
+                }
+                .setNegativeButton("关闭", null)
+                .show()
+            }
+          }
+        }.start()
+      }
+    })
     wrap.addView(TextView(this).apply {
       text = engineManager.mcpRuntimeSummary()
       textSize = 12f
