@@ -557,6 +557,29 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
     ].join('\n'))
     changed = true
   }
+  const shellMarker = 'DSH Android compat: model Shell env without interposer'
+  if (!txt.includes(shellMarker)) {
+    // The seeded subprocess-local bundle already has the linker rewrite.
+    // Inject at that exact one-shot spawn boundary, not globally into Host.
+    const seam = /spawnSubprocess\(\(\(\) => \{/g
+    const hits = txt.match(seam) ?? []
+    if (hits.length !== 1) throw new Error('Android model shell env seam missing: ' + file + ' (' + hits.length + ')')
+    txt = txt.replace(seam, match => match + [
+      '',
+      '  // ' + shellMarker,
+      '  if (process.env.DSH_ANDROID_STANDALONE === "1" && Array.isArray(spec.argv)) {',
+      '    const parts = spec.argv.map(String);',
+      '    const bashCommand = parts.includes("-c") && parts.some(v => v === "bash" || v.endsWith("/bin/bash"));',
+      '    const prefix = process.env.TERMUX__PREFIX || process.env.PREFIX || "";',
+      '    if (bashCommand && prefix) {',
+      '      spec = { ...spec, env: { ...spec.env, LD_PRELOAD: undefined,',
+      '        BASH_ENV: prefix + "/libexec/dsh-mobile/android-bash-env.sh",',
+      '        DSH_ANDROID_STANDALONE: "1", TERMUX__PREFIX: prefix, PREFIX: prefix } };',
+      '    }',
+      '  }'
+    ].join('\\n'))
+    changed = true
+  }
   if (!changed) return 'already'
   write(file, txt)
   checkPatchedJavaScript(file)
