@@ -1177,13 +1177,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
         !Regex("KEY|PASSWORD|SECRET|TOKEN", RegexOption.IGNORE_CASE).containsMatchIn(name)
     }
 
-    fun check(label: String, argv: List<String>, marker: String, useRuntime: Boolean): String {
+    fun check(label: String, argv: List<String>, marker: String, envMode: String): Triple<String, Boolean, Boolean> {
       val startedAt = System.nanoTime()
       var child: Process? = null
       val captured = java.io.ByteArrayOutputStream()
       try {
         val builder = ProcessBuilder(argv).directory(homeDir).redirectErrorStream(true)
-        if (useRuntime) {
+        if (envMode != "system") {
           val environment = builder.environment()
           val removed = environment.keys.filter { name ->
             name.startsWith("DSH_", ignoreCase = true) ||
@@ -1191,6 +1191,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
           }
           for (name in removed) environment.remove(name)
           environment.putAll(scrubbedRuntime)
+          // A Java child started with the full runtime environment is NOT
+          // equivalent to a plain Android system shell: LD_PRELOAD and
+          // LD_LIBRARY_PATH can affect /system/bin/sh, head and linker64.
+          // Test those variables independently, without exposing their values.
+          if (envMode == "no-preload" || envMode == "no-preload-no-libpath") {
+            environment.remove("LD_PRELOAD")
+          }
+          if (envMode == "no-preload-no-libpath") environment.remove("LD_LIBRARY_PATH")
         }
         val active = builder.start()
         child = active
@@ -1221,7 +1229,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
         val exit = if (active.isAlive) "still-alive" else runCatching { active.exitValue().toString() }.getOrDefault("unknown")
         val passed = finished && exit == "0" && output.contains(marker)
-        return buildString {
+        val report = buildString {
           append(label).append(": ").append(if (passed) "PASS" else "FAIL")
           append(" exit=").append(exit)
           append(" timeout=").append(!finished)
@@ -1229,9 +1237,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
           if (output.isNotBlank()) append("\n  output: ").append(output.replace("\n", "\n  ").take(1600))
           else append("\n  output: (none)")
         }
+        // Never spawn another native probe if Android did not reap this child
+        // even after a forced kill; accumulating stuck children is unsafe.
+        return Triple(report, passed, active.isAlive)
       } catch (t: Throwable) {
-        return label + ": EXCEPTION " + t.javaClass.simpleName +
-          " (" + (t.message ?: "").take(300) + ")"
+        return Triple(label + ": EXCEPTION " + t.javaClass.simpleName +
+          " (" + (t.message ?: "").take(300) + ")", false, child?.isAlive == true)
       } finally {
         child?.let { active -> if (active.isAlive) runCatching { active.destroyForcibly() } }
       }
@@ -1263,20 +1274,59 @@ class EngineManager(private val context: Context, private val pickToken: String?
     return buildString {
       append("DSH Android native Shell stage diagnostic (read-only)\n")
       append("This test does not invoke the model tool or modify the workspace.\n")
-      append("System Android process, embedded ELF, sandbox runner, then Node child spawn.\n")
-      append(check("01 system-sh", listOf("/system/bin/sh", "-c", "printf ANDROID_SH_OK"), "ANDROID_SH_OK", false))
-      append("\n\n")
-      append(check("02 linker-bash", listOf("/system/bin/sh", bridge, bash, "-c", "printf BASH_OK"), "BASH_OK", true))
-      append("\n\n")
-      append(check("03 sandbox-bash", listOf("/system/bin/sh", sandbox, "read-only", homeDir.absolutePath,
-        "--", "bash", "-c", "printf SANDBOX_OK"), "SANDBOX_OK", true))
-      append("\n\n")
-      append(check("04 node-child-sandbox", listOf("/system/bin/sh", bridge, node, "-e", nodeSubprocessProbe),
-        "NODE_SPAWN_OK", true))
-      append("\n\n")
-      append(check("05 node-detached-sandbox", listOf("/system/bin/sh", bridge, node, "-e", nodeDetachedProbe),
-        "NODE_DETACHED_OK", true))
-      append("\n\nNote: stages 04 and 05 change only Node detached process-group startup. A passing stage still does not prove model Shell lifecycle correctness.")
+      append("Controlled environment experiment: runtime env vs LD_PRELOAD / LD_LIBRARY_PATH isolation.\n")
+      var unreaped = false
+      fun probe(label: String, argv: List<String>, marker: String, envMode: String): Boolean {
+        if (unreaped) return false
+        val (report, passed, stuck) = check(label, argv, marker, envMode)
+        append(report).append("\n\n")
+        if (stuck) {
+          unreaped = true
+          append("STOP: a child is still alive after forced termination. No more processes will be started.\n")
+        }
+        return passed
+      }
+      val systemArgv = listOf("/system/bin/sh", "-c", "printf ANDROID_SH_OK")
+      probe("01 system-sh", systemArgv, "ANDROID_SH_OK", "system")
+      if (!unreaped) probe("01a system-sh-runtime-no-preload-no-libpath", systemArgv,
+        "ANDROID_SH_OK", "no-preload-no-libpath")
+      if (!unreaped) probe("01b system-sh-runtime-no-preload", systemArgv,
+        "ANDROID_SH_OK", "no-preload")
+      if (!unreaped) {
+        // -x is diagnostic only, and traces the bridge's fixed commands
+        // (not user input). It pinpoints whether the bridge hangs before
+        // head, during the ELF magic check, or at linker64 exec.
+        val bridgeTrace = probe("02a bridge-bash-no-preload-trace",
+          listOf("/system/bin/sh", "-x", bridge, bash, "-c", "printf BASH_TRACE_OK"),
+          "BASH_TRACE_OK", "no-preload")
+        if (!bridgeTrace && !unreaped) {
+          probe("02b direct-linker-bash-no-preload",
+            listOf("/system/bin/linker64", bash, "-c", "printf BASH_DIRECT_OK"),
+            "BASH_DIRECT_OK", "no-preload")
+        }
+      }
+      // The full environment is the only added difference from 01b. If
+      // this stage hangs, a preloaded library is a stronger hypothesis than
+      // Bash's own ELF, because Bash has not been launched in either stage.
+      if (!unreaped) probe("01c system-sh-full-runtime", systemArgv,
+        "ANDROID_SH_OK", "runtime")
+
+      val bashReady = if (!unreaped) probe("02 linker-bash",
+        listOf("/system/bin/sh", bridge, bash, "-c", "printf BASH_OK"),
+        "BASH_OK", "runtime") else false
+      if (bashReady && !unreaped) {
+        probe("03 sandbox-bash", listOf("/system/bin/sh", sandbox, "read-only", homeDir.absolutePath,
+          "--", "bash", "-c", "printf SANDBOX_OK"), "SANDBOX_OK", "runtime")
+        if (!unreaped) probe("04 node-child-sandbox",
+          listOf("/system/bin/sh", bridge, node, "-e", nodeSubprocessProbe), "NODE_SPAWN_OK", "runtime")
+        if (!unreaped) probe("05 node-detached-sandbox",
+          listOf("/system/bin/sh", bridge, node, "-e", nodeDetachedProbe), "NODE_DETACHED_OK", "runtime")
+      } else if (!unreaped) {
+        append("03–05 SKIPPED: the prerequisite full-runtime Bash bridge did not pass.\n")
+      }
+      append("\nInterpretation: 01b PASS + 01c FAIL implicates LD_PRELOAD; 01a PASS + 01b FAIL implicates LD_LIBRARY_PATH or its interaction. ")
+      append("02a failure output identifies the bridge step; 02a FAIL + 02b PASS implicates the bridge itself.\n")
+      append("Passing native probes does not prove model Shell registration or lifecycle correctness.")
     }
   }
 
