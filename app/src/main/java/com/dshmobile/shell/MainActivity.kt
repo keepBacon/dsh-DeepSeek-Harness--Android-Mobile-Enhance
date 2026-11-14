@@ -309,6 +309,10 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    // Recover a persisted crash-loop flag before starting the Host. The
+    // Activity might be recreated while the same process is running; ShellState
+    // distinguishes that from a process death.
+    ShellState.recoverInterruptedPrebootTrial(this)
     val root = FrameLayout(this)
     webView = WebView(this).apply { id = View.generateViewId() }
     root.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -5228,7 +5232,11 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { showWeb() }
         } else {
           if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
-          runOnUiThread { showEngineFailure("正常 Web 跳过启动前兼容处理后仍未就绪") }
+          // On every explicit failure, immediately schedule the known-working
+          // official-only mode for the next launch. Keep the current failure UI
+          // and engine.log intact for diagnosis.
+          ShellState.recoverFailedPrebootTrial(this, "gateway-unavailable")
+          runOnUiThread { showEngineFailure("正常 Web 诊断失败；下次启动自动回到官方组件模式") }
         }
       } catch (t: Throwable) {
         runOnUiThread { showEngineFailure("启动前兼容性对照异常：" + (t.message ?: t.javaClass.simpleName)) }
