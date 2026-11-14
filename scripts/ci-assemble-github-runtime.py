@@ -58,6 +58,7 @@ SCRIPT_MAP = {
     "dsh-luau-runner.mjs": "dsh-luau-runner.mjs",
     "dsh-android-sandbox-runner.sh": "android-sandbox-runner.sh",
     "dsh-android-exec.sh": "android-exec.sh",
+    "dsh-android-bash-env.sh": "android-bash-env.sh",
 }
 
 def get(url):
@@ -250,6 +251,7 @@ def overlay_sources(stage, source):
         shutil.copy2(src, mobile / dest)
     (mobile / "android-sandbox-runner.sh").chmod(0o755)
     (mobile / "android-exec.sh").chmod(0o755)
+    (mobile / "android-bash-env.sh").chmod(0o644)
     (mobile / "toolbox-mcp.mjs").chmod(0o755)
     (mobile / "basic-toolbox-mcp.mjs").chmod(0o755)
     builder = (source / "scripts/embed-termux-tools.sh").read_text()
@@ -364,7 +366,7 @@ def main():
         subprocess.run(
             ["node", str(args.repo / "scripts/android-runtime-patch.mjs"), str(stage / "usr")],
             check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.1.5-rc.2",
-                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local"})
+                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local,@deepseek-ai/dsh-subprocess-local"})
         patch_web_fetch_limits(stage)
         stage_modsearch(stage, workspace)
         install_typescript(stage, workspace)
