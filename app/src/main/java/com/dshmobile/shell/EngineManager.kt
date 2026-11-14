@@ -1192,8 +1192,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
           for (name in removed) environment.remove(name)
           environment.putAll(scrubbedRuntime)
         }
-        child = builder.start()
-        val active = child
+        val active = builder.start()
+        child = active
         val reader = Thread({
           try {
             active.inputStream.use { input ->
@@ -1233,7 +1233,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         return label + ": EXCEPTION " + t.javaClass.simpleName +
           " (" + (t.message ?: "").take(300) + ")"
       } finally {
-        if (child?.isAlive == true) runCatching { child.destroyForcibly() }
+        child?.let { active -> if (active.isAlive) runCatching { active.destroyForcibly() } }
       }
     }
 
