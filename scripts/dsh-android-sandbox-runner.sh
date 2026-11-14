@@ -51,6 +51,14 @@ prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
 bridge="${DSH_ANDROID_EXEC_BRIDGE:-}"
 [ -n "$bridge" ] || bridge="$prefix/libexec/dsh-mobile/android-exec.sh"
 if [ -f "$bridge" ]; then
+  # The default model Bash runs under this sandbox, not bash-local's direct
+  # launch path. Resolve Bash by the known embedded ELF rather than invoking
+  # a PATH wrapper (which may route through another launch layer or be absent
+  # from the subprocess provider's credential-scrubbed child environment).
+  if [ "$1" = "bash" ] && [ -n "$prefix" ] && [ -f "$prefix/bin/bash" ]; then
+    shift
+    exec /system/bin/sh "$bridge" "$prefix/bin/bash" "$@"
+  fi
   exec /system/bin/sh "$bridge" "$@"
 fi
 exec "$@"
