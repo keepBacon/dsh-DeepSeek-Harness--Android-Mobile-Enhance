@@ -719,7 +719,7 @@ jobs:
           node --check "$model_bash"
           subprocess="$modules/@deepseek-ai/dsh-subprocess-local/lib/index.js"
           grep -Fq 'DSH Android compat: executable spawn via system linker' "$subprocess"
-          grep -Fq 'DSH Android compat: model Shell env without interposer' "$subprocess"
+          grep -Fq 'DSH Android compat: model Bash environment without preload' "$model_bash"
           test -s "scripts/dsh-android-bash-env.sh"
           grep -Fq 'argv: ["/system/bin/sh", runner' "$modules/@deepseek-ai/dsh-sandbox-local/lib/index.js"
           node --check "$subprocess"
