@@ -562,29 +562,6 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
     ].join('\n'))
     changed = true
   }
-  const shellMarker = 'DSH Android compat: model Shell env without interposer'
-  if (!txt.includes(shellMarker)) {
-    // The seeded subprocess-local bundle already has the linker rewrite.
-    // Inject at that exact one-shot spawn boundary, not globally into Host.
-    const seam = /spawnSubprocess\(\(\(\) => \{/g
-    const hits = txt.match(seam) ?? []
-    if (hits.length !== 1) throw new Error('Android model shell env seam missing: ' + file + ' (' + hits.length + ')')
-    txt = txt.replace(seam, match => match + [
-      '',
-      '  // ' + shellMarker,
-      '  if (process.env.DSH_ANDROID_STANDALONE === "1" && Array.isArray(spec.argv)) {',
-      '    const parts = spec.argv.map(String);',
-      '    const bashCommand = parts.includes("-c") && parts.some(v => v === "bash" || v.endsWith("/bin/bash"));',
-      '    const prefix = process.env.TERMUX__PREFIX || process.env.PREFIX || "";',
-      '    if (bashCommand && prefix) {',
-      '      spec = { ...spec, env: { ...spec.env, LD_PRELOAD: undefined,',
-      '        BASH_ENV: prefix + "/libexec/dsh-mobile/android-bash-env.sh",',
-      '        DSH_ANDROID_STANDALONE: "1", TERMUX__PREFIX: prefix, PREFIX: prefix } };',
-      '    }',
-      '  }'
-    ].join('\n'))
-    changed = true
-  }
   if (!changed) return 'already'
   write(file, txt)
   checkPatchedJavaScript(file)
@@ -601,15 +578,37 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
 eachPackage('@deepseek-ai/dsh-bash-local', 'lib/index.js', (file) => {
   let source = read(file)
   const marker = 'DSH Android compat: model Bash via system linker'
-  if (source.includes(marker)) return 'already'
-  const call = /this\.(executeArgv|runArgv)\(\s*spec\s*,\s*\[\s*["']bash["']\s*,\s*["']-c["']\s*,\s*spec\.command\s*\]\s*\)/g
-  const matches = [...source.matchAll(call)]
-  if (matches.length !== 1) throw new Error('bash-local model runArgv seam changed (' + matches.length + '): ' + file)
-  const replacement = (_match, method) => `this.${method}(spec, process.env.DSH_ANDROID_STANDALONE === "1"
-    ? ["/system/bin/sh", (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/libexec/dsh-mobile/android-exec.sh",
-       (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/bin/bash", "-c", spec.command]
-    : ["bash", "-c", spec.command]) /* ${marker} */`
-  source = source.replace(call, replacement)
+  const envMarker = 'DSH Android compat: model Bash environment without preload'
+  let changed = false
+  if (!source.includes(marker)) {
+    const call = /this\\.(executeArgv|runArgv)\\(\\s*spec\\s*,\\s*\\[\\s*["']bash["']\\s*,\\s*["']-c["']\\s*,\\s*spec\\.command\\s*\\]\\s*\\)/g
+    const matches = [...source.matchAll(call)]
+    if (matches.length !== 1) throw new Error('bash-local linker seam changed (' + matches.length + '): ' + file)
+    const replacement = (_match, method) => `this.${method}(spec, process.env.DSH_ANDROID_STANDALONE === "1"
+      ? ["/system/bin/sh", (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/libexec/dsh-mobile/android-exec.sh",
+         (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/bin/bash", "-c", spec.command]
+      : ["bash", "-c", spec.command]) /* ${marker} */`
+    source = source.replace(call, replacement)
+    changed = true
+  }
+  if (!source.includes(envMarker)) {
+    // The packaged seed may already contain the linker rewrite, whereas
+    // the full published package only has the original Bash argv call.
+    // Always inject the model Bash child environment at its own provider
+    // boundary, never into an upstream subprocess-local build variant.
+    const seam = /this\\.(executeArgv|runArgv)\\(\\s*spec\\s*,\\s*process\\.env\\.DSH_ANDROID_STANDALONE\\s*===\\s*["']1["']/g
+    const matches = [...source.matchAll(seam)]
+    if (matches.length !== 1) throw new Error('bash-local environment seam changed (' + matches.length + '): ' + file)
+    source = source.replace(seam, (_match, method) => `this.${method}((process.env.DSH_ANDROID_STANDALONE === "1"
+      ? { ...spec, env: { ...spec.env, LD_PRELOAD: undefined,
+          BASH_ENV: (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/libexec/dsh-mobile/android-bash-env.sh",
+          DSH_ANDROID_STANDALONE: "1",
+          TERMUX__PREFIX: process.env.TERMUX__PREFIX || process.env.PREFIX,
+          PREFIX: process.env.TERMUX__PREFIX || process.env.PREFIX } }
+      : spec), process.env.DSH_ANDROID_STANDALONE === "1" /* ${envMarker} */`)
+    changed = true
+  }
+  if (!changed) return 'already'
   write(file, source)
   checkPatchedJavaScript(file)
   return 'patched'
