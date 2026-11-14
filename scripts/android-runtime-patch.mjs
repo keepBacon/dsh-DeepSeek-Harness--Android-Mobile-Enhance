@@ -516,8 +516,13 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: skip desktop linux-scope'
   const execMarker = 'DSH Android compat: executable spawn via system linker'
+  // GitHub's signed seed already contains Android-subprocess adjustments in a
+  // different compiled layout. Its containment method cannot be re-patched.
+  // Only the NEW model Bash environment fix is permitted on this seed;
+  // fresh release-family installations still receive the original rewrites.
+  const seededCompatOnly = Boolean(process.env.DSH_COMPAT_ONLY_PACKAGES)
   let changed = false
-  if (!txt.includes(marker)) {
+  if (!seededCompatOnly && !txt.includes(marker)) {
     const anchor = /selectContainmentMode\s*\(\s*kind\s*\)\s*\{/
     const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
     if (matches.length !== 1) throw new Error('subprocess-local containment anchor changed: ' + file)
@@ -531,7 +536,7 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
     ].join('\n'))
     changed = true
   }
-  if (!txt.includes(execMarker)) {
+  if (!seededCompatOnly && !txt.includes(execMarker)) {
     // The published index bundle exposes Runtime.spawn(spec), while the
     // underlying spawn.ts function is folded into a different bundle chunk.
     // Transform its API request, preserving the entire spec and exact argv.
