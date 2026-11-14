@@ -8,6 +8,7 @@ import { codeWorkflowTools, codeWorkflowCall } from './dsh-code-engine-workflow.
 import { luaTools, luaCall } from './dsh-lua-tools.mjs'
 import { spawn } from 'node:child_process'
 import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
+import { boundedSpawn } from './dsh-bounded-spawn.mjs'
 import { readWebPage, readPageTool } from './dsh-web-page-reader.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
@@ -135,19 +136,8 @@ async function runProcess(command,args=[],opts={}){
  const timeoutMs=int(opts.timeoutMs,10000,100,60000)
  const maxOutput=int(opts.maxOutputBytes,MAX_OUTPUT,1024,MAX_COMMAND_OUTPUT)
  const env=opts.env||process.env
- return await new Promise((resolvePromise)=>{
-  const started=Date.now()
-  let child
-  const {command:launch,args:launchArgs}=androidToolLaunch(bin,argv,env)
-  try{child=spawn(launch,launchArgs,{cwd,env,shell:false,stdio:['ignore','pipe','pipe']})}catch(error){resolvePromise({exitCode:null,signal:null,stdout:'',stderr:String(error),timedOut:false,truncated:false,durationMs:Date.now()-started});return}
-  let stdout=Buffer.alloc(0),stderr=Buffer.alloc(0),truncated=false,timedOut=false,spawnError=null
-  const capture=(current,chunk)=>{const b=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);if(current.length>=maxOutput){truncated=true;return current}const room=maxOutput-current.length;if(b.length>room)truncated=true;return Buffer.concat([current,b.subarray(0,room)])}
-  child.stdout?.on('data',chunk=>{stdout=capture(stdout,chunk)})
-  child.stderr?.on('data',chunk=>{stderr=capture(stderr,chunk)})
-  child.on('error',error=>{spawnError=error})
-  const timer=setTimeout(()=>{timedOut=true;try{child.kill('SIGKILL')}catch{}},timeoutMs)
-  child.on('close',(code,signal)=>{clearTimeout(timer);resolvePromise({exitCode:typeof code==='number'?code:null,signal:signal||null,stdout:stdout.toString('utf8'),stderr:(spawnError?String(spawnError)+'\n':'')+stderr.toString('utf8'),timedOut,truncated,durationMs:Date.now()-started})})
- })
+ const launch=androidToolLaunch(bin,argv,env)
+ return boundedSpawn(launch.command,launch.args,{cwd,env,timeoutMs,maxOutputBytes:maxOutput})
 }
 async function runStrict(bin,args,opts={}){const r=await runProcess(bin,args,opts);if(r.timedOut)throw new Error(bin+' timed out');if(r.exitCode!==0)throw new Error(bin+' failed ('+r.exitCode+'): '+(r.stderr||r.stdout||'unknown error').slice(0,MAX_OUTPUT));return(r.stdout+(r.stderr?'\n[stderr]\n'+r.stderr:'')).trim()}
 
