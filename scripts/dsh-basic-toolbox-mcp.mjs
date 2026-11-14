@@ -6,6 +6,7 @@ import { resolve4, resolve6, resolveMx, resolveTxt, resolveCname } from 'node:dn
 import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
 import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
+import { boundedSpawn } from './dsh-bounded-spawn.mjs'
 import { connect as netConnect } from 'node:net'
 import { createRequire } from 'node:module'
 import { dirname, resolve, relative, isAbsolute, sep } from 'node:path'
@@ -82,7 +83,15 @@ async function checkedPath(p){const path=await realpath(userPath(p)),s=await sta
 async function checkedDir(p='.'){const path=await realpath(userPath(p)),s=await stat(path);if(!s.isDirectory())throw new Error('not a directory');return{path}}
 async function exists(p){try{await lstat(p);return true}catch(e){if(e?.code==='ENOENT')return false;throw e}}
 function trim(s,n=1200){const a=String(s).split(/\r?\n/);return{output:a.slice(0,n).join('\n').slice(0,MAX_OUTPUT),truncated:a.length>n,totalLines:a.length}}
-async function run(cmd,args=[],opts={}){return await new Promise(done=>{let out='',err='',finished=false;const env=opts.env||process.env;const launch=androidToolLaunch(cmd,args,env);let child;try{child=spawn(launch.command,launch.args,{cwd:opts.cwd||process.cwd(),env,shell:false,stdio:['ignore','pipe','pipe']})}catch(e){done({exitCode:null,stdout:'',stderr:String(e),timedOut:false});return}const cap=MAX_OUTPUT;child.stdout?.on('data',b=>{if(out.length<cap)out=(out+b.toString()).slice(0,cap)});child.stderr?.on('data',b=>{if(err.length<cap)err=(err+b.toString()).slice(0,cap)});let timedOut=false;const timer=setTimeout(()=>{timedOut=true;try{child.kill('SIGKILL')}catch{}},opts.timeout||30000);child.on('close',(code,signal)=>{clearTimeout(timer);if(!finished){finished=true;done({exitCode:code,signal:signal||null,stdout:out,stderr:err,timedOut})}});child.on('error',e=>{clearTimeout(timer);if(!finished){finished=true;done({exitCode:null,stdout:out,stderr:String(e),timedOut})}})})}
+async function run(cmd,args=[],opts={}){
+ const env=opts.env||process.env
+ const launch=androidToolLaunch(cmd,args,env)
+ const r=await boundedSpawn(launch.command,launch.args,{
+  cwd:opts.cwd||process.cwd(),env,timeoutMs:opts.timeout||30000,maxOutputBytes:MAX_OUTPUT,
+ })
+ return {exitCode:r.exitCode,signal:r.signal,stdout:r.stdout,stderr:r.stderr,timedOut:r.timedOut}
+}
+
 // Prefer the standalone 7zz binary; it does not require external 7z.so codecs.
 function archiveBinary(){return resolve(PREFIX,'bin/7zz')}
 function fileMagicEnv(){
