@@ -577,7 +577,7 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
       '        DSH_ANDROID_STANDALONE: "1", TERMUX__PREFIX: prefix, PREFIX: prefix } };',
       '    }',
       '  }'
-    ].join('\\n'))
+    ].join('\n'))
     changed = true
   }
   if (!changed) return 'already'
