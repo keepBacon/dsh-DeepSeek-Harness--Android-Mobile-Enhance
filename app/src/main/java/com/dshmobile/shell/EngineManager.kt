@@ -68,6 +68,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private val preloadBin = File(usrDir, "lib/libtermux-exec-ld-preload.so")
   private val engineLogFile = File(context.filesDir, "engine.log")
   private val bootStageFile = File(context.filesDir, "engine-boot-stage.txt")
+  // Persist the actual launched profile independently of the last timeout stage.
+  private val lastLaunchedModeFile = File(context.filesDir, "engine-last-launch-mode.txt")
   // Own Android-only boot workspace; never reads the normal user's global patches.
   private val safeDshHomeDir = File(context.filesDir, "dsh-safe-home")
   private var engineProcess: Process? = null
@@ -1138,6 +1140,23 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
   }
 
+  /** Only identify a process we started in this Android process. A saved
+   * preference alone is not proof that the still-running Host changed mode. */
+  private fun selectedHostMode(): String = when {
+    ShellState.safeModeEnabled(context) -> "safe"
+    ShellState.officialOnlyDiagnosticEnabled(context) -> "official-only"
+    ShellState.normalMcpDiagnosticEnabled(context) -> "normal-no-mcp"
+    ShellState.normalPrebootCompatDiagnosticEnabled(context) -> "normal-no-preboot-compat"
+    else -> "normal"
+  }
+
+  fun isManagedHostModeMismatched(): Boolean {
+    val live = ACTIVE_PROCESS.get() ?: return false
+    return try {
+      live.isAlive && ACTIVE_PROCESS_MODE.get()?.let { it != selectedHostMode() } == true
+    } catch (_: Throwable) { false }
+  }
+
   /** Last useful engine diagnostics for the recovery screen. */
   fun engineDiagnostics(maxChars: Int = 6000): String {
     val health = runtimeHealth()
@@ -1149,6 +1168,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       append("DSH ").append(dshVersion())
       if (compatManifestFile.isFile) append(" · Android compat runtime")
       if (!health.ok) append("\n").append(health.describe())
+      append("\nSelected startup mode: ").append(selectedHostMode())
+      val live = ACTIVE_PROCESS.get()
+      if (live?.isAlive == true) {
+        append("\nLive managed Host mode: ").append(ACTIVE_PROCESS_MODE.get() ?: "unknown")
+      }
+      val spawned = try { lastLaunchedModeFile.readText().take(150).trim() } catch (_: Throwable) { "" }
+      if (spawned.isNotBlank()) append("\nLast Host spawn: ").append(spawned.replace("\n", " "))
       val startError = LAST_START_ERROR
       if (startError.isNotBlank()) {
         if (isNotEmpty()) append('\n')
@@ -1737,8 +1763,16 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val active = ACTIVE_PROCESS.get()
     if (active != null) {
       val alive = try { active.isAlive } catch (_: Throwable) { false }
-      if (alive) return true
-      ACTIVE_PROCESS.compareAndSet(active, null)
+      if (alive) {
+        if (isManagedHostModeMismatched()) {
+          LAST_START_ERROR = "仍有旧启动模式的 Host 正在运行（" +
+            (ACTIVE_PROCESS_MODE.get() ?: "unknown") + "），当前请求：" + selectedHostMode() +
+            "。拒绝复用旧 Host；请停止旧进程后再启动。"
+          return false
+        }
+        return true
+      }
+      if (ACTIVE_PROCESS.compareAndSet(active, null)) ACTIVE_PROCESS_MODE.set(null)
     }
 
     // 进程级 CAS：并发调用只有一个能真正启动（设备实证 EADDRINUSE 双启动）。
@@ -1811,6 +1845,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
         engineLogFile.writeText("")
         recordBootStage("node-spawn-requested")
         val child = startWithArgs(args, env)
+        // This records what actually spawned, not just the selected preference.
+        val startedMode = selectedHostMode()
+        ACTIVE_PROCESS_MODE.set(startedMode)
+        try {
+          lastLaunchedModeFile.writeText("mode=$startedMode epochMs=" + System.currentTimeMillis() + "\n")
+        } catch (t: Throwable) {
+          Log.w(TAG, "could not record launched Host mode", t)
+        }
         recordBootStage("node-spawned")
         engineProcess = child
         ACTIVE_PROCESS.set(child)
@@ -1822,7 +1864,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       val early = engineProcess?.waitFor(80, TimeUnit.MILLISECONDS) == true
       if (early) {
         val code = try { engineProcess?.exitValue() ?: -1 } catch (_: Throwable) { -1 }
-        ACTIVE_PROCESS.compareAndSet(engineProcess, null)
+        if (ACTIVE_PROCESS.compareAndSet(engineProcess, null)) ACTIVE_PROCESS_MODE.set(null)
         engineProcess = null
         LAST_START_ERROR = "DSH 引擎启动后立即退出（exit=$code）"
         val diag = engineDiagnostics(3500)
@@ -3414,7 +3456,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
             stopped = false
             Log.e(TAG, "DSH process survived graceful and forced termination")
           } else {
-            ACTIVE_PROCESS.compareAndSet(process, null)
+            if (ACTIVE_PROCESS.compareAndSet(process, null)) ACTIVE_PROCESS_MODE.set(null)
             if (engineProcess === process) engineProcess = null
           }
         } catch (t: Throwable) {
@@ -3440,6 +3482,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
      * PID to coordinate lifecycle operations.
      */
     private val ACTIVE_PROCESS = java.util.concurrent.atomic.AtomicReference<Process?>(null)
+    private val ACTIVE_PROCESS_MODE = java.util.concurrent.atomic.AtomicReference<String?>(null)
     private val PROCESS_LIFECYCLE_LOCK = Any()
     private val STOP_GENERATION = java.util.concurrent.atomic.AtomicLong(0)
 
