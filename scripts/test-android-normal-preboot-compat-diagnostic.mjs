@@ -15,7 +15,7 @@ const noMcp = activity.slice(activity.indexOf('  private fun switchNormalMcpDiag
 
 assert.match(state, /private const val NORMAL_PREBOOT_COMPAT_DIAGNOSTIC/)
 assert.match(state, /fun normalPrebootCompatDiagnosticEnabled\(context: Context\): Boolean/)
-assert.match(state, /fun setNormalPrebootCompatDiagnosticEnabled\(context: Context, enabled: Boolean\): Boolean =/)
+assert.match(state, /fun setNormalPrebootCompatDiagnosticEnabled\(context: Context, enabled: Boolean\): Boolean \{/)
 assert.match(state, /putBoolean\(NORMAL_PREBOOT_COMPAT_DIAGNOSTIC, enabled\)/)
 assert.match(state, /putInt\(PREBOOT_TRIAL_PHASE, if \(enabled\) TRIAL_READY else TRIAL_NOT_ARMED\)/)
 assert.match(start, /val skipPrebootCompat = !safeMode && !officialProbe && !noMcpDiagnostic &&/)
