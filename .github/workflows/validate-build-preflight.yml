@@ -134,6 +134,7 @@ jobs:
           cp scripts/dsh-web-page-reader.mjs "$stage/libexec/dsh-mobile/dsh-web-page-reader.mjs"
           cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
           cp scripts/dsh-android-tool-spawn.mjs "$stage/libexec/dsh-mobile/dsh-android-tool-spawn.mjs"
+          cp scripts/dsh-bounded-spawn.mjs "$stage/libexec/dsh-mobile/dsh-bounded-spawn.mjs"
           cp scripts/dsh-code-engine*.mjs "$stage/libexec/dsh-mobile/"
           cp scripts/dsh-lua*.mjs "$stage/libexec/dsh-mobile/"
           npm install --prefix "$stage/lib/node_modules/@deepseek-ai/dsh" --no-save --ignore-scripts --no-audit --no-fund @modelcontextprotocol/sdk@1.25.3
