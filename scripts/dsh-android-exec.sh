@@ -2,6 +2,11 @@
 # System linker bridge for dynamically linked ARM64 app-private ELF binaries.
 # Called via /system/bin/sh; preserves exact command argument boundaries.
 set -e
+# All built-in bridge helpers must be Android-system executables. The
+# application-private wrappers in the inherited PATH are not execve-able.
+# Do not let command substitutions such as printf resolve to wrappers/printf.
+PATH=/system/bin:/system/xbin
+export PATH
 [ "$#" -ge 1 ] || { echo DSH_ANDROID_EXEC_NO_COMMAND >&2; exit 125; }
 program="$1"; shift
 prefix="${TERMUX__PREFIX:-${PREFIX:-}}"

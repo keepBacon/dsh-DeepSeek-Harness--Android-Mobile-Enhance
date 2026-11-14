@@ -102,6 +102,7 @@ jobs:
           node scripts/test-mobile-toolbox-dispatch.mjs
           node scripts/test-dsh-bounded-spawn.mjs
           node scripts/test-android-model-bash-bridge.mjs
+          node scripts/test-android-model-shell-noexec-fix.mjs
           node scripts/test-android-native-shell-diagnostic.mjs
           node --test scripts/test-lua-workflow.mjs
           node scripts/test-code-engine.mjs
@@ -718,6 +719,8 @@ jobs:
           node --check "$model_bash"
           subprocess="$modules/@deepseek-ai/dsh-subprocess-local/lib/index.js"
           grep -Fq 'DSH Android compat: executable spawn via system linker' "$subprocess"
+          grep -Fq 'DSH Android compat: model Shell env without interposer' "$subprocess"
+          test -s "scripts/dsh-android-bash-env.sh"
           grep -Fq 'argv: ["/system/bin/sh", runner' "$modules/@deepseek-ai/dsh-sandbox-local/lib/index.js"
           node --check "$subprocess"
 

@@ -1233,7 +1233,10 @@ EOF_TERMUX_RUN
   cat > "$stage/usr/libexec/dsh/termux-wrapper" <<'EOF_TERMUX_WRAPPER'
 #!/system/bin/sh
 set -eu
-name="${0##*/}"
+name="${DSH_WRAPPER_COMMAND:-${0##*/}}"
+case "$name" in
+  ""|*[!A-Za-z0-9._+-]*) echo "DSH_TERMUX_WRAPPER_INVALID_COMMAND" >&2; exit 125 ;;
+esac
 prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
 [ -n "$prefix" ] || { echo "TERMUX__PREFIX is not set" >&2; exit 125; }
 case "$name" in

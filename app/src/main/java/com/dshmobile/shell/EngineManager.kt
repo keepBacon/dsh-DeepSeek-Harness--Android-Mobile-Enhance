@@ -2123,7 +2123,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
       ?.absolutePath
       ?: File(usrDir, "bin/bash").absolutePath
     val env = mutableMapOf(
-      "PATH" to (usrDir.absolutePath + "/libexec/dsh/wrappers:" + usrDir.absolutePath + "/bin:/system/bin"),
+      // System tools must precede noexec private script wrappers.
+      // Model Bash further isolates its child PATH using BASH_ENV.
+      "PATH" to ("/system/bin:" + usrDir.absolutePath + "/libexec/dsh/wrappers:" + usrDir.absolutePath + "/bin"),
       "LD_LIBRARY_PATH" to (usrDir.absolutePath + "/lib"),
       "HOME" to homeDir.absolutePath,
       "XDG_CONFIG_HOME" to xdgConfig.absolutePath,

@@ -1,0 +1,27 @@
+#!/usr/bin/env node
+// Guard the production Android model Shell fix against silent patch omissions.
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+const read = file => readFileSync(new URL('../' + file, import.meta.url), 'utf8')
+const bridge = read('scripts/dsh-android-exec.sh')
+const bashEnv = read('scripts/dsh-android-bash-env.sh')
+const builder = read('scripts/ci-assemble-github-runtime.py')
+const embed = read('scripts/embed-termux-tools.sh')
+const patch = read('scripts/android-runtime-patch.mjs')
+const engine = read('app/src/main/java/com/dshmobile/shell/EngineManager.kt')
+assert.match(bridge, /PATH=\/system\/bin:\/system\/xbin/)
+assert.ok(bridge.indexOf('PATH=/system/bin:/system/xbin') < bridge.indexOf('magic='), 'clean bridge PATH before command substitution')
+assert.match(bashEnv, /command_not_found_handle\(\)/)
+assert.match(bashEnv, /PATH=\/system\/bin:\/system\/xbin/)
+assert.match(bashEnv, /DSH_WRAPPER_COMMAND="\$_dsh_cmd" DSH_TERMUX_INNER=1/)
+assert.match(bashEnv, /\/system\/bin\/sh "\$_dsh_mobile_prefix\/libexec\/dsh\/termux-wrapper"/)
+assert.match(embed, /DSH_WRAPPER_COMMAND:-\$\{0##\*\/\}/)
+assert.match(builder, /"dsh-android-bash-env.sh": "android-bash-env.sh"/)
+assert.match(builder, /@deepseek-ai\/dsh-bash-local,@deepseek-ai\/dsh-subprocess-local/)
+assert.match(patch, /DSH Android compat: model Shell env without interposer/)
+assert.match(patch, /LD_PRELOAD: undefined/)
+assert.match(patch, /BASH_ENV: prefix \+ "\/libexec\/dsh-mobile\/android-bash-env.sh"/)
+assert.match(patch, /parts\.includes\("-c"\)/)
+assert.match(engine, /"PATH" to \("\/system\/bin:" \+ usrDir\.absolutePath/)
+assert.ok(!bashEnv.includes('eval '))
+console.log('[DSH] Android Bash noexec-safe PATH, child preload isolation, staged env and dispatch: OK')
