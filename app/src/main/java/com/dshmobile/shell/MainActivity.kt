@@ -5232,13 +5232,37 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { showWeb() }
         } else {
           if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
-          // On every explicit failure, immediately schedule the known-working
-          // official-only mode for the next launch. Keep the current failure UI
-          // and engine.log intact for diagnosis.
-          ShellState.recoverFailedPrebootTrial(this, "gateway-unavailable")
-          runOnUiThread { showEngineFailure("正常 Web 诊断失败；下次启动自动回到官方组件模式") }
+          // Restore the known-working official-only profile NOW, not merely
+          // the SharedPreferences flag. A still-live trial Host would otherwise
+          // be reused by startEngine(), even though the diagnostic claims
+          // official-only was selected. The failed trial logs are preserved
+          // by recoverFailedPrebootTrial() before the Host is stopped.
+          if (!ShellState.recoverFailedPrebootTrial(this, "gateway-unavailable")) {
+            runOnUiThread { showEngineFailure("正常 Web 诊断失败，无法保存官方组件回退状态") }
+            return@Thread
+          }
+          if (!engineManager.stopEngine()) {
+            runOnUiThread {
+              showEngineFailure("官方组件回退已保存，但旧 Host 未退出；请在系统设置强行停止 DSH 并重开")
+            }
+            return@Thread
+          }
+          runOnUiThread {
+            showStartingState("已退出失败的诊断 Host，正在恢复官方组件模式…",
+              "全部原有插件、聊天记录、配置均保留。")
+          }
+          val officialStarted = engineManager.startEngine()
+          val officialReady = officialStarted && waitForEngineReady()
+          if (officialReady) {
+            startEngineService()
+            runOnUiThread { showWeb() }
+          } else {
+            if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
+            runOnUiThread { showEngineFailure("已切换官方组件，但恢复启动仍未就绪") }
+          }
         }
       } catch (t: Throwable) {
+        ShellState.recoverFailedPrebootTrial(this, "trial-exception")
         runOnUiThread { showEngineFailure("启动前兼容性对照异常：" + (t.message ?: t.javaClass.simpleName)) }
       } finally {
         EngineManager.endMaintenance()
@@ -6390,6 +6414,26 @@ class MainActivity : ComponentActivity() {
     runOnUiThread { showStartingState("正在连接 DeepSeek Harness…") }
     Thread {
       try {
+        // The previous Web trial may have fallen back in preferences while
+        // its original Node Host is still alive. Never treat that stale Host
+        // as proof that the official-only profile started successfully.
+        if (engineManager.isManagedHostModeMismatched()) {
+          EngineManager.beginMaintenance()
+          try {
+            runOnUiThread {
+              showStartingState("正在关闭与当前模式不匹配的旧 Host…",
+                "只停止旧引擎，不改动插件、会话、凭据或 Web 配置。")
+            }
+            if (!engineManager.stopEngine()) {
+              runOnUiThread {
+                showEngineFailure("旧 Host 的实际启动模式与当前设置不同，且无法安全停止；请强行停止应用再重开")
+              }
+              return@Thread
+            }
+          } finally {
+            EngineManager.endMaintenance()
+          }
+        }
         if (EngineProbe.check(250).optBoolean("running", false)) {
           // Re-arm foreground ownership even when the Host survived an
           // Activity recreation or was already listening before this launch.
