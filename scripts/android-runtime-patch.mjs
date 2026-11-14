@@ -562,6 +562,32 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
   return 'patched'
 }, { mandatory: androidPermissionPresetGuardMandatory })
 
+
+// The model-facing one-shot bash executor (dsh-bash-local) is independent
+// of the sidebar PTY and the Android MCP toolboxes. The model invokes
+// "bash -c" through subprocess-local; Android does not permit direct execve
+// of app-private binaries. Run the actual embedded Bash ELF via the system
+// linker bridge, preserving exact command, cwd, env and the subprocess
+// provider's existing cancellation/permission policy. No shell interpolation.
+eachPackage('@deepseek-ai/dsh-bash-local', 'lib/index.js', (file) => {
+  let source = read(file)
+  const marker = 'DSH Android compat: model Bash via system linker'
+  if (source.includes(marker)) return 'already'
+  const call = /this\.executeArgv\(\s*spec\s*,\s*\[\s*["']bash["']\s*,\s*["']-c["']\s*,\s*spec\.command\s*\]\s*\)/g
+  const matches = source.match(call) ?? []
+  if (matches.length !== 1) {
+    throw new Error('bash-local model executeArgv seam changed (' + matches.length + '): ' + file)
+  }
+  const replacement = `this.executeArgv(spec, process.env.DSH_ANDROID_STANDALONE === "1"
+    ? ["/system/bin/sh", (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/libexec/dsh-mobile/android-exec.sh",
+       (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/bin/bash", "-c", spec.command]
+    : ["bash", "-c", spec.command]) /* ${marker} */`
+  source = source.replace(call, replacement)
+  write(file, source)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: androidPermissionPresetGuardMandatory })
+
 // terminal-bash defaults to /bin/bash on POSIX desktops. Android has no /bin
 // Bash; the APK already publishes the relocated embedded shell through
 // DSH_SIDEBAR_SHELL/SHELL.
