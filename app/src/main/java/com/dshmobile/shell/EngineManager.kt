@@ -1292,12 +1292,6 @@ class EngineManager(private val context: Context, private val pickToken: String?
         "ANDROID_SH_OK", "no-preload-no-libpath")
       if (!unreaped) probe("01b system-sh-runtime-no-preload", systemArgv,
         "ANDROID_SH_OK", "no-preload")
-      // The full environment is the only added difference from 01b. If
-      // this stage hangs, a preloaded library is a stronger hypothesis than
-      // Bash's own ELF, because Bash has not been launched in either stage.
-      if (!unreaped) probe("01c system-sh-full-runtime", systemArgv,
-        "ANDROID_SH_OK", "runtime")
-
       if (!unreaped) {
         // -x is diagnostic only, and traces the bridge's fixed commands
         // (not user input). It pinpoints whether the bridge hangs before
@@ -1311,6 +1305,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
             "BASH_DIRECT_OK", "no-preload")
         }
       }
+      // The full environment is the only added difference from 01b. If
+      // this stage hangs, a preloaded library is a stronger hypothesis than
+      // Bash's own ELF, because Bash has not been launched in either stage.
+      if (!unreaped) probe("01c system-sh-full-runtime", systemArgv,
+        "ANDROID_SH_OK", "runtime")
+
       val bashReady = if (!unreaped) probe("02 linker-bash",
         listOf("/system/bin/sh", bridge, bash, "-c", "printf BASH_OK"),
         "BASH_OK", "runtime") else false
