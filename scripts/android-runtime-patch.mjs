@@ -206,6 +206,7 @@ const wanted = new Set([
   '@deepseek-ai/cordis-plugin-loader',
   '@deepseek-ai/dsh-sandbox-local',
   '@deepseek-ai/dsh-subprocess-local',
+  '@deepseek-ai/dsh-bash-local',
   '@deepseek-ai/dsh-terminal-bash',
   '@deepseek-ai/dsh-web-fetch-http',
   '@deepseek-ai/dsh-tool-web',
@@ -573,12 +574,10 @@ eachPackage('@deepseek-ai/dsh-bash-local', 'lib/index.js', (file) => {
   let source = read(file)
   const marker = 'DSH Android compat: model Bash via system linker'
   if (source.includes(marker)) return 'already'
-  const call = /this\.executeArgv\(\s*spec\s*,\s*\[\s*["']bash["']\s*,\s*["']-c["']\s*,\s*spec\.command\s*\]\s*\)/g
-  const matches = source.match(call) ?? []
-  if (matches.length !== 1) {
-    throw new Error('bash-local model executeArgv seam changed (' + matches.length + '): ' + file)
-  }
-  const replacement = `this.executeArgv(spec, process.env.DSH_ANDROID_STANDALONE === "1"
+  const call = /this\.(executeArgv|runArgv)\(\s*spec\s*,\s*\[\s*["']bash["']\s*,\s*["']-c["']\s*,\s*spec\.command\s*\]\s*\)/g
+  const matches = [...source.matchAll(call)]
+  if (matches.length !== 1) throw new Error('bash-local model runArgv seam changed (' + matches.length + '): ' + file)
+  const replacement = (_match, method) => `this.${method}(spec, process.env.DSH_ANDROID_STANDALONE === "1"
     ? ["/system/bin/sh", (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/libexec/dsh-mobile/android-exec.sh",
        (process.env.TERMUX__PREFIX || process.env.PREFIX) + "/bin/bash", "-c", spec.command]
     : ["bash", "-c", spec.command]) /* ${marker} */`
