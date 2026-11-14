@@ -24,6 +24,8 @@ class EngineService : Service() {
 
   override fun onCreate() {
     super.onCreate()
+    // A sticky foreground service may start before MainActivity after a crash.
+    ShellState.recoverInterruptedPrebootTrial(this)
     engineManager = EngineManager(this, ShellState.pickToken(this))
     startForeground(NOTIFICATION_ID, buildNotification())
     armWatchdog()
