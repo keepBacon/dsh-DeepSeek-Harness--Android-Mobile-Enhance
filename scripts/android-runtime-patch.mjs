@@ -581,7 +581,7 @@ eachPackage('@deepseek-ai/dsh-bash-local', 'lib/index.js', (file) => {
   const envMarker = 'DSH Android compat: model Bash environment without preload'
   let changed = false
   if (!source.includes(marker)) {
-    const call = /this\\.(executeArgv|runArgv)\\(\\s*spec\\s*,\\s*\\[\\s*["']bash["']\\s*,\\s*["']-c["']\\s*,\\s*spec\\.command\\s*\\]\\s*\\)/g
+    const call = /this\.(executeArgv|runArgv)\(\s*spec\s*,\s*\[\s*["']bash["']\s*,\s*["']-c["']\s*,\s*spec\.command\s*\]\s*\)/g
     const matches = [...source.matchAll(call)]
     if (matches.length !== 1) throw new Error('bash-local linker seam changed (' + matches.length + '): ' + file)
     const replacement = (_match, method) => `this.${method}(spec, process.env.DSH_ANDROID_STANDALONE === "1"
@@ -596,7 +596,7 @@ eachPackage('@deepseek-ai/dsh-bash-local', 'lib/index.js', (file) => {
     // the full published package only has the original Bash argv call.
     // Always inject the model Bash child environment at its own provider
     // boundary, never into an upstream subprocess-local build variant.
-    const seam = /this\\.(executeArgv|runArgv)\\(\\s*spec\\s*,\\s*process\\.env\\.DSH_ANDROID_STANDALONE\\s*===\\s*["']1["']/g
+    const seam = /this\.(executeArgv|runArgv)\(\s*spec\s*,\s*process\.env\.DSH_ANDROID_STANDALONE\s*===\s*["']1["']/g
     const matches = [...source.matchAll(seam)]
     if (matches.length !== 1) throw new Error('bash-local environment seam changed (' + matches.length + '): ' + file)
     source = source.replace(seam, (_match, method) => `this.${method}((process.env.DSH_ANDROID_STANDALONE === "1"
