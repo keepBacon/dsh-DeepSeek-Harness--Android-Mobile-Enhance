@@ -22,6 +22,13 @@ export TMPDIR="$HOME/tmp"
 unset DSH_ANDROID_STANDALONE DSH_ANDROID_EXEC_BRIDGE || true
 output="$(/bin/sh "$TMP/runner.sh" workspace-write "$WORK" -- /data/bin/sample 'hello world')"
 test "$output" = "mode=workspace-write|workspace=$WORK|command=/data/bin/sample|arg=hello world"
+# Default model Bash is sandboxed. It must resolve to the embedded Bash ELF,
+# not a PATH wrapper that can be unavailable in a scrubbed child environment.
+mkdir -p "$PREFIX/bin"
+: > "$PREFIX/bin/bash"
+output="$(/bin/sh "$TMP/runner.sh" read-only "$WORK" -- bash -c 'printf DSH_OK')"
+test "$output" = "mode=read-only|workspace=$WORK|command=$PREFIX/bin/bash|arg=-c"
+
 if /bin/sh "$TMP/runner.sh" danger-full-access "$WORK" -- /data/bin/sample >/dev/null 2>&1; then
   echo '[FAIL] invalid sandbox execution mode unexpectedly accepted' >&2
   exit 1
