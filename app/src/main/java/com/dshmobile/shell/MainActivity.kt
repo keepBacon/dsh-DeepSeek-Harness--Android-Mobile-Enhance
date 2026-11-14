@@ -794,6 +794,18 @@ class MainActivity : ComponentActivity() {
       text = "仅在下次正常模式启动时跳过 Android 管理的 MCP 配置；不修改任何 MCP 服务定义、插件或聊天记录。"
       textSize = 12f
     })
+    wrap.addView(Button(this).apply {
+      text = if (ShellState.normalPrebootCompatDiagnosticEnabled(this@MainActivity))
+        "正常 Web：恢复启动前兼容处理（并重启）"
+      else "正常 Web：跳过启动前兼容处理（诊断）"
+      setOnClickListener {
+        switchNormalPrebootCompatDiagnostic(!ShellState.normalPrebootCompatDiagnosticEnabled(this@MainActivity))
+      }
+    })
+    wrap.addView(TextView(this).apply {
+      text = "保留原 Web 的全部 Bundle、有效补丁和 MCP；只跳过 Android 的插件兼容性预处理。不会卸载插件或清空配置。"
+      textSize = 12f
+    })
     wrap.addView(TextView(this).apply {
       text = "启用后重启 DSH，仅启动内置基础功能，暂时不加载额外插件、Skills 或 MCP。仍可管理插件和 Skill 安装包；安装状态和原始启用配置不会被修改。关闭后重启 DSH 恢复。"
       textSize = 12f
@@ -5077,7 +5089,11 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { showEngineFailure("无法保存官方组件对照设置") }
           return@Thread
         }
-        // A control test must never silently retain the previous no-MCP flag.
+        // A control test must never retain a different normal-Web comparison.
+        if (!ShellState.setNormalPrebootCompatDiagnosticEnabled(this, false)) {
+          runOnUiThread { showEngineFailure("无法退出启动前兼容性对照模式") }
+          return@Thread
+        }
         if (!ShellState.setNormalMcpDiagnosticEnabled(this, false)) {
           runOnUiThread { showEngineFailure("无法恢复默认 MCP 诊断选择") }
           return@Thread
@@ -5127,7 +5143,11 @@ class MainActivity : ComponentActivity() {
           runOnUiThread { showEngineFailure("无法保存 MCP 对照诊断选择") }
           return@Thread
         }
-        // Explicit normal MCP comparison always boots the real Web profile.
+        // Compare one variable at a time: no-MCP and no-compat are exclusive.
+        if (!ShellState.setNormalPrebootCompatDiagnosticEnabled(this, false)) {
+          runOnUiThread { showEngineFailure("无法退出启动前兼容性对照模式") }
+          return@Thread
+        }
         if (!ShellState.setOfficialOnlyDiagnosticEnabled(this, false)) {
           runOnUiThread { showEngineFailure("无法退出官方组件诊断 Profile") }
           return@Thread
@@ -5157,6 +5177,61 @@ class MainActivity : ComponentActivity() {
       } catch (t: Throwable) {
         runOnUiThread { showEngineFailure("MCP 对照诊断异常：" +
           (t.message ?: t.javaClass.simpleName)) }
+      } finally {
+        EngineManager.endMaintenance()
+        profileMutationRunning.set(false)
+      }
+    }.start()
+  }
+
+  /**
+   * Reproduce the full, previously failing Web profile while skipping only
+   * Android's pre-start compatibility edits. All nine installed bundles,
+   * the active Web patch and Android MCP remain enabled for this comparison.
+   * The user's manifests, package trees and credentials are never rewritten.
+   */
+  private fun switchNormalPrebootCompatDiagnostic(enabled: Boolean) {
+    if (engineFlowRunning.get() || !profileMutationRunning.compareAndSet(false, true)) {
+      showSimpleMessage("操作进行中", "请先结束当前引擎操作")
+      return
+    }
+    EngineManager.beginMaintenance()
+    showStartingState("正在进行正常 Web 启动前兼容性对照…",
+      "保留全部原始插件、配置、MCP、会话；只跳过 Android 启动前兼容性处理。")
+    Thread {
+      try {
+        if (!ShellState.setNormalPrebootCompatDiagnosticEnabled(this, enabled)) {
+          runOnUiThread { showEngineFailure("无法保存启动前兼容性对照设置") }
+          return@Thread
+        }
+        // Isolate only one launch dimension. Persist before attempting to stop
+        // an unresponsive old Host, so Android force-stop retains the choice.
+        if (!ShellState.setOfficialOnlyDiagnosticEnabled(this, false) ||
+            !ShellState.setNormalMcpDiagnosticEnabled(this, false) ||
+            !ShellState.setSafeModeEnabled(this, false)) {
+          runOnUiThread { showEngineFailure("诊断已保存，但无法恢复其他模式的默认选项") }
+          return@Thread
+        }
+        try { stopService(Intent(this, EngineService::class.java)) } catch (_: Throwable) {}
+        if (!engineManager.stopEngine()) {
+          runOnUiThread {
+            showEngineFailure("启动前兼容性对照已保存，旧 Host 仍在运行")
+            showSimpleMessage("需系统强行停止",
+              "Android 设置 → 应用 → DSH → 强行停止，然后重新打开。请勿清除数据。")
+          }
+          return@Thread
+        }
+        val started = engineManager.startEngine()
+        val ready = started && waitForEngineReady()
+        if (ready) {
+          startEngineService()
+          runOnUiThread { showWeb() }
+        } else {
+          if (engineManager.isEngineProcessAlive()) engineManager.recordGatewayStartupTimeout()
+          runOnUiThread { showEngineFailure("正常 Web 跳过启动前兼容处理后仍未就绪") }
+        }
+      } catch (t: Throwable) {
+        runOnUiThread { showEngineFailure("启动前兼容性对照异常：" + (t.message ?: t.javaClass.simpleName)) }
       } finally {
         EngineManager.endMaintenance()
         profileMutationRunning.set(false)
@@ -6244,6 +6319,14 @@ class MainActivity : ComponentActivity() {
         switchOfficialOnlyDiagnostic(!ShellState.officialOnlyDiagnosticEnabled(this@MainActivity))
       }
     }
+    val noCompat = Button(this).apply {
+      text = if (ShellState.normalPrebootCompatDiagnosticEnabled(this@MainActivity))
+        "恢复正常 Web 启动前兼容处理并重启"
+      else "正常 Web 保留所有插件，跳过启动前兼容处理（诊断）"
+      setOnClickListener {
+        switchNormalPrebootCompatDiagnostic(!ShellState.normalPrebootCompatDiagnosticEnabled(this@MainActivity))
+      }
+    }
     val resetConfig = Button(this).apply {
       text = "备份并重置 web 配置"
       setOnClickListener {
@@ -6271,7 +6354,7 @@ class MainActivity : ComponentActivity() {
       }
     }
     recoveryControls.clear()
-    recoveryControls += listOf(repairRuntime, retry, safeMode, noMcp, officialProbe, resetConfig, rescue, copyDiagnostics)
+    recoveryControls += listOf(repairRuntime, retry, safeMode, noMcp, officialProbe, noCompat, resetConfig, rescue, copyDiagnostics)
     recoveryControls.forEach { it.visibility = View.GONE }
     guide.addView(engineStatus)
     guide.addView(progressText)
@@ -6280,6 +6363,7 @@ class MainActivity : ComponentActivity() {
     guide.addView(safeMode)
     guide.addView(noMcp)
     guide.addView(officialProbe)
+    guide.addView(noCompat)
     guide.addView(resetConfig)
     guide.addView(rescue)
     guide.addView(copyDiagnostics)

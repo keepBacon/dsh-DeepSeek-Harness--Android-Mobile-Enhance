@@ -16,7 +16,7 @@ assert.match(start,/val officialProbe = !safeMode && ShellState\.officialOnlyDia
 assert.match(start,/else if \(officialProbe\) prepareOfficialOnlyDiagnosticProfile\(\) else null/)
 assert.match(start,/mcpConfigManager\.ensureRuntimePatch\(safeMode \|\| officialProbe \|\| noMcpDiagnostic\)/)
 assert.match(start,/engineEnv\(preload, isolatedSafeHome = safeMode\)/)
-assert.match(start,/if \(!safeMode && !officialProbe\)/)
+assert.match(start,/if \(!safeMode && !officialProbe && !skipPrebootCompat\)/)
 assert.match(prep,/File\(ensureDshDataHome\(\), "profiles\/\$name"\)/)
 assert.match(prep,/android-official-probe-web-20261113/)
 assert.match(prep,/marker\.readText\(\)/)

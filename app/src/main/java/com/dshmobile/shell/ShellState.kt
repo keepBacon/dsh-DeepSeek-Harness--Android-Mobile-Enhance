@@ -12,6 +12,7 @@ object ShellState {
   private const val SAFE_MODE = "safe-mode"
   private const val NORMAL_MCP_DIAGNOSTIC = "normal-mcp-diagnostic-disabled"
   private const val OFFICIAL_ONLY_DIAGNOSTIC = "official-only-diagnostic-web"
+  private const val NORMAL_PREBOOT_COMPAT_DIAGNOSTIC = "normal-preboot-compat-diagnostic-disabled"
 
   const val UI_MODE_MOBILE = "mobile"
   const val UI_MODE_NATIVE = "native"
@@ -75,6 +76,16 @@ object ShellState {
   fun setOfficialOnlyDiagnosticEnabled(context: Context, enabled: Boolean): Boolean =
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
       .edit().putBoolean(OFFICIAL_ONLY_DIAGNOSTIC, enabled).commit()
+
+  /** One-launch normal-Web comparison: keep every installed bundle and MCP,
+   * but skip Android's optional preboot plugin compatibility rewrites. */
+  fun normalPrebootCompatDiagnosticEnabled(context: Context): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .getBoolean(NORMAL_PREBOOT_COMPAT_DIAGNOSTIC, false)
+
+  fun setNormalPrebootCompatDiagnosticEnabled(context: Context, enabled: Boolean): Boolean =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit().putBoolean(NORMAL_PREBOOT_COMPAT_DIAGNOSTIC, enabled).commit()
 
   /**
    * Stable private token used by the Android directory-picker bridge and the
