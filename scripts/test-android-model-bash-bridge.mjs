@@ -5,6 +5,7 @@ const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8'
 const patch = read('scripts/android-runtime-patch.mjs')
 const build = read('scripts/ci-assemble-github-runtime.py')
 const engine = read('app/src/main/java/com/dshmobile/shell/EngineManager.kt')
+const sandboxRunner = read('scripts/dsh-android-sandbox-runner.sh')
 assert.match(patch, /eachPackage\('@deepseek-ai\/dsh-bash-local', 'lib\/index\.js'/)
 assert.match(patch, /DSH Android compat: model Bash via system linker/)
 assert.match(patch, /const matches = source\.match\(call\) \?\? \[\]/)
@@ -18,4 +19,8 @@ assert.match(build, /DSH_COMPAT_ONLY_PACKAGES[^\n]*@deepseek-ai\/dsh-bash-local/
 assert.match(engine, /"DSH_ANDROID_STANDALONE" to "1"/)
 assert.match(engine, /"TERMUX__PREFIX" to usrDir\.absolutePath/)
 assert.match(engine, /"LD_PRELOAD" to preload\.absolutePath/)
+assert.match(sandboxRunner, /if \[ "\$1" = "bash" \]/)
+assert.match(sandboxRunner, /"\$prefix\/bin\/bash"/)
+assert.match(sandboxRunner, /exec \/system\/bin\/sh "\$bridge"/)
+
 console.log('[DSH] model-facing bash linker bridge source contract: OK')
