@@ -38,10 +38,13 @@ TOOL_SEEDS = (
     # Pin by the SHA256-bearing Termux package index at build time and include
     # the HTTPS trust store, SSH transport and remote helper dependencies.
     "git", "gh", "openssh", "ca-certificates",
+    # Search/navigation: keep the Termux ARM64 pcre2, findutils, ncurses deps.
+    "ripgrep", "fd", "fzf",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
     "dig", "aapt2", "gzip", "git", "gh", "ssh",
+    "rg", "fd", "fzf",
 )
 
 SCRIPT_MAP = {
@@ -264,6 +267,22 @@ def fetch_packages(stage, workspace):
             header = stream.read(20)
         if len(header) < 20 or header[:4] != bytes((0x7f, 69, 76, 70)) or int.from_bytes(header[18:20], "little") != 183:
             raise ValueError("native ARM64 " + cmd + " is not an AArch64 ELF")
+    # Search and interactive fuzzy-finder resources must be packaged together,
+    # not reduced to three --version-capable ELF binaries.
+    for cmd in ("rg", "fd", "fzf"):
+        binary = stage / "usr/bin" / cmd
+        if not binary.is_file():
+            raise ValueError("missing ARM64 search tool " + cmd)
+        with binary.open("rb") as stream:
+            header = stream.read(20)
+        if len(header) < 20 or header[:4] != bytes((0x7f, 69, 76, 70)) or int.from_bytes(header[18:20], "little") != 183:
+            raise ValueError("search tool is not ARM64 ELF: " + cmd)
+    if not (stage / "usr/share/fzf/key-bindings.bash").is_file():
+        raise ValueError("fzf shell key bindings missing from ARM64 package")
+    if not (stage / "usr/share/fzf/completion.bash").is_file():
+        raise ValueError("fzf bash completion missing from ARM64 package")
+    if not (stage / "usr/bin/fzf-tmux").is_file():
+        raise ValueError("fzf-tmux integration missing from ARM64 package")
     print("[native] verified", len(TOOL_COMMANDS), "critical tool executable paths and magic data")
     return manifest
 
