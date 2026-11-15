@@ -5,6 +5,9 @@ import argparse, hashlib, json, pathlib, re, sys, tarfile
 REQUIRED = (
  'usr/bin/node','usr/bin/bash','usr/bin/proot',
  'usr/bin/git','usr/bin/gh','usr/bin/ssh',
+ 'usr/bin/rg','usr/bin/fd','usr/bin/fzf',
+ 'usr/bin/fzf-tmux', 'usr/share/fzf/key-bindings.bash',
+ 'usr/share/fzf/completion.bash',
  'usr/lib/libtermux-exec-ld-preload.so',
  'usr/lib/node_modules/@deepseek-ai/dsh/package.json',
  'usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
