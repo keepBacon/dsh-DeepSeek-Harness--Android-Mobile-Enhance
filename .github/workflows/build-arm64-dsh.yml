@@ -6,6 +6,7 @@ on:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
       - 'scripts/test-android-git-gh-runtime.py'
+      - 'scripts/test-android-search-tools.py'
       - 'scripts/ci_fix_web_fetch_limits.py'
       - 'scripts/ci_modsearch_recovery.py'
       - 'scripts/dsh-mobile-toolbox-mcp.mjs'
