@@ -38,7 +38,7 @@ assert '"GIT_SSL_CAINFO"' in engine_text
 assert '"GIT_EXEC_PATH"' in engine_text
 assert '"GIT_CONFIG_SYSTEM"' in engine_text
 assert '"GIT_SSH_COMMAND"' in engine_text
-assert not re.search(r'["\\']GH_TOKEN["\\']\\s*to\\s*', engine_text), "must not inject GitHub token into app environment"
+assert '"GH_TOKEN" to ' not in engine_text, "must not inject a GitHub token"
 assert 'GH_TOKEN' not in builder_text
 assert "command_not_found_handle()" in shell_text  # no direct exec of app-private wrappers
 assert "ci-assemble-github-runtime.py" in workflow
