@@ -2097,6 +2097,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   private fun sshCommand(batchMode: Boolean): String = buildString {
+    // Git invokes SSH as a separate process. Android app-private executables
+    // must go through the system-shell / linker bridge even from Git itself.
+    append("/system/bin/sh ")
+    append(File(usrDir, "libexec/dsh-mobile/android-exec.sh").absolutePath)
+    append(" ")
     append(sshBin.absolutePath)
     if (sshConfigFile.isFile) append(" -F ").append(sshConfigFile.absolutePath)
     preferredSshKeyFile()?.let { append(" -i ").append(it.absolutePath) }
@@ -2136,6 +2141,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "COLORTERM" to "truecolor",
       "TERM_PROGRAM" to "DSH-Mobile",
       "TERM_PROGRAM_VERSION" to "0.1.1",
+      // Gh stores OAuth tokens under user-owned XDG config, never inside
+      // immutable APK assets or global logs. Do not inject GH_TOKEN.
+      "GH_CONFIG_DIR" to File(xdgConfig, "gh").apply {
+        mkdirs()
+        try { android.system.Os.chmod(absolutePath, 448) } catch (_: Throwable) {} // 0700
+      }.absolutePath,
+      "GH_PAGER" to "cat",
+      "GH_NO_UPDATE_NOTIFIER" to "1",
       "EDITOR" to editor,
       "VISUAL" to editor,
       "GIT_EDITOR" to editor,

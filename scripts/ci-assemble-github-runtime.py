@@ -34,10 +34,14 @@ SEEDS = ("proot", "python", "python-pip", "apt", "dpkg", "termux-tools", "termux
 TOOL_SEEDS = (
     "jq", "yq", "7zip", "openssl-tool", "file",
     "binutils", "dnsutils", "aapt2", "gzip",
+    # Git / GitHub CLI must be real Termux ARM64 packages, not desktop binaries.
+    # Pin by the SHA256-bearing Termux package index at build time and include
+    # the HTTPS trust store, SSH transport and remote helper dependencies.
+    "git", "gh", "openssh", "ca-certificates",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
-    "dig", "aapt2", "gzip",
+    "dig", "aapt2", "gzip", "git", "gh", "ssh",
 )
 
 SCRIPT_MAP = {
@@ -238,6 +242,28 @@ def fetch_packages(stage, workspace):
     standalone_7zz = stage / "usr/bin/7zz"
     if not standalone_7zz.is_file():
         raise ValueError("7zip standalone archive codec 7zz missing")
+    # git --version alone misses a broken remote HTTP helper. Fail the
+    # archive build before signing if HTTPS transport or CA trust is missing.
+    git_helpers = (
+        stage / "usr/libexec/git-core/git-remote-https",
+        stage / "usr/lib/git-core/git-remote-https",
+    )
+    if not any(helper.is_file() for helper in git_helpers):
+        raise ValueError("git HTTPS transport helper missing from native ARM64 runtime")
+    if not any((stage / rel).is_file() for rel in (
+        "usr/etc/tls/cert.pem",
+        "usr/etc/ssl/cert.pem",
+        "usr/etc/ssl/certs/ca-certificates.crt",
+    )):
+        raise ValueError("GitHub HTTPS CA bundle missing from native ARM64 runtime")
+    for cmd in ("git", "gh", "ssh"):
+        candidate = stage / "usr/bin" / cmd
+        if not candidate.is_file():
+            raise ValueError("native ARM64 " + cmd + " binary absent from package")
+        with candidate.open("rb") as stream:
+            header = stream.read(20)
+        if len(header) < 20 or header[:4] != bytes((0x7f, 69, 76, 70)) or int.from_bytes(header[18:20], "little") != 183:
+            raise ValueError("native ARM64 " + cmd + " is not an AArch64 ELF")
     print("[native] verified", len(TOOL_COMMANDS), "critical tool executable paths and magic data")
     return manifest
 
