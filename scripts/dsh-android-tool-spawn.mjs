@@ -25,8 +25,12 @@ export function androidToolLaunch(command, args=[], env=process.env) {
 
  const bridge=env.DSH_ANDROID_EXEC_BRIDGE||
    resolve(prefix,'libexec/dsh-mobile/android-exec.sh')
- // Preserve every argument boundary; no shell interpolation is involved.
- // In standalone mode the bridge resolves bare commands from the same PATH
- // as the MCP process (including embedded Termux native tools).
- return {command:'/system/bin/sh',args:[bridge,command,...args],bridged:true}
+ // android-exec intentionally limits PATH to /system/bin to avoid recursive
+ // noexec wrapper invocation; resolve the three new embedded search commands
+ // to their known ARM64 entrypoints before entering that bridge.
+ const target=standalone && ['rg','fd','fzf'].includes(command)
+   ? resolve(prefix,'bin',command)
+   : command
+ // Preserve argv boundaries; never concatenate command data into a shell.
+ return {command:'/system/bin/sh',args:[bridge,target,...args],bridged:true}
 }
