@@ -17,6 +17,14 @@ test('Android standalone PATH commands and relative executable scripts use bridg
  assert.deepEqual(androidToolLaunch('./gradlew',['tasks'],android),
   {command:'/system/bin/sh',args:[bridge,'./gradlew','tasks'],bridged:true})
 })
+test('Embedded search commands resolve through explicit ARM64 path, never stripped bridge PATH',()=>{
+ for(const name of ['rg','fd','fzf']){
+  const argv=name==='fzf'?['--filter','two']:['--version']
+  assert.deepEqual(androidToolLaunch(name,argv,android),
+   {command:'/system/bin/sh',args:[bridge,prefix+'/bin/'+name,...argv],bridged:true})
+ }
+})
+
 test('Android system and APEX executables are never rewrapped',()=>{
  for(const name of ['/system/bin/sh','/system/bin/ls','/apex/com.android.runtime/bin/linker64'])
   assert.deepEqual(androidToolLaunch(name,['--help'],android),{command:name,args:['--help'],bridged:false})

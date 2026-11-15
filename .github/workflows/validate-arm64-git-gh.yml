@@ -5,6 +5,7 @@ on:
       - 'scripts/ci-assemble-github-runtime.py'
       - 'scripts/ci-validate-runtime.py'
       - 'scripts/test-android-git-gh-runtime.py'
+      - 'scripts/test-android-search-tools.py'
       - '.github/workflows/validate-arm64-git-gh.yml'
   workflow_dispatch:
 permissions:
@@ -16,7 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check local Git and GitHub CLI staging contract
-        run: python3 scripts/test-android-git-gh-runtime.py
+        run: |
+          python3 scripts/test-android-git-gh-runtime.py
+          python3 scripts/test-android-search-tools.py
       - name: Assemble actual Termux ARM64 Git and GitHub CLI in signed runtime seed
         shell: bash
         env:
@@ -40,7 +43,7 @@ jobs:
           import json,sys
           audit=json.load(open(sys.argv[1]))
           packages={x['package'] for x in audit['androidPackageArchives']}
-          missing={'git','gh','openssh','ca-certificates'}-packages
+          missing={'git','gh','openssh','ca-certificates','ripgrep','fd','fzf'}-packages
           if missing:
               raise SystemExit('Git/GitHub CLI packages absent from native archive: '+str(sorted(missing)))
           print('[DSH] Termux aarch64 Git/gh/SSH/CA staging and hash checks OK')
