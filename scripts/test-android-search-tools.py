@@ -33,6 +33,8 @@ assert 'command_not_found_handle()' in bash_env
 assert 'DSH_WRAPPER_COMMAND="$_dsh_cmd"' in bash_env
 assert 'PATH=/system/bin:/system/xbin' in bridge
 assert "androidToolLaunch(" in mobile
+assert "['rg','fd','fzf'].includes(command)" in mobile
+assert "resolve(prefix,'bin',command)" in mobile
 assert '"DSH_RG_PATH"' in engine
 for name in ("ripgrep","fd","fzf"):
     assert "'"+name+"'" in workflow, "ARM64 native package smoke misses "+name
