@@ -262,7 +262,7 @@ def fetch_packages(stage, workspace):
             raise ValueError("native ARM64 " + cmd + " binary absent from package")
         with candidate.open("rb") as stream:
             header = stream.read(20)
-        if len(header) < 20 or header[:4] != b"\\x7fELF" or int.from_bytes(header[18:20], "little") != 183:
+        if len(header) < 20 or header[:4] != bytes((0x7f, 69, 76, 70)) or int.from_bytes(header[18:20], "little") != 183:
             raise ValueError("native ARM64 " + cmd + " is not an AArch64 ELF")
     print("[native] verified", len(TOOL_COMMANDS), "critical tool executable paths and magic data")
     return manifest
