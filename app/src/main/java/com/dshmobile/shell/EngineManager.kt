@@ -2097,6 +2097,11 @@ class EngineManager(private val context: Context, private val pickToken: String?
   }
 
   private fun sshCommand(batchMode: Boolean): String = buildString {
+    // Git invokes SSH as a separate process. Android app-private executables
+    // must go through the system-shell / linker bridge even from Git itself.
+    append("/system/bin/sh ")
+    append(File(usrDir, "libexec/dsh-mobile/android-exec.sh").absolutePath)
+    append(" ")
     append(sshBin.absolutePath)
     if (sshConfigFile.isFile) append(" -F ").append(sshConfigFile.absolutePath)
     preferredSshKeyFile()?.let { append(" -i ").append(it.absolutePath) }
