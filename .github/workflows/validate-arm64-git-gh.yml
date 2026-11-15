@@ -1,0 +1,50 @@
+name: Verify DSH ARM64 Git and GitHub CLI runtime
+on:
+  pull_request:
+    paths:
+      - 'scripts/ci-assemble-github-runtime.py'
+      - 'scripts/ci-validate-runtime.py'
+      - 'scripts/test-android-git-gh-runtime.py'
+      - '.github/workflows/validate-arm64-git-gh.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-package:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check local Git and GitHub CLI staging contract
+        run: python3 scripts/test-android-git-gh-runtime.py
+      - name: Assemble actual Termux ARM64 Git and GitHub CLI in signed runtime seed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3 dpkg-dev nodejs npm xz-utils
+          mkdir -p "$RUNNER_TEMP/dsh-seed"
+          gh release download "1" -R "$GITHUB_REPOSITORY" -p "Dsh.Mobile.Pro.V0.1.apk" -D "$RUNNER_TEMP/dsh-seed"
+          unzip -p "$RUNNER_TEMP/dsh-seed/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > "$RUNNER_TEMP/dsh-seed/seed.tar.xz"
+          python3 scripts/ci-assemble-github-runtime.py \
+            --repo . \
+            --seed "$RUNNER_TEMP/dsh-seed/seed.tar.xz" \
+            --output "$RUNNER_TEMP/git-gh-runtime.tar.xz" \
+            --audit "$RUNNER_TEMP/git-gh-runtime-audit.json"
+          python3 scripts/ci-validate-runtime.py \
+            --snapshot "$RUNNER_TEMP/git-gh-runtime.tar.xz" \
+            --lock scripts/dsh-release-family-lock.json
+          python3 - "$RUNNER_TEMP/git-gh-runtime-audit.json" <<'PY'
+          import json,sys
+          audit=json.load(open(sys.argv[1]))
+          packages={x['package'] for x in audit['androidPackageArchives']}
+          missing={'git','gh','openssh','ca-certificates'}-packages
+          if missing:
+              raise SystemExit('Git/GitHub CLI packages absent from native archive: '+str(sorted(missing)))
+          print('[DSH] Termux aarch64 Git/gh/SSH/CA staging and hash checks OK')
+          PY
+      - name: Note device-only boundary
+        run: |
+          echo 'Native archive is valid; HTTPS Git helper process and gh API still require Android device tests.'
