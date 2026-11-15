@@ -4,6 +4,7 @@ import argparse, hashlib, json, pathlib, re, sys, tarfile
 
 REQUIRED = (
  'usr/bin/node','usr/bin/bash','usr/bin/proot',
+ 'usr/bin/git','usr/bin/gh','usr/bin/ssh',
  'usr/lib/libtermux-exec-ld-preload.so',
  'usr/lib/node_modules/@deepseek-ai/dsh/package.json',
  'usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
@@ -55,6 +56,10 @@ def validate(snapshot, lock):
    if name.startswith('/') or '\\' in name or '..' in pathlib.PurePosixPath(name).parts:
     raise ValueError('unsafe archive entry: '+name)
    if name in REQUIRED and (member.isfile() or member.issym() or member.islnk()): found.add(name)
+   if name in (
+    'usr/libexec/git-core/git-remote-https','usr/lib/git-core/git-remote-https',
+    'usr/etc/tls/cert.pem','usr/etc/ssl/cert.pem','usr/etc/ssl/certs/ca-certificates.crt'
+   ) and (member.isfile() or member.issym() or member.islnk()): found.add(name)
    if name=='usr/lib/node_modules/@deepseek-ai/dsh/package.json':
     if not member.isfile() or member.size>1024*1024: raise ValueError('bad DSH manifest')
     package=json.load(f.extractfile(member))
@@ -74,6 +79,14 @@ def validate(snapshot, lock):
    if name=='usr/bin/node' and member.isfile():
     h=f.extractfile(member).read(20)
     arch=len(h)>=20 and h[:4]==bytes.fromhex('7f454c46') and int.from_bytes(h[18:20],'little')==183
+ if not any(name in found for name in (
+  'usr/libexec/git-core/git-remote-https', 'usr/lib/git-core/git-remote-https'
+ )):
+  raise ValueError('missing Git HTTPS transport helper')
+ if not any(name in found for name in (
+  'usr/etc/tls/cert.pem', 'usr/etc/ssl/cert.pem', 'usr/etc/ssl/certs/ca-certificates.crt'
+  )):
+  raise ValueError('missing Git HTTPS CA trust bundle')
  if set(REQUIRED)-found: raise ValueError('missing required paths: '+', '.join(sorted(set(REQUIRED)-found)))
  if not arch: raise ValueError('node is not ARM64 ELF')
  # Native seeds can contain neither or only one of these Web-profile modules.
