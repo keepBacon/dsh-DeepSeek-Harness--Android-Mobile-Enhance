@@ -65,7 +65,7 @@ async function runtimeDoctor(args){
    const st=await lstat(p),item={component:file,present:true,kind:st.isFile()?'file':st.isSymbolicLink()?'symlink':'other',size:st.size};
    if(st.isFile()&&file.startsWith('bin/')){
     const handle=await open(p,'r');
-    try{const bytes=Buffer.alloc(4);await handle.read(bytes,0,4,0);item.elf=bytes.equals(Buffer.from([127,69,76,70]))}finally{await handle.close()}
+    try{const bytes=Buffer.alloc(4);await handle.read(bytes,0,4,0);item.format=bytes.equals(Buffer.from([127,69,76,70]))?'ELF':bytes[0]===35&&bytes[1]===33?'script':'other'}finally{await handle.close()}
    }
    checks.push(item);
   }catch(e){checks.push({component:file,present:false,error:e.code||String(e)})}
@@ -80,7 +80,7 @@ async function runtimeDoctor(args){
   }
  }
  const host=args.probeHost===false?{skipped:true}:await hostProbe();
- for(const x of checks)if(!x.present||x.elf===false)issues.push({category:'payload',component:x.component,reason:x.error||'Invalid ELF magic',nextStep:'Check the ARM64 runtime package and noexec launcher; preserve app HOME.'});
+ for(const x of checks)if(!x.present)issues.push({category:'payload',component:x.component,reason:x.error||'Missing runtime entrypoint',nextStep:'Check the ARM64 runtime package and noexec launcher; preserve app HOME.'});
  for(const x of commandChecks)if(x.error||x.exitCode!==0||x.timedOut)issues.push({category:'execution',component:x.command,reason:x.error||x.firstLine||x.signal||'nonzero exit',nextStep:'Check ELF bridge, inherited environment, child process stderr and timeout.'});
  if(host.reachable===false)issues.push({category:'host',component:'127.0.0.1:3080',reason:host.reason,nextStep:'Compare engine logs and official-only Web profile; TCP availability is not Host identity.'});
  return {platform:process.platform,arch:process.arch,node:process.version,prefix:PREFIX,checks,commandChecks,host,issues,limitations:['No secrets or user configuration are modified','WebView and full plugin integration require device testing']};
