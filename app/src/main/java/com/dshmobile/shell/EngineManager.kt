@@ -409,7 +409,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         Log.w(TAG, "Cannot read installed MCP tool declarations: $fileName", t)
         return
       }
-      if (!source.contains("const tools=[") && !source.contains("const codeTools=[") && !source.contains("const codeV3Tools=[") && !source.contains("const codeV4Tools=[") && !source.contains("const codeAstTools = [") && !source.contains("const codeWorkflowTools=[")) return
+      if (!source.contains("const tools=[") && !source.contains("const codeTools=[") && !source.contains("const codeV3Tools=[") && !source.contains("const codeV4Tools=[") && !source.contains("const codeAstTools = [") && !source.contains("const codeWorkflowTools=[") && !source.contains("const workspaceTools=[") && !source.contains("const lspTools=[")) return
       val seen = HashSet<String>()
       for (match in toolPattern.findAll(source)) {
         val name = match.groupValues[1]
