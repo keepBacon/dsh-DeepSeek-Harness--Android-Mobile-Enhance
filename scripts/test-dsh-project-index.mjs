@@ -69,6 +69,23 @@ try{
   const {readdir}=await import('node:fs/promises');return (await readdir(process.env.DSH_PROJECT_INDEX_DIR))[0]})()),'utf8'))
  assert.equal(records.version,1)
  assert.equal(records.root,project)
+ // A project with >128 TypeScript sources should retain semantic navigation.
+ await mkdir(join(project,'large'))
+ for(let i=0;i<145;i++)await writeFile(join(project,'large','f'+i+'.ts'),
+   i===0?'export function uniqueLongProjectSymbol(){return 7}\n':"export const num"+i+" = "+i+"\n")
+ await writeFile(join(project,'large','client.ts'),
+   "import {uniqueLongProjectSymbol} from './f0'\nexport const use = uniqueLongProjectSymbol()\n")
+ const largeIndex=await workspaceCall('workspace_index',{root:project})
+ assert.ok(largeIndex.stats.total>128)
+ const semantic=await workspaceCall('workspace_references',{root:project,
+   name:'uniqueLongProjectSymbol',file:'large/client.ts',line:2,column:20,limit:50})
+ assert.equal(semantic.strategy,'typescript-language-service')
+ assert.equal(semantic.precision,'semantic')
+ assert.ok(semantic.results.some(x=>x.file==='large/f0.ts'))
+ const precise=await workspaceCall('workspace_definition',{root:project,
+   name:'uniqueLongProjectSymbol',file:'large/client.ts',line:2,column:20,limit:50})
+ assert.equal(precise.precision,'semantic')
+ assert.ok(precise.results.some(x=>x.file==='large/f0.ts'))
  assert.equal(workspaceTools.length,8)
  console.log('[DSH] P1 incremental multi-language workspace index, graph and impact: OK')
 }finally{await rm(home,{recursive:true,force:true})}

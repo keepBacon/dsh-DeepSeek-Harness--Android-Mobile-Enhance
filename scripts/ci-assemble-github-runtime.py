@@ -424,6 +424,46 @@ def install_typescript(stage, workspace):
     if not (target / "lib/typescript.js").is_file():
         raise ValueError("TypeScript AST runtime failed to stage")
 
+def install_pyright(stage, workspace):
+    """Stage pinned pure JS Pyright for real Python semantic navigation on Android."""
+    packed = subprocess.run(["npm", "pack", "pyright@1.1.414", "--ignore-scripts",
+        "--pack-destination", str(workspace), "--json"], check=True, stdout=subprocess.PIPE, text=True)
+    metadata = json.loads(packed.stdout)
+    if len(metadata) != 1 or Path(metadata[0]["filename"]).name != metadata[0]["filename"]:
+        raise ValueError("unexpected Pyright npm metadata")
+    archive_path = workspace / metadata[0]["filename"]
+    if not archive_path.is_file():
+        raise ValueError("Pyright package missing after npm pack")
+    target = stage / "usr/lib/dsh-dev-tools/node_modules/pyright"
+    if target.exists() or target.is_symlink():
+        raise ValueError("unexpected existing Pyright developer-tools target")
+    target.mkdir(parents=True)
+    with tarfile.open(archive_path, "r:gz") as package:
+        for entry in package:
+            name = check_relative(entry.name)
+            if not name.startswith("package/"):
+                raise ValueError("unexpected Pyright archive entry")
+            rel = name.removeprefix("package/")
+            if not rel:
+                continue
+            dest = target / rel
+            if entry.isdir():
+                dest.mkdir(parents=True, exist_ok=True)
+            elif entry.isfile():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with package.extractfile(entry) as source, dest.open("wb") as sink:
+                    shutil.copyfileobj(source, sink)
+            else:
+                raise ValueError("unsupported Pyright archive member type")
+    entrypoint = target / "dist/pyright-langserver.js"
+    # npm's shim points to langserver.index.js in the npm package root.
+    if not entrypoint.is_file():
+        entrypoint = target / "langserver.index.js"
+    if not entrypoint.is_file():
+        raise ValueError("Pyright language-server JS entrypoint missing")
+    return {"version": "1.1.414", "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest()}
+
+
 def install_luau_analysis_runtime(stage, workspace):
     """Stage the pinned portable Luau WASM backend without lifecycle scripts."""
     packed = subprocess.run(["npm", "pack", "luau-web@1.5.1", "--ignore-scripts",
@@ -483,6 +523,7 @@ def main():
         patch_web_fetch_limits(stage)
         stage_modsearch(stage, workspace)
         install_typescript(stage, workspace)
+        pyright_audit = install_pyright(stage, workspace)
         install_luau_analysis_runtime(stage, workspace)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         # Keep symbolic links intact. Never dereference Android-only targets.
@@ -494,6 +535,7 @@ def main():
             "seedSha256": hashlib.sha256(args.seed.read_bytes()).hexdigest(),
             "sourceOverlay": list(SCRIPT_MAP.values()),
             "androidPackageArchives": manifest,
+            "pyright": pyright_audit,
             "aptAbi": abi_report,
             "limits": "Native Android ELF loadability / WebUI still require device smoke",
         }, indent=2) + "\n")

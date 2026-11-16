@@ -261,7 +261,7 @@ async function semanticRefs(state,base,args){
  const selected=normalizeFile(args.file,base)
  if(!/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(selected))return null
  const sources=allEntries(state).filter(([p])=>/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(p)).map(([p])=>join(base,p))
- if(sources.length>128)return {strategy:'incomplete',reason:'TypeScript language service is bounded to 128 source files',truncated:true}
+ if(sources.length>512)return {strategy:'incomplete',reason:'TypeScript language service is bounded to 512 source files',truncated:true}
  try{
   const file=join(base,selected)
   const response=await codeAstCall('code_ast_references',{file,line:args.line,column:args.column,
@@ -364,7 +364,7 @@ export async function workspaceCall(name,args={}){
    const selected=normalizeFile(args.file,base)
    if(/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(selected)){
     const sources=allEntries(state).filter(([p])=>/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(p)).map(([p])=>join(base,p))
-    if(sources.length<=128){
+    if(sources.length<=512){
      try{
       const file=join(base,selected)
       const answer=await codeAstCall('code_ast_definition',{file,line:args.line,column:args.column,

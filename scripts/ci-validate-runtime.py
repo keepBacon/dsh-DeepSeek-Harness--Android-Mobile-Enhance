@@ -43,6 +43,7 @@ REQUIRED = (
  'usr/libexec/dsh-mobile/dsh-lua-case.mjs',
  'usr/libexec/dsh-mobile/dsh-lua-analysis-core.mjs',
  'usr/libexec/dsh-mobile/dsh-luau-runner.mjs',
+ 'usr/lib/dsh-dev-tools/node_modules/pyright/langserver.index.js',
  'usr/lib/dsh-dev-tools/node_modules/luau-web/src/index.js',
  'usr/lib/dsh-dev-tools/node_modules/luau-web/src/lib/Luau.Web.Asyncify.js',
  'usr/lib/dsh-dev-tools/node_modules/luau-web/src/lib/Luau.Web.JSPI.js',
