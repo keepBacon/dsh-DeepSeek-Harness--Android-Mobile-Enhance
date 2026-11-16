@@ -10,6 +10,8 @@ on:
       - 'scripts/ci_fix_web_fetch_limits.py'
       - 'scripts/ci_modsearch_recovery.py'
       - 'scripts/dsh-mobile-toolbox-mcp.mjs'
+      - 'scripts/dsh-inspector-tools.mjs'
+      - 'scripts/test-dsh-inspector-tools.mjs'
       - 'scripts/dsh-bounded-spawn.mjs'
       - 'scripts/dsh-android-exec.sh'
       - 'scripts/dsh-android-bash-env.sh'

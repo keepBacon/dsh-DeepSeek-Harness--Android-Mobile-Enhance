@@ -45,6 +45,7 @@ import android.util.Base64
 class MainActivity : ComponentActivity() {
 
   private lateinit var webView: WebView
+  private val webViewInspector by lazy { WebViewInspector(this, webView, ::isEngineSource) }
   private lateinit var guideView: LinearLayout
   /** 目录选择桥鉴权 token（每次进程启动随机；引擎 env + JS 桥同源持有）。 */
   private val pickToken: String by lazy { ShellState.pickToken(this) }
@@ -320,6 +321,7 @@ class MainActivity : ComponentActivity() {
     root.addView(guideView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     setContentView(root)
     configureWebView()
+    webViewInspector.start()
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
         handleBackPressed()
@@ -351,6 +353,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onDestroy() {
     if (databaseWriterDelegate.isInitialized()) databaseWriter.close()
+    webViewInspector.stop()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
     try {
@@ -595,6 +598,7 @@ class MainActivity : ComponentActivity() {
       }
 
       override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage): Boolean {
+        webViewInspector.recordConsole(consoleMessage)
         Log.d(
           "dsh-web",
           "${consoleMessage.messageLevel()}: ${consoleMessage.message()} " +
