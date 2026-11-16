@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process'
 import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
 import { boundedSpawn } from './dsh-bounded-spawn.mjs'
 import { devTaskTools, devTaskCall, isDevTaskTool } from './dsh-dev-tasks.mjs'
+import { devRun } from './dsh-dev-process.mjs'
 import { readWebPage, readPageTool } from './dsh-web-page-reader.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
@@ -138,8 +139,7 @@ async function runProcess(command,args=[],opts={}){
  const timeoutMs=int(opts.timeoutMs,10000,100,60000)
  const maxOutput=int(opts.maxOutputBytes,MAX_OUTPUT,1024,MAX_COMMAND_OUTPUT)
  const env=opts.env||process.env
- const launch=androidToolLaunch(bin,argv,env)
- return boundedSpawn(launch.command,launch.args,{cwd,env,timeoutMs,maxOutputBytes:maxOutput})
+ return devRun(bin,argv,{cwd,env,timeoutMs,maxOutputBytes:maxOutput})
 }
 async function runStrict(bin,args,opts={}){const r=await runProcess(bin,args,opts);if(r.timedOut)throw new Error(bin+' timed out');if(r.exitCode!==0)throw new Error(bin+' failed ('+r.exitCode+'): '+(r.stderr||r.stdout||'unknown error').slice(0,MAX_OUTPUT));return(r.stdout+(r.stderr?'\n[stderr]\n'+r.stderr:'')).trim()}
 
