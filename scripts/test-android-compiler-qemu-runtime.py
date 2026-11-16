@@ -53,7 +53,7 @@ class DeveloperRuntimeContract(unittest.TestCase):
             native=root/"usr/share/lua-language-server/bin/lua-language-server"
             native.parent.mkdir(parents=True)
             header=bytearray(20)
-            header[:4]=b"\\x7fELF"
+            header[:4]=b"\x7fELF"
             header[18:20]=(183).to_bytes(2,"little")
             native.write_bytes(header)
             module.install_lua_language_server_launcher(root)
