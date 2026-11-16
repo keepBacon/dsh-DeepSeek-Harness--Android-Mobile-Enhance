@@ -22,6 +22,15 @@ try{
   language:'cpp',action:'definition',timeoutMs:3000})
  assert.equal(recovered.result.length,1)
  assert.equal(lspTools.length,2)
+ const bundled=join(root,'fake-pyright-langserver.js')
+ await writeFile(bundled,'// test-only Pyright entrypoint\n')
+ process.env.DSH_PYRIGHT_LANGSERVER_PATH=bundled
+ const detected=await lspCall('workspace_lsp_status',{})
+ const pyright=detected.backends.find(x=>x.backend==='pyright')
+ assert.equal(pyright.installed,true)
+ assert.equal(pyright.command,'node')
+ assert.equal(pyright.source,'bundled-pyright')
+ delete process.env.DSH_PYRIGHT_LANGSERVER_PATH
  const status=await lspCall('workspace_lsp_status',{})
  assert.ok(status.backends.some(x=>x.backend==='clangd'))
  await assert.rejects(lspCall('workspace_lsp_query',{root,file:join(tmpdir(),'outside.cpp'),action:'definition'}),/ENOENT|outside/i)
