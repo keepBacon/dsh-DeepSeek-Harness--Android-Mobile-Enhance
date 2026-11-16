@@ -14,6 +14,7 @@ import shutil
 import subprocess
 
 ABI_ROOTS = ("apt", "libc++")
+NATIVE_TOOL_PACKAGES = frozenset(("clang", "lld", "llvm", "make", "cmake", "ninja", "pkg-config", "qemu-user-x86-64"))
 ELF = b"\x7fELF"
 SYSTEM_SONAMES = {
     "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
@@ -21,7 +22,7 @@ SYSTEM_SONAMES = {
 }
 
 
-def apt_abi_packages(index, dependency_names):
+def apt_abi_packages(index, dependency_names, roots=ABI_ROOTS):
     closure = set()
     def visit(name):
         if name in closure:
@@ -33,7 +34,7 @@ def apt_abi_packages(index, dependency_names):
         for dep in dependency_names(",".join(
                 part for part in (record.get("Pre-Depends", ""), record.get("Depends", "")) if part), index):
             visit(dep)
-    for root in ABI_ROOTS:
+    for root in roots:
         visit(root)
     return closure
 
@@ -53,7 +54,8 @@ def should_replace_native(package, cohort, source, relative_path):
         return False
     if source.is_symlink():
         # SONAME/linker aliases must come from the same package as their ELF.
-        return relative_path.name.endswith(".so") or ".so." in relative_path.name
+        return (relative_path.name.endswith(".so") or ".so." in relative_path.name
+                or (package in NATIVE_TOOL_PACKAGES and parts[0] == "bin"))
     return is_elf(source)
 
 
