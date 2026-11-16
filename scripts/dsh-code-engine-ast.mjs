@@ -15,6 +15,7 @@ const location = {file:field,line:{type:'integer',minimum:1},column:{type:'integ
 const projects = {type:'array',items:field,minItems:1,maxItems:128}
 export const codeAstTools = [
  {name:'code_ast_symbols',description:'AST declaration outline for JS/TS using TypeScript parser. Returns name, kind, line, column and symbol start offsets.',inputSchema:obj({file:field,maxResults:{type:'integer',minimum:1,maximum:500},includeNested:{type:'boolean'}},['file'])},
+ {name:'code_ast_definition',description:'Resolve a JS/TS symbol to its definition(s) using the bundled TypeScript language service, with precise positions.',inputSchema:obj({...location,projectFiles:projects,maxResults:{type:'integer',minimum:1,maximum:500}},['file','line','column'])},
  {name:'code_ast_references',description:'Find same-symbol references using TypeScript language service, not text matches. Supply projectFiles for cross-file analysis.',inputSchema:obj({...location,projectFiles:projects,maxResults:{type:'integer',minimum:1,maximum:500}},['file','line','column'])},
  {name:'code_ast_rename',description:'Scope-aware JS/TS rename via TypeScript Language Service. Uses Code Engine multi-file transactional edits with dry run and stale hash detection.',inputSchema:obj({...location,newName:field,projectFiles:projects,dryRun:{type:'boolean'},maxFiles:{type:'integer',minimum:1,maximum:128}},['file','line','column','newName'])},
  {name:'code_ast_prepare_rename',description:'Check whether a selected JS/TS symbol can be renamed and report its actual semantic reference locations without editing.',inputSchema:obj({...location,projectFiles:projects,maxResults:{type:'integer',minimum:1,maximum:500}},['file','line','column'])},
@@ -173,6 +174,15 @@ async function references(args){
   return {strategy:'typescript-language-service',path:ls.file,locations:summarizeReferences(ls,places,limit),total:places.length,truncated:places.length>limit}
  }finally{ls.service.dispose()}
 }
+async function definition(args){
+ const ls=await languageService(args)
+ try{
+  const found=ls.service.getDefinitionAtPosition(ls.file,ls.position)||[]
+  const limit=Math.min(500,Math.max(1,args.maxResults||100))
+  return {strategy:'typescript-language-service',precision:'semantic',file:ls.file,
+   definitions:summarizeReferences(ls,found,limit),total:found.length,truncated:found.length>limit}
+ }finally{ls.service.dispose()}
+}
 async function prepareRename(args){
  const ls=await languageService(args)
  try{
@@ -269,6 +279,7 @@ async function rename(args){
 export async function codeAstCall(name,args={}){
  switch(name){
   case 'code_ast_symbols':return symbols(args)
+  case 'code_ast_definition':return definition(args)
   case 'code_ast_references':return references(args)
   case 'code_ast_rename':return rename(args)
   case 'code_ast_prepare_rename':return prepareRename(args)

@@ -8,6 +8,7 @@ from this Git revision. Never executes an Android ELF on the Linux runner.
 import argparse
 import base64
 import gzip
+import http.client
 import hashlib
 import json
 import os
@@ -17,12 +18,14 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 import tarfile
 import tempfile
 from ci_fix_web_fetch_limits import patch as patch_web_fetch_limits
 from ci_modsearch_recovery import stage_modsearch
 from ci_termux_abi import apt_abi_packages, should_replace_native, overlay_one, validate_apt_abi, NATIVE_TOOL_PACKAGES
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 REPOS = {
     "main": "https://packages-cf.termux.dev/apt/termux-main",
@@ -57,6 +60,9 @@ TOOL_COMMANDS = (
 SCRIPT_MAP = {
     "dsh-mobile-toolbox-mcp.mjs": "toolbox-mcp.mjs",
     "dsh-inspector-tools.mjs": "dsh-inspector-tools.mjs",
+    "dsh-project-language.mjs": "dsh-project-language.mjs",
+    "dsh-project-index.mjs": "dsh-project-index.mjs",
+    "dsh-workspace-lsp.mjs": "dsh-workspace-lsp.mjs",
     "dsh-web-page-reader.mjs": "dsh-web-page-reader.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
     "dsh-android-tool-spawn.mjs": "dsh-android-tool-spawn.mjs",
@@ -79,9 +85,24 @@ SCRIPT_MAP = {
 }
 
 def get(url):
+    # Termux mirrors occasionally close a large .deb response mid-stream.
+    # Re-download from byte zero and let the caller verify the full SHA256;
+    # never continue from partial bytes or ignore a mismatch.
     req = Request(url, headers={"User-Agent": "DSH-GitHub-Actions-native-assembler/1"})
-    with urlopen(req, timeout=150) as result:
-        return result.read()
+    for attempt in range(4):
+        try:
+            with urlopen(req, timeout=150) as result:
+                return result.read()
+        except (HTTPError, URLError, http.client.IncompleteRead, TimeoutError,
+                ConnectionError, OSError) as error:
+            if isinstance(error, HTTPError) and 400 <= error.code < 500 and error.code != 429:
+                raise
+            if attempt == 3:
+                raise
+            delay = min(6.0, 0.75 * (2 ** attempt))
+            print("[native] transient repository download failure, retry",
+                  attempt + 1, "of 4:", type(error).__name__, file=sys.stderr)
+            time.sleep(delay)
 
 def check_relative(name):
     while name.startswith("./"):

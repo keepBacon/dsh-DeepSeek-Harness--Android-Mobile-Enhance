@@ -65,7 +65,7 @@ async function test(kind,dir){
     assert.equal(names.length,new Set(names).size,'duplicate tool names');
     assert.ok(names.length>=(kind==='mobile'?100:50),'tool registry incomplete: '+names.length);
     if(kind==='mobile'){
-      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start','read_page','modsearch_health','apt_doctor']){
+      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start','read_page','modsearch_health','apt_doctor','workspace_index','workspace_symbols','workspace_references','workspace_definition','workspace_dependencies','workspace_impact','workspace_diagnostics','workspace_lsp_status']){
         assert.ok(names.includes(tool),'missing mobile MCP tool: '+tool);
       }
     }else{
@@ -118,6 +118,15 @@ async function test(kind,dir){
       const http=await call('protocol_parse_http',{message:'POST /mcp HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n'+httpBody});
       assert.equal(http.bodyBytes,Buffer.byteLength(httpBody));
       assert.equal(http.bodyPreview,httpBody);
+      const project=join(dir,'project')
+      await mkdir(project)
+      await writeFile(join(project,'index.ts'),'export function plus() { return 1 }\n')
+      const index=await call('workspace_index',{root:project})
+      assert.equal(index.stats.total,1)
+      const symbols=await call('workspace_symbols',{root:project,query:'plus'})
+      assert.ok(symbols.results.some(x=>x.name==='plus'))
+      const lspStatus=await call('workspace_lsp_status',{})
+      assert.ok(lspStatus.backends.some(x=>x.backend==='clangd'))
       const context=await call('code_context',{path:file});
       assert.equal(context.sha256,createHash('sha256').update(text).digest('hex'));
       await call('fs_patch',{path:file,oldText:'中文',newText:'修复'});
