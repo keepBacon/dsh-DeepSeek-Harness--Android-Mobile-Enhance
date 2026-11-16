@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,readFile,readdir,rm,symlink,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {inspectorTools,inspectorCall} from './dsh-inspector-tools.mjs';
 const root=await mkdtemp(join(tmpdir(),'dsh-inspector-'));
+process.env.PREFIX=join(root,'usr');
+const {inspectorTools,inspectorCall}=await import('./dsh-inspector-tools.mjs');
 try {
  const project=join(root,'project');await mkdir(project);
  await writeFile(join(project,'a.js'),"import './b.js';\nexport const a=1;\n");
