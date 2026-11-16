@@ -23,7 +23,7 @@ The existing `code_ast_*` APIs remain available; `code_ast_definition` now expos
 
 ### Supported languages and precision
 
-- **JavaScript / TypeScript:** real syntax parsing via bundled TypeScript compiler; TypeScript Language Service provides precise definition and cross-file references for **up to 128 supplied JS/TS source files**. Larger projects still have indexed static declarations, but exact references need an expanded/persistent language service in a later iteration.
+- **JavaScript / TypeScript:** real syntax parsing via bundled TypeScript compiler; TypeScript Language Service provides precise definition and cross-file references for **up to 512 supplied JS/TS source files (32 MiB source budget)**. Larger projects still have indexed static declarations, but exact references need an expanded/persistent language service in a later iteration.
 - **C/C++, Python, Java, Kotlin, Lua/Luau:** bounded syntax-shaped heuristics for declarations, imports and lexical reference candidates. A real language server can provide semantic navigation **only when installed and responsive**. LSP is not silently emulated by regex.
 - **Shell:** bounded function/source discovery only, with heuristic confidence labels.
 
@@ -62,4 +62,11 @@ Build and MCP-wire integration are also verified by GitHub Actions.
 
 ## Remaining semantic gaps
 
-This implementation creates the P1 project-index and LSP **infrastructure**. It does not guarantee bundled Python/Kotlin/Java/Lua language servers, complete multi-language semantic indexing, persistent LSP server sessions or true full-project JS/TS semantic resolution beyond 128 files. It would be inaccurate to describe those as implemented or verified on Android.
+This implementation creates the P1 project-index and LSP **infrastructure**. Pyright is now bundled for Python; it does not guarantee bundled Kotlin/Java/Lua language servers, complete multi-language semantic indexing, persistent LSP server sessions or true full-project JS/TS semantic resolution beyond 512 files. It would be inaccurate to describe those as implemented or verified on Android.
+
+
+## Follow-up improvements
+
+- The Android runtime now packages pinned Pyright 1.1.414 as a pure JavaScript language server, launched with the embedded Node executable. Availability is reported through `workspace_lsp_status` and functionality must be verified on-device.
+- TypeScript semantic navigation supports up to 512 source files and an explicit 32 MiB source budget. Projects exceeding either limit require a narrower scope; static queries still work.
+- Real-device acceptance: run `workspace_lsp_query` on a Python file to verify definitions/references after APK installation; static packaging checks alone do not prove runtime readiness.
