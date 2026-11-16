@@ -104,7 +104,20 @@ function lineBased(path,text){
   const comment=trimmed.startsWith('//')||(trimmed.startsWith('#')&&!includeDirective)||trimmed.startsWith('--')||trimmed.startsWith('*')
   if(!comment){
    let m
-   if(language==='Python'){
+   if(language==='JavaScript'||language==='TypeScript'){
+    if((m=/\b(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/.exec(line)))
+     symbol(m[1],'function',number,line.indexOf(m[1],m.index)+1)
+    if((m=/\b(?:export\s+)?(?:default\s+)?class\s+([A-Za-z_$][\w$]*)\b/.exec(line)))
+     symbol(m[1],'class',number,line.indexOf(m[1],m.index)+1)
+    if((m=/\b(?:interface|type|enum)\s+([A-Za-z_$][\w$]*)\b/.exec(line)))
+     symbol(m[1],'type',number,line.indexOf(m[1],m.index)+1)
+    if((m=/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\b/.exec(line)))
+     symbol(m[1],'variable',number,line.indexOf(m[1],m.index)+1)
+    if((m=/\b(?:import|export)\s+[^;]*?\bfrom\s*['"]([^'"]+)['"]/.exec(line))||
+       (m=/\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]/.exec(line))||
+       (m=/\bimport\s*['"]([^'"]+)['"]/.exec(line)))
+     dep(m[1],'import',number,line.indexOf(m[1])+1)
+   }else if(language==='Python'){
     if((m=/^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/.exec(line)))symbol(m[1],'function',number,line.indexOf(m[1])+1)
     else if((m=/^\s*class\s+([A-Za-z_]\w*)\b/.exec(line)))symbol(m[1],'class',number,line.indexOf(m[1])+1)
     if((m=/^\s*(?:from\s+([.\w]+)\s+import|import\s+([.\w]+))/.exec(line)))dep(m[1]||m[2], 'python-import',number,line.indexOf(m[1]||m[2])+1)
