@@ -369,6 +369,7 @@ def install_lua_language_server_launcher(stage):
         launcher.unlink()
     elif launcher.exists() and not launcher.is_file():
         raise ValueError("invalid Lua language-server launcher")
+    launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_text("""#!/system/bin/sh
 set -eu
 prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
