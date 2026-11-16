@@ -129,6 +129,7 @@ async function indexUnlocked(base,opts={}){
   if(prior&&prior.fingerprint===fingerprint){
    files[entry.relative]=prior
    refsCount+=prior.refs.length;symbolCount+=prior.symbols.length;importCount+=prior.imports.length
+   if(prior.parsingTruncated)indexBudgetTruncated=true
    reused++;continue
   }
   if(scannedBytes+st.size>MAX_TOTAL){scan.truncated=true;break}
@@ -140,19 +141,20 @@ async function indexUnlocked(base,opts={}){
    if(content.includes('\0')){scan.skipped++;continue}
   }catch(e){if(e.name==='TypeError'||e.code==='EACCES'){scan.skipped++;continue}throw e}
   const parsed=parseSource(entry.relative,content)
+  let parsingTruncated=false
   if(parsed.refs.length+refsCount>MAX_PROJECT_REFS){
-   parsed.refs=parsed.refs.slice(0,Math.max(0,MAX_PROJECT_REFS-refsCount));indexBudgetTruncated=true
+   parsed.refs=parsed.refs.slice(0,Math.max(0,MAX_PROJECT_REFS-refsCount));indexBudgetTruncated=true;parsingTruncated=true
   }
   if(parsed.symbols.length+symbolCount>MAX_PROJECT_SYMBOLS){
-   parsed.symbols=parsed.symbols.slice(0,Math.max(0,MAX_PROJECT_SYMBOLS-symbolCount));indexBudgetTruncated=true
+   parsed.symbols=parsed.symbols.slice(0,Math.max(0,MAX_PROJECT_SYMBOLS-symbolCount));indexBudgetTruncated=true;parsingTruncated=true
   }
   if(parsed.imports.length+importCount>MAX_PROJECT_IMPORTS){
-   parsed.imports=parsed.imports.slice(0,Math.max(0,MAX_PROJECT_IMPORTS-importCount));indexBudgetTruncated=true
+   parsed.imports=parsed.imports.slice(0,Math.max(0,MAX_PROJECT_IMPORTS-importCount));indexBudgetTruncated=true;parsingTruncated=true
   }
   refsCount+=parsed.refs.length;symbolCount+=parsed.symbols.length;importCount+=parsed.imports.length
   files[entry.relative]={fingerprint,sha256:sha(content),size:st.size,
    language:parsed.language,parser:parsed.parser,confidence:parsed.confidence,
-   symbols:parsed.symbols,refs:parsed.refs,imports:parsed.imports,
+   symbols:parsed.symbols,refs:parsed.refs,imports:parsed.imports,parsingTruncated,
    diagnostics:parsed.diagnostics,packageName:parsed.packageName}
   changed++
  }
