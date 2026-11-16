@@ -9,6 +9,7 @@ on:
       - 'scripts/test-ci-termux-abi.py'
       - 'scripts/test-android-git-gh-runtime.py'
       - 'scripts/test-android-search-tools.py'
+      - 'scripts/test-android-compiler-qemu-runtime.py'
       - 'scripts/ci_fix_web_fetch_limits.py'
       - 'scripts/ci_modsearch_recovery.py'
       - 'scripts/dsh-mobile-toolbox-mcp.mjs'
@@ -71,6 +72,7 @@ jobs:
         run: |
           python3 scripts/validate-ci-mobile-esm-closure.py
           python3 scripts/test-ci-termux-abi.py
+          python3 scripts/test-android-compiler-qemu-runtime.py
       - name: Build Android ARM64 runtime on GitHub runner (no Termux)
         shell: bash
         env:
