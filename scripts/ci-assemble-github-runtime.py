@@ -59,6 +59,7 @@ SCRIPT_MAP = {
     "dsh-inspector-tools.mjs": "dsh-inspector-tools.mjs",
     "dsh-project-language.mjs": "dsh-project-language.mjs",
     "dsh-project-index.mjs": "dsh-project-index.mjs",
+    "dsh-workspace-lsp.mjs": "dsh-workspace-lsp.mjs",
     "dsh-web-page-reader.mjs": "dsh-web-page-reader.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
     "dsh-android-tool-spawn.mjs": "dsh-android-tool-spawn.mjs",
