@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { createHash } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { devRun } from './dsh-dev-process.mjs'
 import { TextDecoder } from 'node:util'
 import { codeCall } from './dsh-code-engine.mjs'
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
@@ -54,18 +54,7 @@ async function rename(a){
  return {...await codeCall('code_multi_edit',{edits,dryRun:a.dryRun===true}),mode:'lexical-js-ts',scopeAware:false,files}
 }
 async function run(command,args,cwd,timeoutMs=15000,maxOutputBytes=131072){
- const started=Date.now()
- return new Promise(done=>{
-  let child,out='',err='',truncated=false,timedOut=false,spawnError=null,timer
-  const capture=(buf,kind)=>{const current=kind==='out'?out:err,room=maxOutputBytes-Buffer.byteLength(current);if(room<=0){truncated=true;return}const text=buf.subarray(0,room).toString('utf8');if(kind==='out')out+=text;else err+=text;if(buf.length>room)truncated=true}
-  try{
-   child=spawn(command,args,{cwd,stdio:['ignore','pipe','pipe'],shell:false})
-   timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL')},timeoutMs)
-   child.stdout.on('data',b=>capture(b,'out'));child.stderr.on('data',b=>capture(b,'err'))
-   child.on('error',e=>{spawnError=e.message})
-   child.on('close',(exitCode,signal)=>{clearTimeout(timer);done({command,args,exitCode,signal,ok:exitCode===0&&!timedOut&&!spawnError,timedOut,truncated,stdout:out,stderr:err,error:spawnError,durationMs:Date.now()-started})})
-  }catch(e){if(timer)clearTimeout(timer);done({command,args,ok:false,error:e.message,exitCode:null,durationMs:Date.now()-started})}
- })
+ return devRun(command,args,{cwd,timeoutMs,maxOutputBytes})
 }
 export async function codeV3Call(name,a={}){
  if(name==='code_rename_identifier')return rename(a)
