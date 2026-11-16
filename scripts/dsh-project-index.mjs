@@ -16,6 +16,7 @@ const VERSION=1, MAX_FILES=5000, MAX_SIZE=1024*1024, MAX_DEPTH=24, MAX_TOTAL=48*
 const IGNORED=new Set(['.git','node_modules','build','dist','target','.gradle','.idea','.cache','vendor',
  'coverage','.next','.venv','venv','__pycache__','.turbo','.yarn','.pnpm-store','out','bin','obj','.dsh'])
 const MAX_INDEX_BYTES=20*1024*1024
+const MAX_PROJECT_REFS=40000,MAX_PROJECT_SYMBOLS=20000,MAX_PROJECT_IMPORTS=8000
 const queues=new Map()
 const cacheMemory=new Map()
 const MAX_MEMORY_PROJECTS=3
@@ -68,7 +69,12 @@ async function load(root){
   cacheMemory.set(root,data)
   while(cacheMemory.size>MAX_MEMORY_PROJECTS)cacheMemory.delete(cacheMemory.keys().next().value)
   return data
- }catch(e){if(e.code==='ENOENT')return null;throw e}
+ }catch(e){
+  if(e.code==='ENOENT'||e instanceof SyntaxError||
+     /project index cache invalid|project index schema incompatible/.test(String(e.message||'')))
+   return null // Rebuild disposable index rather than block the project.
+  throw e
+ }
 }
 async function save(root,data){
  const dir=persistentRoot()
@@ -113,13 +119,18 @@ async function indexUnlocked(base,opts={}){
  const previous=opts.force?null:await load(base)
  const files={},scan=await discover(base,maxFiles)
  let changed=0,reused=0,removed=0,oversize=0,scannedBytes=0
+ let refsCount=0,symbolCount=0,importCount=0,indexBudgetTruncated=false
  for(const entry of scan.names){
   const st=await lstat(entry.path).catch(()=>null)
   if(!st||!st.isFile()){scan.skipped++;continue}
   if(st.size>MAX_SIZE){oversize++;continue}
   const fingerprint=[st.size,st.mtimeMs,st.ctimeMs,st.ino].join(':')
   const prior=previous?.files?.[entry.relative]
-  if(prior&&prior.fingerprint===fingerprint){files[entry.relative]=prior;reused++;continue}
+  if(prior&&prior.fingerprint===fingerprint){
+   files[entry.relative]=prior
+   refsCount+=prior.refs.length;symbolCount+=prior.symbols.length;importCount+=prior.imports.length
+   reused++;continue
+  }
   if(scannedBytes+st.size>MAX_TOTAL){scan.truncated=true;break}
   scannedBytes+=st.size
   let content
@@ -129,6 +140,16 @@ async function indexUnlocked(base,opts={}){
    if(content.includes('\0')){scan.skipped++;continue}
   }catch(e){if(e.name==='TypeError'||e.code==='EACCES'){scan.skipped++;continue}throw e}
   const parsed=parseSource(entry.relative,content)
+  if(parsed.refs.length+refsCount>MAX_PROJECT_REFS){
+   parsed.refs=parsed.refs.slice(0,Math.max(0,MAX_PROJECT_REFS-refsCount));indexBudgetTruncated=true
+  }
+  if(parsed.symbols.length+symbolCount>MAX_PROJECT_SYMBOLS){
+   parsed.symbols=parsed.symbols.slice(0,Math.max(0,MAX_PROJECT_SYMBOLS-symbolCount));indexBudgetTruncated=true
+  }
+  if(parsed.imports.length+importCount>MAX_PROJECT_IMPORTS){
+   parsed.imports=parsed.imports.slice(0,Math.max(0,MAX_PROJECT_IMPORTS-importCount));indexBudgetTruncated=true
+  }
+  refsCount+=parsed.refs.length;symbolCount+=parsed.symbols.length;importCount+=parsed.imports.length
   files[entry.relative]={fingerprint,sha256:sha(content),size:st.size,
    language:parsed.language,parser:parsed.parser,confidence:parsed.confidence,
    symbols:parsed.symbols,refs:parsed.refs,imports:parsed.imports,
@@ -138,9 +159,13 @@ async function indexUnlocked(base,opts={}){
  if(previous)removed=Object.keys(previous.files).filter(x=>!Object.hasOwn(files,x)).length
  const result={version:VERSION,root:base,updatedAt:new Date().toISOString(),files,
   stats:{total:Object.keys(files).length,changed,reused,removed,oversize,skipped:scan.skipped,
-   truncated:scan.truncated,scannedBytes,complete:!scan.truncated&&oversize===0}}
+   truncated:scan.truncated||indexBudgetTruncated,scannedBytes,
+   referenceCount:refsCount,symbolCount,importCount,
+   complete:!scan.truncated&&!indexBudgetTruncated&&oversize===0}}
  if(previous&&changed===0&&removed===0&&previous.stats.total===result.stats.total&&
-    previous.stats.truncated===result.stats.truncated&&previous.stats.oversize===oversize){
+    previous.stats.truncated===result.stats.truncated&&previous.stats.oversize===oversize&&
+    previous.stats.referenceCount===refsCount&&previous.stats.symbolCount===symbolCount&&
+    previous.stats.importCount===importCount){
   // Source fingerprints are unchanged. Do not rewrite 10+ MiB of index data
   // on every query, especially on Android flash-backed application storage.
   return {...previous,stats:result.stats}
