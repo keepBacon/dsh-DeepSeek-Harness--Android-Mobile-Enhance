@@ -10,6 +10,7 @@ import { homedir } from 'node:os'
 import { TextDecoder } from 'node:util'
 import { languageOf, parseSource } from './dsh-project-language.mjs'
 import { codeAstCall } from './dsh-code-engine-ast.mjs'
+import { lspCall } from './dsh-workspace-lsp.mjs'
 
 const VERSION=1, MAX_FILES=5000, MAX_SIZE=1024*1024, MAX_DEPTH=24, MAX_TOTAL=48*1024*1024
 const IGNORED=new Set(['.git','node_modules','build','dist','target','.gradle','.idea','.cache','vendor',
@@ -223,6 +224,18 @@ async function semanticRefs(state,base,args){
    total:response.total,truncated:response.truncated}
  }catch(error){return {strategy:'typescript-language-service-unavailable',reason:String(error.message||error),truncated:true}}
 }
+async function optionalLsp(base,args,action){
+ if(!args.file||!args.line||!args.column)return null
+ const selected=normalizeFile(args.file,base)
+ if(/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(selected))return null
+ try{
+  const answer=await lspCall('workspace_lsp_query',{root:base,file:join(base,selected),
+   action,line:args.line,column:args.column,timeoutMs:12000})
+  if(answer.available)return {strategy:'language-server',precision:'semantic',backend:answer.backend,
+   results:answer.result,truncated:answer.truncated}
+  return {strategy:'language-server-unavailable',reason:answer.reason,backend:answer.backend}
+ }catch(error){return {strategy:'language-server-error',reason:String(error.message||error).slice(0,300)}}
+}
 function referenceCandidates(state,name,limit){
  const found=[]
  for(const [file,row] of allEntries(state))for(const ref of row.refs){
@@ -294,9 +307,11 @@ export async function workspaceCall(name,args={}){
  if(name==='workspace_references'){
   const semantic=await semanticRefs(state,base,args)
   if(semantic?.strategy==='typescript-language-service')return summarize(state,semantic)
+  const lsp=await optionalLsp(base,args,'references')
+  if(lsp?.strategy==='language-server')return summarize(state,lsp)
   const candidates=referenceCandidates(state,args.name,bounded(args.limit,100,1,500))
   return summarize(state,{strategy:'lexical-candidates',precision:'heuristic',...candidates,
-   semanticAttempt:semantic||null})
+   semanticAttempt:semantic||lsp||null})
  }
  if(name==='workspace_definition'){
   if(args.file&&args.line&&args.column){
@@ -315,6 +330,8 @@ export async function workspaceCall(name,args={}){
     }
    }
   }
+  const lsp=await optionalLsp(base,args,'definition')
+  if(lsp?.strategy==='language-server')return summarize(state,lsp)
   const symbols=projectedEntries(state,{query:args.name,limit:500})
   const results=symbols.results.filter(x=>x.name===args.name).slice(0,bounded(args.limit,100,1,500))
   return summarize(state,{strategy:'declaration-candidates',precision:'heuristic',results,
