@@ -15,7 +15,8 @@ async function finished(id){
  throw Error('task failed to complete')
 }
 try{
- assert.equal(devTaskTools.length,4)
+ assert.equal(devTaskTools.length,5)
+ assert.ok(devTaskTools.some(x=>x.name==='dev_toolchain_smoke'))
  const job=await devTaskCall('dev_task_start',{command:process.execPath,args:['-e','console.log("JOB_OK")']})
  assert.match(job.id,/^dt-[a-f0-9]{24}$/)
  const done=await finished(job.id)
