@@ -299,6 +299,22 @@ export async function workspaceCall(name,args={}){
    semanticAttempt:semantic||null})
  }
  if(name==='workspace_definition'){
+  if(args.file&&args.line&&args.column){
+   const selected=normalizeFile(args.file,base)
+   if(/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(selected)){
+    const sources=allEntries(state).filter(([p])=>/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(p)).map(([p])=>join(base,p))
+    if(sources.length<=128){
+     try{
+      const file=join(base,selected)
+      const answer=await codeAstCall('code_ast_definition',{file,line:args.line,column:args.column,
+       projectFiles:sources.filter(x=>x!==file),maxResults:bounded(args.limit,100,1,500)})
+      return summarize(state,{strategy:'typescript-language-service',precision:'semantic',
+       results:answer.definitions.map(d=>({...d,file:normalizeFile(d.path,base)})),
+       total:answer.total,truncated:answer.truncated})
+     }catch(error){ /* Fall back to explicitly labeled declaration candidates. */ }
+    }
+   }
+  }
   const symbols=projectedEntries(state,{query:args.name,limit:500})
   const results=symbols.results.filter(x=>x.name===args.name).slice(0,bounded(args.limit,100,1,500))
   return summarize(state,{strategy:'declaration-candidates',precision:'heuristic',results,
