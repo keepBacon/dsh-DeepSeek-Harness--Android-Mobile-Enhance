@@ -9,6 +9,8 @@ REQUIRED = (
  'usr/bin/fzf-tmux', 'usr/share/fzf/key-bindings.bash',
  'usr/share/fzf/completion.bash',
  'usr/lib/libtermux-exec-ld-preload.so',
+ 'usr/lib/libc++_shared.so',
+ 'usr/bin/apt','usr/bin/apt-get','usr/bin/apt-cache','usr/bin/apt-config',
  'usr/lib/node_modules/@deepseek-ai/dsh/package.json',
  'usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
  'usr/libexec/dsh-mobile/android-sandbox-runner.sh',
