@@ -54,6 +54,21 @@ class AbiTest(unittest.TestCase):
             self.assertEqual(dest.read_bytes(), src.read_bytes())
             self.assertEqual(old.read_bytes(), b"do-not-touch")
 
+    def test_rebase_absolute_termux_symlink(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = root / "stage/usr/bin"
+            out.mkdir(parents=True)
+            target = out / "clang-21"
+            target.write_bytes(b"native-compiler")
+            src = root / "src"
+            src.symlink_to("/data/data/com.termux/files/usr/bin/clang-21")
+            dst = out / "clang"
+            self.assertTrue(overlay_one(src, dst, allow_replace=True))
+            self.assertTrue(dst.is_symlink())
+            self.assertEqual(dst.resolve(), target.resolve())
+            self.assertEqual(dst.read_bytes(), b"native-compiler")
+
     def test_overlay_preserves_non_native_seed(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
