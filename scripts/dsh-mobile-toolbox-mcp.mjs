@@ -10,6 +10,8 @@ import { inspectorTools, inspectorCall, isInspectorTool } from './dsh-inspector-
 import { spawn } from 'node:child_process'
 import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
 import { boundedSpawn } from './dsh-bounded-spawn.mjs'
+import { devTaskTools, devTaskCall, isDevTaskTool } from './dsh-dev-tasks.mjs'
+import { devRun } from './dsh-dev-process.mjs'
 import { readWebPage, readPageTool } from './dsh-web-page-reader.mjs'
 import { createRequire } from 'node:module'
 import { dirname, resolve, basename } from 'node:path'
@@ -30,7 +32,7 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
-const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,...inspectorTools,readPageTool,
+const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,...inspectorTools,...devTaskTools,readPageTool,
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and actual CLI wrappers (Bash, Python, curl, Git, rg). Reports per-command execution failures rather than only checking entrypoint existence. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -137,8 +139,7 @@ async function runProcess(command,args=[],opts={}){
  const timeoutMs=int(opts.timeoutMs,10000,100,60000)
  const maxOutput=int(opts.maxOutputBytes,MAX_OUTPUT,1024,MAX_COMMAND_OUTPUT)
  const env=opts.env||process.env
- const launch=androidToolLaunch(bin,argv,env)
- return boundedSpawn(launch.command,launch.args,{cwd,env,timeoutMs,maxOutputBytes:maxOutput})
+ return devRun(bin,argv,{cwd,env,timeoutMs,maxOutputBytes:maxOutput})
 }
 async function runStrict(bin,args,opts={}){const r=await runProcess(bin,args,opts);if(r.timedOut)throw new Error(bin+' timed out');if(r.exitCode!==0)throw new Error(bin+' failed ('+r.exitCode+'): '+(r.stderr||r.stdout||'unknown error').slice(0,MAX_OUTPUT));return(r.stdout+(r.stderr?'\n[stderr]\n'+r.stderr:'')).trim()}
 
@@ -393,6 +394,7 @@ async function closeDebug(session){
 }
 
 async function call(name,a={}){
+ if(isDevTaskTool(name))return devTaskCall(name,a)
  if(isInspectorTool(name))return inspectorCall(name,a)
  if(name==='read_page')return await readWebPage(a)
  if(codeTools.some(x=>x.name===name))return codeCall(name,a)

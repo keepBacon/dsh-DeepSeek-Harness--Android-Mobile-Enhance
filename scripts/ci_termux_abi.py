@@ -14,6 +14,7 @@ import shutil
 import subprocess
 
 ABI_ROOTS = ("apt", "libc++")
+NATIVE_TOOL_PACKAGES = frozenset(("clang", "lld", "llvm", "make", "cmake", "ninja", "pkg-config", "qemu-user-x86-64"))
 ELF = b"\x7fELF"
 SYSTEM_SONAMES = {
     "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
@@ -21,7 +22,7 @@ SYSTEM_SONAMES = {
 }
 
 
-def apt_abi_packages(index, dependency_names):
+def apt_abi_packages(index, dependency_names, roots=ABI_ROOTS):
     closure = set()
     def visit(name):
         if name in closure:
@@ -33,7 +34,7 @@ def apt_abi_packages(index, dependency_names):
         for dep in dependency_names(",".join(
                 part for part in (record.get("Pre-Depends", ""), record.get("Depends", "")) if part), index):
             visit(dep)
-    for root in ABI_ROOTS:
+    for root in roots:
         visit(root)
     return closure
 
@@ -53,7 +54,8 @@ def should_replace_native(package, cohort, source, relative_path):
         return False
     if source.is_symlink():
         # SONAME/linker aliases must come from the same package as their ELF.
-        return relative_path.name.endswith(".so") or ".so." in relative_path.name
+        return (relative_path.name.endswith(".so") or ".so." in relative_path.name
+                or (package in NATIVE_TOOL_PACKAGES and parts[0] == "bin"))
     return is_elf(source)
 
 
@@ -67,7 +69,19 @@ def overlay_one(source, destination, allow_replace=False):
         destination.unlink()
     destination.parent.mkdir(parents=True, exist_ok=True)
     if source.is_symlink():
-        os.symlink(os.readlink(source), destination)
+        link = os.readlink(source)
+        legacy = "/data/data/com.termux/files/usr/"
+        if link.startswith(legacy):
+            # Translate a Termux-built absolute alias into a relative alias
+            # inside the bundled app-private usr tree. Never create a link to
+            # another Android app's /data/data prefix.
+            usr = next((p for p in (destination.parent, *destination.parents)
+                        if p.name == "usr"), None)
+            if usr is None:
+                raise ValueError("cannot rebase Termux symlink outside usr: " + str(destination))
+            target = usr / link[len(legacy):]
+            link = os.path.relpath(target, destination.parent)
+        os.symlink(link, destination)
     else:
         shutil.copy2(source, destination, follow_symlinks=False)
     return True

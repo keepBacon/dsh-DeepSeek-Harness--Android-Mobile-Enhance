@@ -16,7 +16,7 @@ try {
  await symlink(root,join(project,'loop'));
  const names=inspectorTools.map(x=>x.name);
  assert.equal(names.length,new Set(names).size,'unique MCP tools');
- for(const name of ['webview_inspect','runtime_doctor','apt_doctor','project_overview','project_dependency_graph','project_architecture_audit'])assert.ok(names.includes(name));
+ for(const name of ['webview_inspect','runtime_doctor','apt_doctor','dev_environment_doctor','project_overview','project_dependency_graph','project_architecture_audit'])assert.ok(names.includes(name));
  const overview=await inspectorCall('project_overview',{root:project});
  assert.equal(overview.totalFiles,4);
  assert.equal(overview.languages.JavaScript.files,2);
@@ -35,6 +35,11 @@ try {
  assert.equal(missingApt.healthy,false);
  assert.equal(missingApt.failures.length,5);
 
+ const dev=await inspectorCall('dev_environment_doctor',{probeCommands:false});
+ assert.equal(dev.readOnly,true);
+ assert.equal(dev.probes.length,0);
+ assert.ok(dev.files.some(f=>f.path==='bin/qemu-x86_64'));
+ assert.equal(typeof dev.capabilities.capNetRaw,'boolean');
  const runtime=await inspectorCall('runtime_doctor',{probeCommands:false,probeHost:false});
  assert.equal(runtime.commandChecks.length,0);
  assert.equal(runtime.host.skipped,true);

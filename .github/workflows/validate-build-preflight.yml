@@ -73,6 +73,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/dsh-code-ast" --no-save --ignore-scripts --no-audit --no-fund typescript@5.9.3 luau-web@1.5.1
           echo "DSH_LUAU_WEB_PATH=$RUNNER_TEMP/dsh-code-ast/node_modules/luau-web/src/index.js" >> "$GITHUB_ENV"
           echo "DSH_CODE_TYPESCRIPT_PATH=$RUNNER_TEMP/dsh-code-ast/node_modules/typescript/lib/typescript.js" >> "$GITHUB_ENV"
+          echo "DSH_CODE_TSC_PATH=$RUNNER_TEMP/dsh-code-ast/node_modules/typescript/lib/tsc.js" >> "$GITHUB_ENV"
 
       - name: JavaScript syntax
         shell: bash
@@ -107,9 +108,12 @@ jobs:
           python3 scripts/test-android-git-gh-runtime.py
           python3 scripts/test-ci-termux-abi.py
           python3 scripts/test-android-search-tools.py
+          python3 scripts/test-android-compiler-qemu-runtime.py
           node scripts/test-android-native-shell-diagnostic.mjs
           node --test scripts/test-lua-workflow.mjs
           node scripts/test-code-engine.mjs
+          node scripts/test-dsh-dev-process.mjs
+          node scripts/test-dsh-dev-tasks.mjs
           node scripts/test-code-engine-v3.mjs
           node scripts/test-code-engine-v4.mjs
           node scripts/test-code-engine-ast.mjs
@@ -143,6 +147,8 @@ jobs:
           cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
           cp scripts/dsh-android-tool-spawn.mjs "$stage/libexec/dsh-mobile/dsh-android-tool-spawn.mjs"
           cp scripts/dsh-bounded-spawn.mjs "$stage/libexec/dsh-mobile/dsh-bounded-spawn.mjs"
+          cp scripts/dsh-dev-process.mjs "$stage/libexec/dsh-mobile/dsh-dev-process.mjs"
+          cp scripts/dsh-dev-tasks.mjs "$stage/libexec/dsh-mobile/dsh-dev-tasks.mjs"
           cp scripts/dsh-code-engine*.mjs "$stage/libexec/dsh-mobile/"
           cp scripts/dsh-lua*.mjs "$stage/libexec/dsh-mobile/"
           npm install --prefix "$stage/lib/node_modules/@deepseek-ai/dsh" --no-save --ignore-scripts --no-audit --no-fund @modelcontextprotocol/sdk@1.25.3

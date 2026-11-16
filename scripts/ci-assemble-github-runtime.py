@@ -21,7 +21,7 @@ import tarfile
 import tempfile
 from ci_fix_web_fetch_limits import patch as patch_web_fetch_limits
 from ci_modsearch_recovery import stage_modsearch
-from ci_termux_abi import apt_abi_packages, should_replace_native, overlay_one, validate_apt_abi
+from ci_termux_abi import apt_abi_packages, should_replace_native, overlay_one, validate_apt_abi, NATIVE_TOOL_PACKAGES
 from urllib.request import Request, urlopen
 
 REPOS = {
@@ -41,11 +41,17 @@ TOOL_SEEDS = (
     "git", "gh", "openssh", "ca-certificates",
     # Search/navigation: keep the Termux ARM64 pcre2, findutils, ncurses deps.
     "ripgrep", "fd", "fzf",
+    # Real Termux/Android ARM64 C/C++ compiler and build/link toolchain.
+    "clang", "make", "cmake", "ninja", "lld", "llvm", "pkg-config",
+    # Linux x86_64 user-mode emulator, not a Windows DLL loader or KVM.
+    "qemu-user-x86-64",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
     "dig", "aapt2", "gzip", "git", "gh", "ssh",
     "rg", "fd", "fzf",
+    "clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config",
+    "qemu-x86_64",
 )
 
 SCRIPT_MAP = {
@@ -55,6 +61,8 @@ SCRIPT_MAP = {
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
     "dsh-android-tool-spawn.mjs": "dsh-android-tool-spawn.mjs",
     "dsh-bounded-spawn.mjs": "dsh-bounded-spawn.mjs",
+    "dsh-dev-process.mjs": "dsh-dev-process.mjs",
+    "dsh-dev-tasks.mjs": "dsh-dev-tasks.mjs",
     "dsh-code-engine.mjs": "dsh-code-engine.mjs",
     "dsh-code-engine-v3.mjs": "dsh-code-engine-v3.mjs",
     "dsh-code-engine-v4.mjs": "dsh-code-engine-v4.mjs",
@@ -165,7 +173,9 @@ def fetch_packages(stage, workspace):
         for name, value in index.items():
             if name not in packages:
                 packages[name] = (base, value)
-    abi_cohort = apt_abi_packages(packages, dependency_names)
+    # Refresh the full native ABI cohort for the newly bundled compiler and QEMU.
+    # Otherwise stale seed libLLVM / libclang / symlink aliases can mismatch current packages.
+    abi_cohort = apt_abi_packages(packages, dependency_names, roots=("apt", "libc++", *sorted(NATIVE_TOOL_PACKAGES)))
     needed = []
     done = set()
     def include(name):
@@ -206,6 +216,16 @@ def fetch_packages(stage, workspace):
             prefix = extracted / "usr"
         if not prefix.is_dir():
             raise ValueError("unrecognized Android package prefix " + name)
+        # The seed can contain a stale pip package and entrypoint. Refresh the
+        # exact package-owned Python-pip payload from the verified .deb, not
+        # arbitrary user-installed site-packages or HOME virtual environments.
+        if name == "python-pip":
+            for site in (stage / "usr/lib").glob("python*/site-packages"):
+                for old_info in site.glob("pip-*.dist-info"):
+                    if old_info.is_symlink():
+                        raise ValueError("unexpected symlink in staged pip metadata")
+                    if old_info.is_dir():
+                        shutil.rmtree(old_info)
         if name == "libc++":
             packaged_cpp = prefix / "lib/libc++_shared.so"
             if not packaged_cpp.is_file():
@@ -219,7 +239,7 @@ def fetch_packages(stage, workspace):
             for file in files:
                 src = parent / file
                 dst = outdir / file
-                replace_abi = should_replace_native(name, abi_cohort, src, rel / file)
+                replace_abi = should_replace_native(name, abi_cohort, src, rel / file) or name == "python-pip"
                 if overlay_one(src, dst, allow_replace=replace_abi) and replace_abi:
                     abi_replacements.append(str((rel / file).as_posix()))
             for folder in dirs[:]:
@@ -278,6 +298,17 @@ def fetch_packages(stage, workspace):
             header = stream.read(20)
         if len(header) < 20 or header[:4] != bytes((0x7f, 69, 76, 70)) or int.from_bytes(header[18:20], "little") != 183:
             raise ValueError("native ARM64 " + cmd + " is not an AArch64 ELF")
+    # Native compiler viability requires headers, C++ library and linkers;
+    # merely running clang --version is insufficient.
+    toolroot = stage / "usr"
+    for name in ("clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config", "qemu-x86_64"):
+        target = toolroot / "bin" / name
+        if not target.is_file():
+            raise ValueError("ARM64 compiler/build executable missing: " + name)
+    if not (toolroot / "include/stdio.h").is_file():
+        raise ValueError("C toolchain missing libc development headers (stdio.h)")
+    if not any((toolroot / "lib").glob("libclang*")) and not any((toolroot / "lib").glob("libLLVM*")):
+        raise ValueError("C toolchain missing Clang/LLVM shared libraries")
     # Search and interactive fuzzy-finder resources must be packaged together,
     # not reduced to three --version-capable ELF binaries.
     for cmd in ("rg", "fd", "fzf"):
@@ -323,6 +354,11 @@ def overlay_sources(stage, source):
         wrapper.chmod(0o755)
     wrappers = stage / "usr/libexec/dsh/wrappers"
     wrappers.mkdir(parents=True, exist_ok=True)
+    # gcc/g++ are compatibility aliases only: Termux uses LLVM/Clang.
+    for alias, target in (("cc", "clang"), ("c++", "clang++"), ("gcc", "clang"), ("g++", "clang++")):
+        executable = stage / "usr/bin" / alias
+        if not executable.exists() and not executable.is_symlink():
+            os.symlink(target, executable)
     # Every packaged CLI must resolve through the same SELinux-safe bridge.
     # The earlier 13-command-only list left nested Bash commands unwrapped.
     for command in sorted({path.name for path in (stage / "usr/bin").iterdir()

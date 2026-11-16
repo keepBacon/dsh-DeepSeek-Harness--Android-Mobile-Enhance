@@ -22,6 +22,11 @@ try{
  await assert.rejects(codeV3Call('code_rename_identifier',{paths:[a],from:'const',to:'renamed'}),/invalid identifier/)
  await assert.rejects(codeV3Call('code_rename_identifier',{paths:[a],from:'newName',to:'other',expectedSha256ByPath:{[a]:'0'.repeat(64)}}),/stale source hash/)
  await writeFile(bad,'const = ;\n')
+ if(process.env.DSH_CODE_TSC_PATH){
+  const typecheck=await codeV3Call('code_check',{paths:[b]})
+  assert.equal(typecheck.ok,true,'bundled TypeScript runner must work without global tsc')
+  assert.equal(typecheck.results[0].bridged,false)
+ }
  const check=await codeV3Call('code_check',{paths:[a,bad]})
  assert.equal(check.ok,false);assert.equal(check.results.length,2);assert.equal(check.results.find(x=>x.path===a).ok,true);assert.equal(check.results.find(x=>x.path===bad).ok,false)
  const command=await codeV3Call('code_test',{command:process.execPath,args:['-e','process.stdout.write("test-ok"); process.stderr.write("warn");']})
