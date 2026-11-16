@@ -41,11 +41,14 @@ TOOL_SEEDS = (
     "git", "gh", "openssh", "ca-certificates",
     # Search/navigation: keep the Termux ARM64 pcre2, findutils, ncurses deps.
     "ripgrep", "fd", "fzf",
+    # Real Termux/Android ARM64 C/C++ compiler and build/link toolchain.
+    "clang", "make", "cmake", "ninja", "lld", "llvm", "pkg-config",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
     "dig", "aapt2", "gzip", "git", "gh", "ssh",
     "rg", "fd", "fzf",
+    "clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config",
 )
 
 SCRIPT_MAP = {
@@ -278,6 +281,17 @@ def fetch_packages(stage, workspace):
             header = stream.read(20)
         if len(header) < 20 or header[:4] != bytes((0x7f, 69, 76, 70)) or int.from_bytes(header[18:20], "little") != 183:
             raise ValueError("native ARM64 " + cmd + " is not an AArch64 ELF")
+    # Native compiler viability requires headers, C++ library and linkers;
+    # merely running clang --version is insufficient.
+    toolroot = stage / "usr"
+    for name in ("clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config"):
+        target = toolroot / "bin" / name
+        if not target.is_file():
+            raise ValueError("ARM64 compiler/build executable missing: " + name)
+    if not (toolroot / "include/stdio.h").is_file():
+        raise ValueError("C toolchain missing libc development headers (stdio.h)")
+    if not any((toolroot / "lib").glob("libclang*")) and not any((toolroot / "lib").glob("libLLVM*")):
+        raise ValueError("C toolchain missing Clang/LLVM shared libraries")
     # Search and interactive fuzzy-finder resources must be packaged together,
     # not reduced to three --version-capable ELF binaries.
     for cmd in ("rg", "fd", "fzf"):
@@ -323,6 +337,11 @@ def overlay_sources(stage, source):
         wrapper.chmod(0o755)
     wrappers = stage / "usr/libexec/dsh/wrappers"
     wrappers.mkdir(parents=True, exist_ok=True)
+    # gcc/g++ are compatibility aliases only: Termux uses LLVM/Clang.
+    for alias, target in (("cc", "clang"), ("c++", "clang++"), ("gcc", "clang"), ("g++", "clang++")):
+        executable = stage / "usr/bin" / alias
+        if not executable.exists() and not executable.is_symlink():
+            os.symlink(target, executable)
     # Every packaged CLI must resolve through the same SELinux-safe bridge.
     # The earlier 13-command-only list left nested Bash commands unwrapped.
     for command in sorted({path.name for path in (stage / "usr/bin").iterdir()
