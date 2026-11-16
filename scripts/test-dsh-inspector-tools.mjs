@@ -30,6 +30,11 @@ try {
  assert.equal(apt.readOnly,true);
  assert.ok(apt.files.some(x=>x.path==='lib/libc++_shared.so'));
  assert.equal(apt.probes.length,0);
+ const missingApt=await inspectorCall('apt_doctor',{probeCommands:true});
+ assert.equal(missingApt.probes.length,5);
+ assert.equal(missingApt.healthy,false);
+ assert.equal(missingApt.failures.length,5);
+
  const runtime=await inspectorCall('runtime_doctor',{probeCommands:false,probeHost:false});
  assert.equal(runtime.commandChecks.length,0);
  assert.equal(runtime.host.skipped,true);
