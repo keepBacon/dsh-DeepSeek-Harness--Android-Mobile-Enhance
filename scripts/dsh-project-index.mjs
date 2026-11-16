@@ -17,6 +17,8 @@ const IGNORED=new Set(['.git','node_modules','build','dist','target','.gradle','
  'coverage','.next','.venv','venv','__pycache__','.turbo','.yarn','.pnpm-store','out','bin','obj','.dsh'])
 const MAX_INDEX_BYTES=20*1024*1024
 const queues=new Map()
+const cacheMemory=new Map()
+const MAX_MEMORY_PROJECTS=3
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
 const root={root:{type:'string',description:'Project directory; defaults to current MCP working directory.'}}
@@ -51,12 +53,20 @@ async function projectRoot(requested){
 }
 function cachePath(root){return join(persistentRoot(),sha(root)+'.json')}
 async function load(root){
+ if(cacheMemory.has(root)){
+  const cached=cacheMemory.get(root)
+  cacheMemory.delete(root)
+  cacheMemory.set(root,cached)
+  return cached
+ }
  try{
   const file=cachePath(root),metadata=await lstat(file)
   if(!metadata.isFile()||metadata.size>MAX_INDEX_BYTES)throw Error('project index cache invalid or too large')
   const data=JSON.parse(await readFile(file,'utf8'))
   if(data.version!==VERSION||data.root!==root||typeof data.files!=='object'||Array.isArray(data.files))
    throw Error('project index schema incompatible; reindex required')
+  cacheMemory.set(root,data)
+  while(cacheMemory.size>MAX_MEMORY_PROJECTS)cacheMemory.delete(cacheMemory.keys().next().value)
   return data
  }catch(e){if(e.code==='ENOENT')return null;throw e}
 }
@@ -69,6 +79,9 @@ async function save(root,data){
  try{
   await writeFile(tmp,payload,{mode:0o600,flag:'wx'})
   await rename(tmp,dest)
+  cacheMemory.delete(root)
+  cacheMemory.set(root,data)
+  while(cacheMemory.size>MAX_MEMORY_PROJECTS)cacheMemory.delete(cacheMemory.keys().next().value)
  }finally{await rm(tmp,{force:true}).catch(()=>{})}
 }
 async function discover(base,maxFiles){
@@ -126,6 +139,12 @@ async function indexUnlocked(base,opts={}){
  const result={version:VERSION,root:base,updatedAt:new Date().toISOString(),files,
   stats:{total:Object.keys(files).length,changed,reused,removed,oversize,skipped:scan.skipped,
    truncated:scan.truncated,scannedBytes,complete:!scan.truncated&&oversize===0}}
+ if(previous&&changed===0&&removed===0&&previous.stats.total===result.stats.total&&
+    previous.stats.truncated===result.stats.truncated&&previous.stats.oversize===oversize){
+  // Source fingerprints are unchanged. Do not rewrite 10+ MiB of index data
+  // on every query, especially on Android flash-backed application storage.
+  return {...previous,stats:result.stats}
+ }
  await save(base,result)
  return result
 }
