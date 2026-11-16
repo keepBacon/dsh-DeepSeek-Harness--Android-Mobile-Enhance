@@ -5,7 +5,7 @@ import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {codeAstTools,codeAstCall} from './dsh-code-engine-ast.mjs'
 
-assert.deepEqual(codeAstTools.map(x=>x.name),['code_ast_symbols','code_ast_references','code_ast_rename','code_ast_prepare_rename','code_ast_diagnostics','code_ast_project_symbols'])
+assert.deepEqual(codeAstTools.map(x=>x.name),['code_ast_symbols','code_ast_definition','code_ast_references','code_ast_rename','code_ast_prepare_rename','code_ast_diagnostics','code_ast_project_symbols'])
 const root=await mkdtemp(join(tmpdir(),'dsh-code-ast-'))
 try{
  await mkdir(join(root,'lib'))
@@ -31,6 +31,9 @@ try{
  assert.equal(declaration.line,2)
  assert.equal(symbols.strategy,'typescript-ast')
  const location={file:api,line:declaration.line,column:declaration.column,projectFiles:[entry,other]}
+ const definition=await codeAstCall('code_ast_definition',{file:entry,line:2,column:17,projectFiles:[api,other]})
+ assert.ok(definition.definitions.some(x=>x.path===api&&x.line===2))
+ assert.equal(definition.precision,'semantic')
  const refs=await codeAstCall('code_ast_references',location)
  assert.ok(refs.locations.some(x=>x.path===entry),'missing cross-file reference')
  assert.ok(!refs.locations.some(x=>x.path===other),'unrelated file shown as reference')
