@@ -107,6 +107,7 @@ jobs:
           python3 scripts/test-android-git-gh-runtime.py
           python3 scripts/test-ci-termux-abi.py
           python3 scripts/test-android-search-tools.py
+          python3 scripts/test-android-compiler-qemu-runtime.py
           node scripts/test-android-native-shell-diagnostic.mjs
           node --test scripts/test-lua-workflow.mjs
           node scripts/test-code-engine.mjs
