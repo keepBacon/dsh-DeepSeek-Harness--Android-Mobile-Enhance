@@ -33,7 +33,7 @@ internal class WebViewInspector(
     requests.mkdirs()
     responses.mkdirs()
     if (!alive.compareAndSet(false, true)) return
-    watcher = object : FileObserver(requests, MOVED_TO or CLOSE_WRITE) {
+    watcher = object : FileObserver(requests, FileObserver.MOVED_TO or FileObserver.CLOSE_WRITE) {
       override fun onEvent(event: Int, path: String?) {
         if (!alive.get() || path == null || !requestName.matches(path)) return
         Thread({ handle(File(requests, path), path) }, "dsh-inspector-request").start()
