@@ -55,7 +55,7 @@ TOOL_COMMANDS = (
     "dig", "aapt2", "gzip", "git", "gh", "ssh",
     "rg", "fd", "fzf",
     "clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config",
-    "qemu-x86_64",
+    "qemu-x86_64", "lua-language-server",
 )
 
 SCRIPT_MAP = {
