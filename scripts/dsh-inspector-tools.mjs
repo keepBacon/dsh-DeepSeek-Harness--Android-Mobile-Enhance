@@ -16,6 +16,7 @@ const MANIFEST=new Set(['package.json','build.gradle','build.gradle.kts','settin
 const rootProp={root:{type:'string',description:'Existing project root (default: MCP cwd).'}};
 export const inspectorTools=[
  {name:'webview_inspect',description:'Request a read-only DOM/layout/performance snapshot from the current trusted DSH Android WebView. Does not read text, field values, cookies, storage or tokens.',inputSchema:{type:'object',properties:{timeoutMs:{type:'integer',minimum:500,maximum:10000,default:5000}},additionalProperties:false}},
+ {name:'apt_doctor',description:'Read-only APT/dpkg/libc++ Android linker and prefix diagnostics. Does not install, update or modify packages.',inputSchema:{type:'object',properties:{probeCommands:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'runtime_doctor',description:'Read-only Android DSH native runtime diagnostic: command execution, ELF, missing entrypoints and Web Host TCP reachability.',inputSchema:{type:'object',properties:{probeCommands:{type:'boolean',default:true},probeHost:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'project_overview',description:'Bounded project inventory by languages, manifests and largest files; ignores symlinks and dependencies.',inputSchema:{type:'object',properties:{...rootProp},additionalProperties:false}},
  {name:'project_dependency_graph',description:'Bounded local import graph for JS/TS, relative Python, and package-qualified Kotlin/Java modules.',inputSchema:{type:'object',properties:{...rootProp,maxNodes:{type:'integer',minimum:10,maximum:250,default:100}},additionalProperties:false}},
@@ -56,6 +57,46 @@ function hostProbe(){
   socket.once('error',e=>finish(false,e.code||'tcp_error'));
   socket.setTimeout(1200,()=>finish(false,'timeout'));
  });
+}
+async function aptDoctor(args={}){
+ const targets=['bin/apt','bin/apt-get','bin/apt-cache','bin/apt-config','bin/dpkg','bin/dpkg-query','bin/pkg','lib/libc++_shared.so','libexec/dsh-mobile/android-exec.sh','libexec/dsh/wrappers/apt','libexec/dsh/wrappers/dpkg','etc/apt/sources.list','var/lib/dpkg/status'];
+ const files=[];
+ for(const item of targets){
+  const path=join(PREFIX,item);
+  try{
+   const st=await lstat(path);
+   const detail={path:item,kind:st.isSymbolicLink()?'symlink':st.isFile()?'file':st.isDirectory()?'directory':'other',bytes:st.size};
+   if(item==='lib/libc++_shared.so'){
+    const handle=await open(path,'r');
+    try{const hdr=Buffer.alloc(20);const {bytesRead}=await handle.read(hdr,0,hdr.length,0);detail.elfAarch64=bytesRead>=20&&hdr.subarray(0,4).equals(Buffer.from([127,69,76,70]))&&hdr.readUInt16LE(18)===183}finally{await handle.close()}
+   }
+   files.push(detail);
+  }catch(e){files.push({path:item,error:e.code||String(e)})}
+ }
+ const probes=[];
+ if(args.probeCommands!==false){
+  const jobs=[['apt',['--version']],['apt-get',['--version']],['apt-cache',['policy']],['dpkg-query',['--version']],['pkg',['list-installed']]];
+  for(const [command,argv] of jobs){
+   const binary=join(PREFIX,'bin',command);
+   try{
+    // The same Android linker bridge used by the DSH model shell.
+    const launch=androidToolLaunch(binary,argv,process.env);
+    const result=await boundedSpawn(launch.command,launch.args,{env:process.env,timeoutMs:3500,maxOutputBytes:2048});
+    const diagnostics=String(result.stderr||result.stdout||'').slice(0,2048);
+    const errorType=/cannot locate symbol|undefined symbol/i.test(diagnostics)?'missing_symbol':
+      /library .* not found|cannot locate .*\.so|CANNOT LINK EXECUTABLE/i.test(diagnostics)?'missing_library_or_linker':
+      /Permission denied|EACCES|exec format/i.test(diagnostics)?'execution_permission':
+      /No such file or directory|ENOENT/i.test(diagnostics)?'missing_path':null;
+    probes.push({command,arguments:argv,exitCode:result.exitCode,timedOut:!!result.timedOut,bridged:launch.bridged,
+      errorType,diagnostic:errorType?diagnostics.slice(0,480):diagnostics.split('\n')[0].slice(0,160)});
+   }catch(e){probes.push({command,error:String(e.code||e.message).slice(0,240)})}
+  }
+ }
+ const failures=probes.filter(x=>x.error||x.timedOut||x.exitCode!==0);
+ return {platform:process.platform,prefix:PREFIX,files,probes,healthy:failures.length===0&&files.every(x=>!x.error),
+  failures,readOnly:true,nextSteps:failures.length?
+  ['Compare the actual linker stderr and first missing SONAME/symbol; do not copy Android system libc++.','Check the signed Runtime identity and embedded APT/libc++ package cohort before attempting upgrades.']:
+  ['If installed on Android, apt update is a separate user-authorized network test; it was not executed here.']};
 }
 async function runtimeDoctor(args){
  const checks=[],commandChecks=[],issues=[];
@@ -175,6 +216,7 @@ export async function inspectorCall(name,args={}){
  if(!isInspectorTool(name))throw new Error('Unknown inspector tool');
  if(name==='webview_inspect')return webviewSnapshot(args.timeoutMs);
  if(name==='runtime_doctor')return runtimeDoctor(args);
+ if(name==='apt_doctor')return aptDoctor(args);
  const inv=await inventory(args.root);
  if(name==='project_overview')return overview(inv);
  const graph=await dependencyGraph(inv);
