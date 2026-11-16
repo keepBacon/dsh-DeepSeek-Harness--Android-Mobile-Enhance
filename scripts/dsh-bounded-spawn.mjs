@@ -78,13 +78,22 @@ export function boundedSpawn(command, args = [], opts = {}) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       const room = Math.max(0, outputCap - current.length)
       if (bytes.length > room) truncated = true
-      if (room > 0) {
-        const slice = bytes.subarray(0, room)
-        const next = Buffer.concat([current, slice])
+      if (opts.captureTail === true) {
+        // Build failures appear at the end of a long compiler log. Preserve
+        // the tail while bounding each stream's in-memory buffer.
+        const next = bytes.length >= outputCap
+          ? bytes.subarray(bytes.length - outputCap)
+          : Buffer.concat([current, bytes]).subarray(-outputCap)
+        if (part === 'stdout') stdout = next
+        else stderr = next
+      } else if (room > 0) {
+        const next = Buffer.concat([current, bytes.subarray(0, room)])
         if (part === 'stdout') stdout = next
         else stderr = next
       }
-      try { opts.onData?.(part, bytes.subarray(0, Math.max(0,room))) } catch {}
+      // Streaming observers always receive fresh bytes, even after the
+      // bounded captured buffer fills. They must enforce their own caps.
+      try { opts.onData?.(part, bytes) } catch {}
     }
     child.stdout?.on('data', chunk => capture('stdout', chunk))
     child.stderr?.on('data', chunk => capture('stderr', chunk))

@@ -29,8 +29,31 @@ try{
  const cancelled=await devTaskCall('dev_task_cancel',{id:sleep.id})
  assert.equal(cancelled.cancelled,true)
  assert.equal((await finished(sleep.id)).status,'cancelled')
+ // Build logs must be queryable while a long process is still running.
+ const streaming=await devTaskCall('dev_task_start',{command:process.execPath,
+   args:['-e','process.stdout.write("LIVE_START");setTimeout(()=>{console.log("LIVE_END")},700)']})
+ let observed=false
+ for(let attempt=0;attempt<45;attempt++){
+  const result=await devTaskCall('dev_task_status',{id:streaming.id})
+  if(result.stdout.includes('LIVE_START')&&result.status==='running'){observed=true;break}
+  await new Promise(resolve=>setTimeout(resolve,15))
+ }
+ assert.equal(observed,true,'stdout must be visible before process completion')
+ const streamed=await finished(streaming.id)
+ assert.equal(streamed.status,'passed')
+ assert.match(streamed.stdout,/LIVE_END/)
+ // The final compiler/linker diagnostic is at the *end* of a long output.
+ const noisy=await devTaskCall('dev_task_start',{command:process.execPath,
+   args:['-e','process.stdout.write("x".repeat(180000));process.stderr.write("FATAL_AT_END");process.exit(2)']})
+ const noisyDone=await finished(noisy.id)
+ assert.equal(noisyDone.status,'failed')
+ assert.equal(noisyDone.truncated,true)
+ assert.match(noisyDone.stderr,/FATAL_AT_END/)
+ assert.ok(Buffer.byteLength(noisyDone.stdout)<=131072)
  const list=await devTaskCall('dev_task_list',{})
  assert.ok(list.tasks.some(x=>x.id===job.id))
+ const ordered=[...list.tasks].sort((a,b)=>b.startedAt.localeCompare(a.startedAt)||b.id.localeCompare(a.id))
+ assert.deepEqual(list.tasks,ordered,'tasks must sort by timestamp, not random ID')
  await assert.rejects(devTaskCall('dev_task_status',{id:'../escape'}),/invalid task id/)
  console.log('[DSH] P0 durable development task start/status/cancel: OK')
 }finally{await rm(dir,{recursive:true,force:true})}

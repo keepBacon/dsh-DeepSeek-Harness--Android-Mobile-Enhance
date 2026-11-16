@@ -42,4 +42,20 @@ const clipped=await boundedSpawn(process.execPath,['-e','process.stdout.write("x
 assert.equal(clipped.exitCode,0)
 assert.equal(clipped.truncated,true)
 assert.equal(Buffer.byteLength(clipped.stdout),512)
+const events=[]
+const diagnostic=await boundedSpawn(process.execPath,['-e',
+ 'process.stdout.write("x".repeat(8192));process.stdout.write("FATAL_LAST_LINE")'],{
+ timeoutMs:1000,maxOutputBytes:512,captureTail:true,onData:(stream,bytes)=>events.push([stream,bytes.length])
+})
+assert.equal(diagnostic.exitCode,0)
+assert.equal(diagnostic.truncated,true)
+assert.ok(Buffer.byteLength(diagnostic.stdout)<=512)
+assert.match(diagnostic.stdout,/FATAL_LAST_LINE$/)
+assert.equal(events.reduce((n,[,size])=>n+size,0),8192+'FATAL_LAST_LINE'.length)
+const existingHead=await boundedSpawn(process.execPath,['-e',
+ 'process.stdout.write("BEGIN_HEAD"+"x".repeat(8192))'],{
+ timeoutMs:1000,maxOutputBytes:512
+})
+assert.match(existingHead.stdout,/^BEGIN_HEAD/)
+assert.equal(existingHead.truncated,true)
 console.log('[DSH] bounded MCP child lifecycle / timeout / orphaned pipe: OK')
