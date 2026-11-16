@@ -30,6 +30,27 @@ try {
  assert.equal(runtime.commandChecks.length,0);
  assert.equal(runtime.host.skipped,true);
  assert.ok(runtime.checks.length>=8);
+ // Simulate the native app replying to the private request directory.
+ const requestDir=join(root,'webview-inspector','requests'),responseDir=join(root,'webview-inspector','responses');
+ const nativeReply=(async()=>{
+   for(let attempt=0;attempt<120;attempt++){
+     const names=await readdir(requestDir).catch(()=>[]);
+     const filename=names.find(x=>/^req-[0-9a-f]{32}\.json$/.test(x));
+     if(filename){
+       const req=JSON.parse(await readFile(join(requestDir,filename),'utf8'));
+       assert.equal(req.operation,'snapshot');
+       await writeFile(join(responseDir,'res-'+req.id+'.json'),
+         JSON.stringify({id:req.id,ok:true,snapshot:{viewport:{width:420}}}));
+       return;
+     }
+     await new Promise(done=>setTimeout(done,20));
+   }
+   throw new Error('WebView request not delivered');
+ })();
+ const positive=await inspectorCall('webview_inspect',{timeoutMs:4000});
+ await nativeReply;
+ assert.equal(positive.available,true);
+ assert.equal(positive.viewport.width,420);
  // On desktop without a foreground WebView, this must fail cleanly instead of hanging.
  const snapshot=await inspectorCall('webview_inspect',{timeoutMs:500});
  assert.equal(snapshot.available,false);
