@@ -7,7 +7,7 @@ import { homedir, tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { devRun } from './dsh-dev-process.mjs'
 
-const MAX_RUNNING=2, MAX_RECORDED=100, MAX_LOG=128*1024
+const MAX_RUNNING=2, MAX_RECORDED=100, MAX_LOG=128*1024, PERSIST_INTERVAL_MS=350
 const active=new Map()
 const prefix=()=>process.env.DSH_DEV_TASK_DIR||join(process.env.HOME||homedir()||tmpdir(),'.dsh','dev-tasks')
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
@@ -31,8 +31,11 @@ async function persist(state){
  await rename(tmp,dest)
 }
 async function getState(id){
+ checkId(id)
+ const live=active.get(id)
+ if(live)return {...live.state}
  const state=JSON.parse(await readFile(filename(id),'utf8'))
- if(state.status==='running'&&!active.has(id)){
+ if(state.status==='running'){
   state.status='interrupted'
   state.finishedAt=new Date().toISOString()
   state.error='MCP service restarted; previous process outcome is unknown'
@@ -89,16 +92,42 @@ async function start(a){
  const id='dt-'+randomBytes(12).toString('hex')
  const cwd=resolve(a.cwd||process.cwd())
  const state={id,command:a.command,args:a.args||[],cwd,status:'running',startedAt:new Date().toISOString(),finishedAt:null,
-  timeoutMs:Math.max(100,Math.min(3600000,a.timeoutMs||300000)),stdout:'',stderr:'',exitCode:null,timedOut:false,cancelled:false}
+  timeoutMs:Math.max(100,Math.min(3600000,a.timeoutMs||300000)),stdout:'',stderr:'',exitCode:null,timedOut:false,cancelled:false,truncated:false}
  const controller=new AbortController()
+ // Write final/progress snapshots sequentially: a slower progress write
+ // must never overwrite the final result after cancellation/completion.
+ const record={controller,state,pending:Promise.resolve(),lastPersist:0}
+ const flush=()=>{
+  const snapshot=JSON.parse(JSON.stringify(state))
+  record.pending=record.pending.catch(()=>{}).then(()=>persist(snapshot))
+  return record.pending
+ }
+ const onData=(kind,chunk)=>{
+  if(!active.has(id))return
+  const data=Buffer.isBuffer(chunk)?chunk.toString('utf8'):String(chunk)
+  const current=kind==='stdout'?state.stdout:state.stderr
+  const next=capAppend(current,data)
+  if(Buffer.byteLength(current+data)>MAX_LOG)state.truncated=true
+  if(kind==='stdout')state.stdout=next
+  else state.stderr=next
+  const now=Date.now()
+  if(now-record.lastPersist>=PERSIST_INTERVAL_MS){
+   record.lastPersist=now
+   void flush().catch(()=>{})
+  }
+ }
  // Reserve slot before any asynchronous launch begins.
- active.set(id,{controller,state})
- try{await persist(state)}catch(e){active.delete(id);throw e}
+ active.set(id,record)
+ try{await flush()}catch(e){active.delete(id);throw e}
  const promise=(async()=>{
   try{
-   const result=await devRun(state.command,state.args,{cwd,timeoutMs:state.timeoutMs,maxOutputBytes:MAX_LOG,signal:controller.signal})
-   state.stdout=capAppend(state.stdout,result.stdout)
-   state.stderr=capAppend(state.stderr,result.stderr)
+   const result=await devRun(state.command,state.args,{cwd,timeoutMs:state.timeoutMs,maxOutputBytes:MAX_LOG,
+    captureTail:true,signal:controller.signal,onData})
+   // Streaming observers already captured the complete capped output. The
+   // final bounded result is a fallback if the runtime emitted no data event.
+   if(!state.stdout)state.stdout=result.stdout
+   if(!state.stderr)state.stderr=result.stderr
+   state.truncated=state.truncated||result.truncated
    state.status=result.cancelled?'cancelled':result.timedOut?'timed_out':result.ok?'passed':'failed'
    state.exitCode=result.exitCode
    state.timedOut=result.timedOut
@@ -113,7 +142,7 @@ async function start(a){
    // Persist final status before removing the in-memory running marker.
    // Otherwise concurrent status reads can misclassify a completed job
    // as "interrupted" during this short write window.
-   await persist(state).catch(()=>{})
+   await flush().catch(()=>{})
    active.delete(id)
   }
  })()
@@ -131,10 +160,11 @@ async function list(limit=20){
  const root=prefix()
  let names
  try{names=await readdir(root)}catch(e){if(e.code==='ENOENT')return {tasks:[]};throw e}
- const entries=names.filter(x=>/^dt-[a-f0-9]{24}\.json$/.test(x)).sort().reverse().slice(0,Math.max(1,Math.min(MAX_RECORDED,limit)))
+ const entries=names.filter(x=>/^dt-[a-f0-9]{24}\.json$/.test(x))
  const states=[]
  for(const item of entries){try{states.push(publicState(await getState(item.slice(0,-5))))}catch{}}
- return {tasks:states.map(s=>({id:s.id,command:s.command,cwd:s.cwd,status:s.status,startedAt:s.startedAt,finishedAt:s.finishedAt,exitCode:s.exitCode}))}
+ states.sort((a,b)=>String(b.startedAt||'').localeCompare(String(a.startedAt||''))||b.id.localeCompare(a.id))
+ return {tasks:states.slice(0,Math.max(1,Math.min(MAX_RECORDED,limit))).map(s=>({id:s.id,command:s.command,cwd:s.cwd,status:s.status,startedAt:s.startedAt,finishedAt:s.finishedAt,exitCode:s.exitCode}))}
 }
 export async function devTaskCall(name,args={}){
  switch(name){
