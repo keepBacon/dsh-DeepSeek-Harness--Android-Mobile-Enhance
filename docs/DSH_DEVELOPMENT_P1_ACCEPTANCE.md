@@ -70,3 +70,12 @@ This implementation creates the P1 project-index and LSP **infrastructure**. Pyr
 - The Android runtime now packages pinned Pyright 1.1.414 as a pure JavaScript language server, launched with the embedded Node executable. Availability is reported through `workspace_lsp_status` and functionality must be verified on-device.
 - TypeScript semantic navigation supports up to 512 source files and an explicit 32 MiB source budget. Projects exceeding either limit require a narrower scope; static queries still work.
 - Real-device acceptance: run `workspace_lsp_query` on a Python file to verify definitions/references after APK installation; static packaging checks alone do not prove runtime readiness.
+
+
+## P1 follow-up — large projects and bundled Lua LSP
+
+For workspaces containing more than 512 JS/TS source files, the workspace now selects up to 512 relevant indexed modules using the selected source, exact-name candidates, and forward/reverse static imports. **A result from this scoped analysis is not exhaustive**: `scope.exhaustive=false`, `scope.analyzedFiles`, `scope.indexedFiles` and `truncated=true` disclose its limits. Definitions/references are precise *within that selected scope*; absent or dynamic dependencies can still be missed.
+
+The Android runtime also includes the official Termux `lua-language-server` ARM64 package (with authenticated package index and dependency closure). Its original hardcoded Termux shell launcher is rewritten for DSH's current `TERMUX__PREFIX` and the Android system linker. The server's session metadata is kept in a temporary app-private directory and removed on exit. Luau constructs extending stock Lua require separate compatibility checks; no full Luau language-server semantics are claimed.
+
+After signed APK installation, call `workspace_lsp_status` and verify Lua backend detection. Query `workspace_lsp_query` for Lua symbol definitions and references on an actual Lua project, and test cancellation/timeouts before declaring it device-ready. Test a JS/TS project with at least 530 files for scoped navigation and inspect scope metadata.
