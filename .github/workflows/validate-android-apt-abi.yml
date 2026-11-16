@@ -1,0 +1,61 @@
+name: Validate DSH Android APT libc++ native ABI
+on:
+  pull_request:
+    paths:
+      - 'scripts/ci_termux_abi.py'
+      - 'scripts/ci-assemble-github-runtime.py'
+      - 'scripts/test-ci-termux-abi.py'
+      - '.github/workflows/validate-android-apt-abi.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-abi:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline ABI replacement unit tests
+        run: python3 scripts/test-ci-termux-abi.py
+      - name: Obtain signed legacy Android ARM64 Runtime seed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3 dpkg-dev binutils nodejs npm xz-utils unzip
+          mkdir -p "$RUNNER_TEMP/dsh-apt-seed" app/src/main/assets
+          gh release download "1" -R "$GITHUB_REPOSITORY" -p "Dsh.Mobile.Pro.V0.1.apk" -D "$RUNNER_TEMP/dsh-apt-seed"
+          unzip -p "$RUNNER_TEMP/dsh-apt-seed/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > "$RUNNER_TEMP/dsh-apt-seed/seed.tar.xz"
+      - name: Construct current ARM64 runtime with coherent native ABI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-assemble-github-runtime.py \
+            --repo . \
+            --seed "$RUNNER_TEMP/dsh-apt-seed/seed.tar.xz" \
+            --output app/src/main/assets/snapshot.tar.xz \
+            --audit runtime-build-audit.json
+          python3 scripts/ci-validate-runtime.py \
+            --snapshot app/src/main/assets/snapshot.tar.xz \
+            --lock scripts/dsh-release-family-lock.json \
+            --output runtime-audit.json
+          python3 - <<'PY'
+          import json
+          report=json.load(open("runtime-build-audit.json"))["aptAbi"]
+          assert report["refreshed_abi_files"]>=3, report
+          assert report["checked_elf"]>=6, report
+          assert report["apt_native_libraries"]>=1, report
+          print("[DSH] verified APT + libc++ shared-object cohort:", report)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-apt-libcxx-audit-${{ github.run_number }}
+          path: |
+            runtime-build-audit.json
+            runtime-audit.json
+          if-no-files-found: error
+          retention-days: 7
