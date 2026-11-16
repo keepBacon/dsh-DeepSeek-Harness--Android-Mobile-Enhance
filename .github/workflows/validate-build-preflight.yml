@@ -73,6 +73,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/dsh-code-ast" --no-save --ignore-scripts --no-audit --no-fund typescript@5.9.3 luau-web@1.5.1
           echo "DSH_LUAU_WEB_PATH=$RUNNER_TEMP/dsh-code-ast/node_modules/luau-web/src/index.js" >> "$GITHUB_ENV"
           echo "DSH_CODE_TYPESCRIPT_PATH=$RUNNER_TEMP/dsh-code-ast/node_modules/typescript/lib/typescript.js" >> "$GITHUB_ENV"
+          echo "DSH_CODE_TSC_PATH=$RUNNER_TEMP/dsh-code-ast/node_modules/typescript/lib/tsc.js" >> "$GITHUB_ENV"
 
       - name: JavaScript syntax
         shell: bash
