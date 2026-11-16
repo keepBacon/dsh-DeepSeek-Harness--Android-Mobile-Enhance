@@ -53,7 +53,7 @@ def should_replace_native(package, cohort, source, relative_path):
         return False
     if source.is_symlink():
         # SONAME/linker aliases must come from the same package as their ELF.
-        return source.name.endswith(".so") or ".so." in source.name
+        return relative_path.name.endswith(".so") or ".so." in relative_path.name
     return is_elf(source)
 
 
