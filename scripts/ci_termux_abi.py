@@ -69,7 +69,19 @@ def overlay_one(source, destination, allow_replace=False):
         destination.unlink()
     destination.parent.mkdir(parents=True, exist_ok=True)
     if source.is_symlink():
-        os.symlink(os.readlink(source), destination)
+        link = os.readlink(source)
+        legacy = "/data/data/com.termux/files/usr/"
+        if link.startswith(legacy):
+            # Translate a Termux-built absolute alias into a relative alias
+            # inside the bundled app-private usr tree. Never create a link to
+            # another Android app's /data/data prefix.
+            usr = next((p for p in (destination.parent, *destination.parents)
+                        if p.name == "usr"), None)
+            if usr is None:
+                raise ValueError("cannot rebase Termux symlink outside usr: " + str(destination))
+            target = usr / link[len(legacy):]
+            link = os.path.relpath(target, destination.parent)
+        os.symlink(link, destination)
     else:
         shutil.copy2(source, destination, follow_symlinks=False)
     return True
