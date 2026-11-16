@@ -214,6 +214,16 @@ def fetch_packages(stage, workspace):
             prefix = extracted / "usr"
         if not prefix.is_dir():
             raise ValueError("unrecognized Android package prefix " + name)
+        # The seed can contain a stale pip package and entrypoint. Refresh the
+        # exact package-owned Python-pip payload from the verified .deb, not
+        # arbitrary user-installed site-packages or HOME virtual environments.
+        if name == "python-pip":
+            for site in (stage / "usr/lib").glob("python*/site-packages"):
+                for old_info in site.glob("pip-*.dist-info"):
+                    if old_info.is_symlink():
+                        raise ValueError("unexpected symlink in staged pip metadata")
+                    if old_info.is_dir():
+                        shutil.rmtree(old_info)
         if name == "libc++":
             packaged_cpp = prefix / "lib/libc++_shared.so"
             if not packaged_cpp.is_file():
@@ -227,7 +237,7 @@ def fetch_packages(stage, workspace):
             for file in files:
                 src = parent / file
                 dst = outdir / file
-                replace_abi = should_replace_native(name, abi_cohort, src, rel / file)
+                replace_abi = should_replace_native(name, abi_cohort, src, rel / file) or name == "python-pip"
                 if overlay_one(src, dst, allow_replace=replace_abi) and replace_abi:
                     abi_replacements.append(str((rel / file).as_posix()))
             for folder in dirs[:]:
