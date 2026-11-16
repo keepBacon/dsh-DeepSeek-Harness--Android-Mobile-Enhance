@@ -40,6 +40,16 @@ class DeveloperRuntimeContract(unittest.TestCase):
         for command in ("clang","clang++","make","cmake","ninja","ld.lld","pkg-config","qemu-x86_64"):
             self.assertIn("'usr/bin/"+command+"'",archive)
 
+    def test_bundled_python_language_server(self):
+        builder=source("scripts/ci-assemble-github-runtime.py")
+        validator=source("scripts/ci-validate-runtime.py")
+        self.assertIn('"pyright@1.1.414"',builder)
+        self.assertIn('install_pyright(stage, workspace)',builder)
+        self.assertIn('usr/lib/dsh-dev-tools/node_modules/pyright/langserver.index.js',validator)
+        lsp=source("scripts/dsh-workspace-lsp.mjs")
+        self.assertIn("bundledPyright",lsp)
+        self.assertIn("'--stdio'",lsp)
+
     def test_android_noexec_bridge_and_capability_policy(self):
         bridge=source("scripts/dsh-android-exec.sh")
         self.assertIn("/system/bin/linker64",bridge)
