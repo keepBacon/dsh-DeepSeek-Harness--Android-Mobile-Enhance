@@ -16,7 +16,7 @@ try {
  await symlink(root,join(project,'loop'));
  const names=inspectorTools.map(x=>x.name);
  assert.equal(names.length,new Set(names).size,'unique MCP tools');
- for(const name of ['webview_inspect','runtime_doctor','project_overview','project_dependency_graph','project_architecture_audit'])assert.ok(names.includes(name));
+ for(const name of ['webview_inspect','runtime_doctor','apt_doctor','project_overview','project_dependency_graph','project_architecture_audit'])assert.ok(names.includes(name));
  const overview=await inspectorCall('project_overview',{root:project});
  assert.equal(overview.totalFiles,4);
  assert.equal(overview.languages.JavaScript.files,2);
@@ -26,6 +26,10 @@ try {
  const audit=await inspectorCall('project_architecture_audit',{root:project});
  assert.equal(audit.cycles.length,1);
  assert.ok(audit.unresolvedLocalImports.some(x=>x.reference==='./nope.js'));
+ const apt=await inspectorCall('apt_doctor',{probeCommands:false});
+ assert.equal(apt.readOnly,true);
+ assert.ok(apt.files.some(x=>x.path==='lib/libc++_shared.so'));
+ assert.equal(apt.probes.length,0);
  const runtime=await inspectorCall('runtime_doctor',{probeCommands:false,probeHost:false});
  assert.equal(runtime.commandChecks.length,0);
  assert.equal(runtime.host.skipped,true);
