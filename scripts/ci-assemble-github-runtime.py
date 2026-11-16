@@ -43,12 +43,15 @@ TOOL_SEEDS = (
     "ripgrep", "fd", "fzf",
     # Real Termux/Android ARM64 C/C++ compiler and build/link toolchain.
     "clang", "make", "cmake", "ninja", "lld", "llvm", "pkg-config",
+    # Linux x86_64 user-mode emulator, not a Windows DLL loader or KVM.
+    "qemu-user-x86-64",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
     "dig", "aapt2", "gzip", "git", "gh", "ssh",
     "rg", "fd", "fzf",
     "clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config",
+    "qemu-x86_64",
 )
 
 SCRIPT_MAP = {
@@ -284,7 +287,7 @@ def fetch_packages(stage, workspace):
     # Native compiler viability requires headers, C++ library and linkers;
     # merely running clang --version is insufficient.
     toolroot = stage / "usr"
-    for name in ("clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config"):
+    for name in ("clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config", "qemu-x86_64"):
         target = toolroot / "bin" / name
         if not target.is_file():
             raise ValueError("ARM64 compiler/build executable missing: " + name)
