@@ -4,6 +4,7 @@ on:
     paths:
       - 'scripts/ci_termux_abi.py'
       - 'scripts/ci-assemble-github-runtime.py'
+      - 'scripts/dsh-inspector-tools.mjs'
       - 'scripts/test-ci-termux-abi.py'
       - '.github/workflows/validate-android-apt-abi.yml'
   workflow_dispatch:
