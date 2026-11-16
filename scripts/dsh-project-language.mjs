@@ -100,7 +100,8 @@ function lineBased(path,text){
  for(let i=0;i<lines.length;i++){
   const line=lines[i],number=i+1
   const trimmed=line.trim()
-  const comment=trimmed.startsWith('//')||trimmed.startsWith('#')||trimmed.startsWith('--')||trimmed.startsWith('*')
+  const includeDirective=['C','C++','C/C++'].includes(language)&&/^\s*#\s*include\b/.test(line)
+  const comment=trimmed.startsWith('//')||(trimmed.startsWith('#')&&!includeDirective)||trimmed.startsWith('--')||trimmed.startsWith('*')
   if(!comment){
    let m
    if(language==='Python'){
