@@ -89,7 +89,7 @@ try{
  // A 512+ source workspace should still navigate within an explicit,
  // non-exhaustive semantic scope, never claim full-project precision.
  for(let i=145;i<530;i++)await writeFile(join(project,'large','f'+i+'.ts'),
-   'export const extra'+i+' = '+i+'\\n')
+   'export const extra'+i+' = '+i+'\n')
  const huge=await workspaceCall('workspace_index',{root:project})
  assert.ok(huge.stats.total>512)
  const scoped=await workspaceCall('workspace_references',{root:project,
