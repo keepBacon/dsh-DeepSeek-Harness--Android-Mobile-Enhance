@@ -69,7 +69,7 @@ async function devEnvironmentDoctor(args={}){
  let status={};
  try{
   const content=await readFile('/proc/self/status','utf8');
-  const match=content.match(/^CapEff:\\s*([a-fA-F0-9]+)\\s*$/m);
+  const match=content.match(/^CapEff:\s*([a-fA-F0-9]+)\s*$/m);
   if(match){const cap=BigInt('0x'+match[1]);status={capEff:match[1],capNetRaw:(cap&(1n<<13n))!==0n};}
   else status={available:false,reason:'CapEff missing in /proc/self/status'};
  }catch(e){status={available:false,reason:String(e.code||e.message)}}
