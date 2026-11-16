@@ -380,7 +380,7 @@ tmp="$prefix/tmp"
 workspace="$(/system/bin/mktemp -d "$tmp/dsh-lua-lsp.XXXXXX")" || exit 125
 trap '/system/bin/rm -rf "$workspace"' EXIT
 /system/bin/mkdir -p "$workspace/log" "$workspace/meta"
-exec /system/bin/linker64 "$program" --logpath="$workspace/log" --metapath="$workspace/meta" "$@"
+/system/bin/linker64 "$program" --logpath="$workspace/log" --metapath="$workspace/meta" "$@"
 """)
     launcher.chmod(0o700)
 
