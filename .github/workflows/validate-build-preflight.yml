@@ -105,6 +105,7 @@ jobs:
           node scripts/test-android-model-bash-bridge.mjs
           node scripts/test-android-model-shell-noexec-fix.mjs
           python3 scripts/test-android-git-gh-runtime.py
+          python3 scripts/test-ci-termux-abi.py
           python3 scripts/test-android-search-tools.py
           node scripts/test-android-native-shell-diagnostic.mjs
           node --test scripts/test-lua-workflow.mjs
