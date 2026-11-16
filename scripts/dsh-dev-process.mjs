@@ -73,7 +73,7 @@ export async function devRun(command,args=[],opts={}) {
  const result=await boundedSpawn(launch.command,launch.args,{
   cwd:launch.cwd,env:launch.env,timeoutMs:clamp(opts.timeoutMs,30000,100,3600000),
   maxOutputBytes:clamp(opts.maxOutputBytes,131072,1024,1048576),
-  signal:opts.signal,onData:opts.onData,killTree:true,
+  signal:opts.signal,onData:opts.onData,captureTail:opts.captureTail===true,killTree:true,
  })
  return {...result,requestedCommand:command,resolvedCommand:launch.resolvedCommand,bridged:launch.bridged,
   command:launch.command,args:launch.args,ok:result.exitCode===0&&!result.timedOut&&!result.cancelled}
