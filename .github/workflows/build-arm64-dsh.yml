@@ -16,6 +16,8 @@ on:
       - 'scripts/dsh-inspector-tools.mjs'
       - 'scripts/dsh-project-language.mjs'
       - 'scripts/dsh-project-index.mjs'
+      - 'scripts/dsh-workspace-lsp.mjs'
+      - 'scripts/test-dsh-workspace-lsp.mjs'
       - 'scripts/test-dsh-project-index.mjs'
       - 'scripts/test-dsh-inspector-tools.mjs'
       - 'scripts/dsh-bounded-spawn.mjs'
