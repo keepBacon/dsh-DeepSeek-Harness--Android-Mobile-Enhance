@@ -86,6 +86,25 @@ try{
    name:'uniqueLongProjectSymbol',file:'large/client.ts',line:2,column:20,limit:50})
  assert.equal(precise.precision,'semantic')
  assert.ok(precise.results.some(x=>x.file==='large/f0.ts'))
+ // A 512+ source workspace should still navigate within an explicit,
+ // non-exhaustive semantic scope, never claim full-project precision.
+ for(let i=145;i<530;i++)await writeFile(join(project,'large','f'+i+'.ts'),
+   'export const extra'+i+' = '+i+'\n')
+ const huge=await workspaceCall('workspace_index',{root:project})
+ assert.ok(huge.stats.total>512)
+ const scoped=await workspaceCall('workspace_references',{root:project,
+   name:'uniqueLongProjectSymbol',file:'large/client.ts',line:2,column:20,limit:50})
+ assert.equal(scoped.precision,'semantic')
+ assert.equal(scoped.scope.exhaustive,false)
+ assert.ok(scoped.scope.analyzedFiles<=512)
+ assert.ok(scoped.scope.indexedFiles>512)
+ assert.equal(scoped.truncated,true)
+ assert.ok(scoped.results.some(x=>x.file==='large/f0.ts'))
+ const scopedDef=await workspaceCall('workspace_definition',{root:project,
+   name:'uniqueLongProjectSymbol',file:'large/client.ts',line:2,column:20,limit:50})
+ assert.equal(scopedDef.precision,'semantic')
+ assert.equal(scopedDef.scope.exhaustive,false)
+ assert.ok(scopedDef.results.some(x=>x.file==='large/f0.ts'))
  assert.equal(workspaceTools.length,8)
  console.log('[DSH] P1 incremental multi-language workspace index, graph and impact: OK')
 }finally{await rm(home,{recursive:true,force:true})}

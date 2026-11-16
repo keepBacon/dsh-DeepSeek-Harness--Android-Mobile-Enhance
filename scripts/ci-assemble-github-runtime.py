@@ -48,13 +48,14 @@ TOOL_SEEDS = (
     "clang", "make", "cmake", "ninja", "lld", "llvm", "pkg-config",
     # Linux x86_64 user-mode emulator, not a Windows DLL loader or KVM.
     "qemu-user-x86-64",
+    "lua-language-server",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
     "dig", "aapt2", "gzip", "git", "gh", "ssh",
     "rg", "fd", "fzf",
     "clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config",
-    "qemu-x86_64",
+    "qemu-x86_64", "lua-language-server",
 )
 
 SCRIPT_MAP = {
@@ -260,7 +261,7 @@ def fetch_packages(stage, workspace):
             for file in files:
                 src = parent / file
                 dst = outdir / file
-                replace_abi = should_replace_native(name, abi_cohort, src, rel / file) or name == "python-pip"
+                replace_abi = should_replace_native(name, abi_cohort, src, rel / file) or name in ("python-pip", "lua-language-server")
                 if overlay_one(src, dst, allow_replace=replace_abi) and replace_abi:
                     abi_replacements.append(str((rel / file).as_posix()))
             for folder in dirs[:]:
@@ -348,6 +349,41 @@ def fetch_packages(stage, workspace):
         raise ValueError("fzf-tmux integration missing from ARM64 package")
     print("[native] verified", len(TOOL_COMMANDS), "critical tool executable paths and magic data")
     return manifest, abi_report
+
+def install_lua_language_server_launcher(stage):
+    """Rewrite the official Termux launcher for the DSH app-private prefix.
+
+    The .deb launcher embeds /data/data/com.termux and execs an app-private
+    ELF directly. Both assumptions are invalid for a non-root DSH Android UID.
+    """
+    root = stage / "usr"
+    program = root / "share/lua-language-server/bin/lua-language-server"
+    if not program.is_file() or program.is_symlink():
+        raise ValueError("Lua language-server native payload missing")
+    with program.open("rb") as inp:
+        header = inp.read(20)
+    if len(header) < 20 or header[:4] != bytes((127, 69, 76, 70)) or int.from_bytes(header[18:20], "little") != 183:
+        raise ValueError("Lua language-server is not AArch64 ELF")
+    launcher = root / "bin/lua-language-server"
+    if launcher.is_symlink():
+        launcher.unlink()
+    elif launcher.exists() and not launcher.is_file():
+        raise ValueError("invalid Lua language-server launcher")
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("""#!/system/bin/sh
+set -eu
+prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
+[ -n "$prefix" ] || { echo DSH_LUA_LSP_PREFIX_MISSING >&2; exit 125; }
+program="$prefix/share/lua-language-server/bin/lua-language-server"
+[ -f "$program" ] || { echo DSH_LUA_LSP_PAYLOAD_MISSING >&2; exit 127; }
+tmp="$prefix/tmp"
+/system/bin/mkdir -p "$tmp"
+workspace="$(/system/bin/mktemp -d "$tmp/dsh-lua-lsp.XXXXXX")" || exit 125
+trap '/system/bin/rm -rf "$workspace"' EXIT
+/system/bin/mkdir -p "$workspace/log" "$workspace/meta"
+/system/bin/linker64 "$program" --logpath="$workspace/log" --metapath="$workspace/meta" "$@"
+""")
+    launcher.chmod(0o700)
 
 def overlay_sources(stage, source):
     mobile = stage / "usr/libexec/dsh-mobile"
@@ -509,6 +545,7 @@ def main():
         stage.mkdir()
         unpack_seed(args.seed, stage)
         manifest, abi_report = fetch_packages(stage, workspace)
+        install_lua_language_server_launcher(stage)
         overlay_sources(stage, args.repo)
         # The GitHub native builder reuses an already-patched DSH seed.
         # Only update its PTY and sandbox launcher entrypoints. The seed's

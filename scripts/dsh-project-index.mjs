@@ -256,18 +256,65 @@ function projectedEntries(state,args){
  }
  return {results,truncated:false}
 }
+// For projects beyond the TypeScript LS capacity, choose a conservative,
+// deterministic subset from the static import graph and exact lexical-name
+// candidates. A scoped result is never reported as full-project exhaustive.
+function semanticScope(state,base,args){
+ const selected=normalizeFile(args.file,base)
+ const jsRe=/\.([cm]?js|[cm]?ts|jsx|tsx)$/
+ const all=allEntries(state).filter(([file])=>jsRe.test(file))
+ const available=new Set(all.map(([file])=>file))
+ if(!available.has(selected))return {files:[join(base,selected)],total:all.length,complete:false,
+  reason:'Selected file is not present in the complete project index'}
+ if(all.length<=512)return {files:all.map(([file])=>join(base,file)),total:all.length,complete:state.stats.complete,
+  reason:state.stats.complete?null:'Project index is incomplete'}
+ const ordered=[],seen=new Set(),queue=[]
+ function add(file){
+  if(!available.has(file)||seen.has(file)||ordered.length>=512)return false
+  seen.add(file);ordered.push(file);queue.push(file);return true
+ }
+ add(selected)
+ const graph=resolveImports(state)
+ const forward=new Map(),backward=new Map()
+ for(const edge of graph.edges){
+  if(!available.has(edge.from)||!available.has(edge.to))continue
+  if(!forward.has(edge.from))forward.set(edge.from,[])
+  if(!backward.has(edge.to))backward.set(edge.to,[])
+  forward.get(edge.from).push(edge.to)
+  backward.get(edge.to).push(edge.from)
+ }
+ // Prefer exact lexical occurrence matches before unrelated modules. Scope
+ // identity is not established by these candidates; TypeScript verifies it.
+ if(args.name){
+  for(const [file,row] of all)if(row.symbols.some(x=>x.name===args.name)||row.refs.some(x=>x.name===args.name))
+   add(file)
+ }
+ // Close the selected dependency neighbourhood within bounded size.
+ let cursor=0
+ while(cursor<queue.length && ordered.length<512){
+  const file=queue[cursor++]
+  for(const dep of forward.get(file)||[])add(dep)
+  for(const importer of backward.get(file)||[])add(importer)
+ }
+ // Preserve only relevant scope rather than silently filling with random
+ // unrelated files when the workspace contains thousands of modules.
+ return {files:ordered.map(file=>join(base,file)),total:all.length,complete:false,
+  reason:'Scoped analysis: project exceeds 512 JS/TS files; references outside dependency/lexical candidate scope may be missing',
+  graphComplete:graph.complete}
+}
 async function semanticRefs(state,base,args){
  if(args.semantic===false||!args.file||!args.line||!args.column)return null
  const selected=normalizeFile(args.file,base)
  if(!/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(selected))return null
- const sources=allEntries(state).filter(([p])=>/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(p)).map(([p])=>join(base,p))
- if(sources.length>512)return {strategy:'incomplete',reason:'TypeScript language service is bounded to 512 source files',truncated:true}
+ const scope=semanticScope(state,base,args)
+ const sources=scope.files
  try{
   const file=join(base,selected)
   const response=await codeAstCall('code_ast_references',{file,line:args.line,column:args.column,
    projectFiles:sources.filter(x=>x!==file),maxResults:bounded(args.limit,100,1,500)})
   return {strategy:'typescript-language-service',precision:'semantic',results:response.locations.map(x=>({...x,file:normalizeFile(x.path,base)})),
-   total:response.total,truncated:response.truncated}
+   total:response.total,truncated:response.truncated||!scope.complete,
+   scope:{analyzedFiles:sources.length,indexedFiles:scope.total,exhaustive:scope.complete,reason:scope.reason}}
  }catch(error){return {strategy:'typescript-language-service-unavailable',reason:String(error.message||error),truncated:true}}
 }
 async function optionalLsp(base,args,action){
@@ -363,7 +410,8 @@ export async function workspaceCall(name,args={}){
   if(args.file&&args.line&&args.column){
    const selected=normalizeFile(args.file,base)
    if(/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(selected)){
-    const sources=allEntries(state).filter(([p])=>/\.([cm]?js|[cm]?ts|jsx|tsx)$/.test(p)).map(([p])=>join(base,p))
+    const scope=semanticScope(state,base,args)
+    const sources=scope.files
     if(sources.length<=512){
      try{
       const file=join(base,selected)
@@ -371,7 +419,8 @@ export async function workspaceCall(name,args={}){
        projectFiles:sources.filter(x=>x!==file),maxResults:bounded(args.limit,100,1,500)})
       return summarize(state,{strategy:'typescript-language-service',precision:'semantic',
        results:answer.definitions.map(d=>({...d,file:normalizeFile(d.path,base)})),
-       total:answer.total,truncated:answer.truncated})
+       total:answer.total,truncated:answer.truncated||!scope.complete,
+       scope:{analyzedFiles:sources.length,indexedFiles:scope.total,exhaustive:scope.complete,reason:scope.reason}})
      }catch(error){ /* Fall back to explicitly labeled declaration candidates. */ }
     }
    }

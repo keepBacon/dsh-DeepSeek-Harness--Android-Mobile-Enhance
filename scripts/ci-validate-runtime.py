@@ -15,6 +15,7 @@ REQUIRED = (
  'usr/bin/ninja','usr/bin/ld.lld','usr/bin/pkg-config',
  'usr/bin/cc','usr/bin/c++','usr/bin/gcc','usr/bin/g++',
  'usr/bin/qemu-x86_64',
+ 'usr/bin/lua-language-server',
  'usr/lib/node_modules/@deepseek-ai/dsh/package.json',
  'usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
  'usr/libexec/dsh-mobile/android-sandbox-runner.sh',
