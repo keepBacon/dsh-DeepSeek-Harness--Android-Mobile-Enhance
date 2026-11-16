@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Compile/QEMU archive contracts independent of native-Android execution."""
+import ast
+import pathlib
+import unittest
+
+ROOT=pathlib.Path(__file__).resolve().parent.parent
+def source(name):
+    return (ROOT/name).read_text()
+
+class DeveloperRuntimeContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        tree=ast.parse(source("scripts/ci-assemble-github-runtime.py"))
+        cls.values={}
+        for stmt in tree.body:
+            if isinstance(stmt,ast.Assign):
+                for target in stmt.targets:
+                    if isinstance(target,ast.Name) and target.id in ("SEEDS","TOOL_SEEDS","TOOL_COMMANDS"):
+                        cls.values[target.id]=ast.literal_eval(stmt.value)
+
+    def test_native_packages(self):
+        for name in ("clang","make","cmake","ninja","lld","llvm","pkg-config","qemu-user-x86-64"):
+            self.assertIn(name,self.values["TOOL_SEEDS"])
+        self.assertIn("python-pip",self.values["SEEDS"])
+
+    def test_compiler_executables_and_emulator(self):
+        names=("clang","clang++","make","cmake","ninja","ld.lld","pkg-config","qemu-x86_64")
+        for name in names:
+            self.assertIn(name,self.values["TOOL_COMMANDS"])
+        self.assertIn("missing libc development headers",source("scripts/ci-assemble-github-runtime.py"))
+        self.assertIn("C toolchain missing Clang/LLVM",source("scripts/ci-assemble-github-runtime.py"))
+
+    def test_compatibility_aliases_and_runtime_health(self):
+        source_builder=source("scripts/ci-assemble-github-runtime.py")
+        archive=source("scripts/ci-validate-runtime.py")
+        for alias in ("cc","c++","gcc","g++"):
+            self.assertIn('("'+alias+'",',source_builder)
+            self.assertIn("'usr/bin/"+alias+"'",archive)
+        for command in ("clang","clang++","make","cmake","ninja","ld.lld","pkg-config","qemu-x86_64"):
+            self.assertIn("'usr/bin/"+command+"'",archive)
+
+    def test_android_noexec_bridge_and_capability_policy(self):
+        bridge=source("scripts/dsh-android-exec.sh")
+        self.assertIn("/system/bin/linker64",bridge)
+        self.assertIn("DSH_ANDROID_EXEC_NOT_FOUND",bridge)
+        self.assertIn("CAP_NET_RAW",source("docs/DSH_ANDROID_DEVELOPER_RUNTIME.md"))
+        self.assertIn("pip",source("docs/DSH_ANDROID_DEVELOPER_RUNTIME.md"))
+
+if __name__=="__main__":
+    unittest.main()
