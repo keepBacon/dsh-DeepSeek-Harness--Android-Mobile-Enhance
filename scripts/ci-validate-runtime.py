@@ -24,6 +24,7 @@ REQUIRED = (
  'usr/libexec/dsh-mobile/dsh-inspector-tools.mjs',
  'usr/libexec/dsh-mobile/dsh-project-language.mjs',
  'usr/libexec/dsh-mobile/dsh-project-index.mjs',
+ 'usr/libexec/dsh-mobile/dsh-workspace-lsp.mjs',
  'usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs',
  'usr/libexec/dsh-mobile/dsh-bounded-spawn.mjs',
  'usr/libexec/dsh-mobile/dsh-dev-process.mjs',
