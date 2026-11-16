@@ -49,6 +49,7 @@ TOOL_COMMANDS = (
 
 SCRIPT_MAP = {
     "dsh-mobile-toolbox-mcp.mjs": "toolbox-mcp.mjs",
+    "dsh-inspector-tools.mjs": "dsh-inspector-tools.mjs",
     "dsh-web-page-reader.mjs": "dsh-web-page-reader.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
     "dsh-android-tool-spawn.mjs": "dsh-android-tool-spawn.mjs",
