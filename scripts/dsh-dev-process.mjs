@@ -53,7 +53,7 @@ async function scriptInvocation(binary,args,cwd,env) {
   try {
    const st=await lstat(path)
    if (st.isFile() || st.isSymbolicLink()) {
-    if(androidEnv(env) || env.DSH_ANDROID_STANDALONE === '1') return {binary:join(prefix,'bin','sh'),args:[path,...args]}
+    if(androidEnv(env) || env.DSH_ANDROID_STANDALONE === '1') return {binary:join(prefix,'bin','bash'),args:[path,...args]}
     return {binary:path,args}
    }
   }catch(e){if(e.code!=='ENOENT')throw e}
