@@ -48,6 +48,7 @@ TOOL_SEEDS = (
     "clang", "make", "cmake", "ninja", "lld", "llvm", "pkg-config",
     # Linux x86_64 user-mode emulator, not a Windows DLL loader or KVM.
     "qemu-user-x86-64",
+    "lua-language-server",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
