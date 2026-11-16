@@ -14,6 +14,13 @@ try{
   assert.equal(answer.precision,'language-server')
   assert.equal(answer.result.length,1)
  }
+ // An unresponsive backend must terminate at the declared deadline;
+ // the next language-server invocation must still work.
+ await assert.rejects(lspExchange({command:process.execPath,args:['-e','setInterval(()=>{},1000)'],
+  root,file:source,language:'cpp',action:'definition',timeoutMs:1000}),/timeout/)
+ const recovered=await lspExchange({command:process.execPath,args:[mock],root,file:source,
+  language:'cpp',action:'definition',timeoutMs:3000})
+ assert.equal(recovered.result.length,1)
  assert.equal(lspTools.length,2)
  const status=await lspCall('workspace_lsp_status',{})
  assert.ok(status.backends.some(x=>x.backend==='clangd'))
