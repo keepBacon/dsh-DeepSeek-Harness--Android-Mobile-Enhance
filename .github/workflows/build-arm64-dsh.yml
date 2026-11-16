@@ -5,6 +5,8 @@ on:
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
+      - 'scripts/ci_termux_abi.py'
+      - 'scripts/test-ci-termux-abi.py'
       - 'scripts/test-android-git-gh-runtime.py'
       - 'scripts/test-android-search-tools.py'
       - 'scripts/ci_fix_web_fetch_limits.py'
@@ -66,7 +68,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify packaged MCP ESM import closure
-        run: python3 scripts/validate-ci-mobile-esm-closure.py
+        run: |
+          python3 scripts/validate-ci-mobile-esm-closure.py
+          python3 scripts/test-ci-termux-abi.py
       - name: Build Android ARM64 runtime on GitHub runner (no Termux)
         shell: bash
         env:
