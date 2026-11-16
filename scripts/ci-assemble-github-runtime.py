@@ -21,13 +21,14 @@ import tarfile
 import tempfile
 from ci_fix_web_fetch_limits import patch as patch_web_fetch_limits
 from ci_modsearch_recovery import stage_modsearch
+from ci_termux_abi import apt_abi_packages, should_replace_native, overlay_one, validate_apt_abi
 from urllib.request import Request, urlopen
 
 REPOS = {
     "main": "https://packages-cf.termux.dev/apt/termux-main",
     "root": "https://packages-cf.termux.dev/apt/termux-root",
 }
-SEEDS = ("proot", "python", "python-pip", "apt", "dpkg", "termux-tools", "termux-keyring")
+SEEDS = ("proot", "python", "python-pip", "apt", "dpkg", "termux-tools", "termux-keyring", "libc++")
 # The previous GitHub build stopped at SEEDS and packaged no tool-suite
 # dependencies, despite the full Termux catalog declaring them. Keep the
 # first ARM64 expansion deliberately focused on the tested missing binaries.
@@ -164,6 +165,7 @@ def fetch_packages(stage, workspace):
         for name, value in index.items():
             if name not in packages:
                 packages[name] = (base, value)
+    abi_cohort = apt_abi_packages(packages, dependency_names)
     needed = []
     done = set()
     def include(name):
@@ -182,6 +184,8 @@ def fetch_packages(stage, workspace):
         raise ValueError("unexpectedly large dependency closure (>220 packages)")
     print("[native] dependency closure", len(needed), "packages")
     manifest = []
+    abi_replacements = []
+    libcxx_sha256 = None
     for name in needed:
         base, package = packages[name]
         filename = package["Filename"]
@@ -202,6 +206,11 @@ def fetch_packages(stage, workspace):
             prefix = extracted / "usr"
         if not prefix.is_dir():
             raise ValueError("unrecognized Android package prefix " + name)
+        if name == "libc++":
+            packaged_cpp = prefix / "lib/libc++_shared.so"
+            if not packaged_cpp.is_file():
+                raise ValueError("libc++ ARM64 package missing libc++_shared.so")
+            libcxx_sha256 = hashlib.sha256(packaged_cpp.read_bytes()).hexdigest()
         for root, dirs, files in os.walk(prefix, followlinks=False):
             parent = Path(root)
             rel = parent.relative_to(prefix)
@@ -210,12 +219,9 @@ def fetch_packages(stage, workspace):
             for file in files:
                 src = parent / file
                 dst = outdir / file
-                if dst.exists() or dst.is_symlink():
-                    continue  # Protect the pre-existing validated DSH/Node ABI.
-                if src.is_symlink():
-                    os.symlink(os.readlink(src), dst)
-                else:
-                    shutil.copy2(src, dst, follow_symlinks=False)
+                replace_abi = should_replace_native(name, abi_cohort, src, rel / file)
+                if overlay_one(src, dst, allow_replace=replace_abi) and replace_abi:
+                    abi_replacements.append(str((rel / file).as_posix()))
             for folder in dirs[:]:
                 src = parent / folder
                 if src.is_symlink():
@@ -226,6 +232,10 @@ def fetch_packages(stage, workspace):
         manifest.append({"package": name, "version": package.get("Version"), "sha256": digest})
         downloaded.unlink()
         shutil.rmtree(extracted)
+    if not libcxx_sha256:
+        raise ValueError("No verified libc++ package was fetched")
+    abi_report = validate_apt_abi(stage, libcxx_sha256, abi_replacements)
+    print("[native] validated apt/libc++ ABI cohort:", abi_report)
     # No more silent success when a package was downloaded but its executable
     # was missing from the merged runtime. Check both new and inherited files.
     missing = [command for command in TOOL_COMMANDS
@@ -285,7 +295,7 @@ def fetch_packages(stage, workspace):
     if not (stage / "usr/bin/fzf-tmux").is_file():
         raise ValueError("fzf-tmux integration missing from ARM64 package")
     print("[native] verified", len(TOOL_COMMANDS), "critical tool executable paths and magic data")
-    return manifest
+    return manifest, abi_report
 
 def overlay_sources(stage, source):
     mobile = stage / "usr/libexec/dsh-mobile"
@@ -401,7 +411,7 @@ def main():
         stage = workspace / "stage"
         stage.mkdir()
         unpack_seed(args.seed, stage)
-        manifest = fetch_packages(stage, workspace)
+        manifest, abi_report = fetch_packages(stage, workspace)
         overlay_sources(stage, args.repo)
         # The GitHub native builder reuses an already-patched DSH seed.
         # Only update its PTY and sandbox launcher entrypoints. The seed's
@@ -427,6 +437,7 @@ def main():
             "seedSha256": hashlib.sha256(args.seed.read_bytes()).hexdigest(),
             "sourceOverlay": list(SCRIPT_MAP.values()),
             "androidPackageArchives": manifest,
+            "aptAbi": abi_report,
             "limits": "Native Android ELF loadability / WebUI still require device smoke",
         }, indent=2) + "\n")
         print("[native] generated ARM64 Android archive", args.output, args.output.stat().st_size)
