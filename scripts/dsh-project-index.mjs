@@ -132,7 +132,9 @@ async function ensure(base,opts={}){
  // Queries update the index only when explicitly requested or missing.
  return memoryBarrier(base,async()=> {
   const current=await load(base)
-  return opts.update||!current?await indexUnlocked(base,opts):current
+  // Every query refreshes changed/deleted source fingerprints. Unchanged
+  // files reuse their previous parsed symbols without reading file bodies.
+  return opts.update||!current||opts.refresh!==false?await indexUnlocked(base,opts):current
  })
 }
 function summarize(state,extra={}){
@@ -156,7 +158,7 @@ function resolveImports(state){
  const edges=[],unresolved=[]
  const extensions=['.ts','.tsx','.mts','.cts','.js','.jsx','.mjs','.cjs','.py','.kt','.java','.lua','.luau','.h','.hpp']
  const targetFor=(base,extensions)=>{
-  const normalizedBase=normalized(base)
+  const normalizedBase=normalized(base).replace(/^\/+/, '')
   return [normalizedBase,...extensions.map(x=>normalizedBase+x),...['index.ts','index.js','index.mjs','__init__.py','init.lua'].map(x=>normalizedBase+'/'+x)].find(x=>paths.has(x))
  }
  for(const [file,row] of entries){
