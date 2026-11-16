@@ -432,6 +432,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     declaredTools("toolbox-mcp.mjs", "mobile_tools", false)
     declaredTools("dsh-inspector-tools.mjs", "mobile_tools", false)
     declaredTools("dsh-project-index.mjs", "mobile_tools", false)
+    declaredTools("dsh-workspace-lsp.mjs", "mobile_tools", false)
     // Code Engine definitions live in a sibling runtime module.
     declaredTools("dsh-code-engine.mjs", "mobile_tools", false)
     declaredTools("dsh-code-engine-v3.mjs", "mobile_tools", false)
@@ -1416,6 +1417,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh-mobile/dsh-inspector-tools.mjs") to "usr/libexec/dsh-mobile/dsh-inspector-tools.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-project-language.mjs") to "usr/libexec/dsh-mobile/dsh-project-language.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-project-index.mjs") to "usr/libexec/dsh-mobile/dsh-project-index.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-workspace-lsp.mjs") to "usr/libexec/dsh-mobile/dsh-workspace-lsp.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-bounded-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-bounded-spawn.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-dev-process.mjs") to "usr/libexec/dsh-mobile/dsh-dev-process.mjs",
@@ -3580,6 +3582,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh-mobile/dsh-inspector-tools.mjs") to "usr/libexec/dsh-mobile/dsh-inspector-tools.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-project-language.mjs") to "usr/libexec/dsh-mobile/dsh-project-language.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-project-index.mjs") to "usr/libexec/dsh-mobile/dsh-project-index.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-workspace-lsp.mjs") to "usr/libexec/dsh-mobile/dsh-workspace-lsp.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-dev-process.mjs") to "usr/libexec/dsh-mobile/dsh-dev-process.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-dev-tasks.mjs") to "usr/libexec/dsh-mobile/dsh-dev-tasks.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
