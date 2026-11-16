@@ -12,7 +12,9 @@ const require = createRequire(import.meta.url)
 const field = {type:'string'}
 const obj = (properties,required=[]) => ({type:'object',properties,required,additionalProperties:false})
 const location = {file:field,line:{type:'integer',minimum:1},column:{type:'integer',minimum:1}}
-const projects = {type:'array',items:field,minItems:1,maxItems:128}
+const MAX_SEMANTIC_FILES=512
+const MAX_SEMANTIC_SOURCE_BYTES=32*1024*1024
+const projects = {type:'array',items:field,minItems:1,maxItems:MAX_SEMANTIC_FILES-1}
 export const codeAstTools = [
  {name:'code_ast_symbols',description:'AST declaration outline for JS/TS using TypeScript parser. Returns name, kind, line, column and symbol start offsets.',inputSchema:obj({file:field,maxResults:{type:'integer',minimum:1,maximum:500},includeNested:{type:'boolean'}},['file'])},
  {name:'code_ast_definition',description:'Resolve a JS/TS symbol to its definition(s) using the bundled TypeScript language service, with precise positions.',inputSchema:obj({...location,projectFiles:projects,maxResults:{type:'integer',minimum:1,maximum:500}},['file','line','column'])},
@@ -117,9 +119,16 @@ async function symbols(args){
 }
 async function languageService(args){
  const ts=typescript(),selected=[resolve(args.file),...(args.projectFiles||[]).map(file=>resolve(file))]
- if(selected.length>129)throw Error('projectFiles exceeds 128')
+ if(new Set(selected).size>MAX_SEMANTIC_FILES)throw Error('TypeScript semantic project exceeds 512 files')
  const sources=new Map()
- for(const file of new Set(selected)){const source=await readSource(file);sources.set(file,source)}
+ let bytes=0
+ for(const file of new Set(selected)){
+  const source=await readSource(file)
+  bytes+=source.size
+  if(bytes>MAX_SEMANTIC_SOURCE_BYTES)
+   throw Error('TypeScript semantic project source budget exceeded (32 MiB); select fewer files')
+  sources.set(file,source)
+ }
  const options={
   allowJs:true,checkJs:false,noEmit:true,skipLibCheck:true,
   target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.NodeNext,
@@ -213,7 +222,7 @@ async function diagnostics(args){
 }
 async function projectSymbols(args){
  const ts=typescript(),selected=[resolve(args.file),...(args.projectFiles||[]).map(file=>resolve(file))]
- if(selected.length>129)throw Error('projectFiles exceeds 128')
+ if(new Set(selected).size>MAX_SEMANTIC_FILES)throw Error('projectFiles exceeds 512')
  const query=args.query==null?'':String(args.query).toLowerCase(),limit=Math.min(500,Math.max(1,args.maxResults||200))
  const result=[]
  for(const file of new Set(selected)){
