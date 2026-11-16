@@ -36,8 +36,25 @@ function selectBackend(file,preferred){
  const ext=/\.[a-z0-9]+$/i.exec(file)?.[0]?.toLowerCase()
  return Object.keys(BACKENDS).find(name=>BACKENDS[name].ext.includes(ext))||null
 }
+async function bundledPyright(){
+ const prefix=process.env.TERMUX__PREFIX||process.env.PREFIX||''
+ const env=process.env.DSH_PYRIGHT_LANGSERVER_PATH
+ const candidates=[env,
+  prefix?join(prefix,'lib/dsh-dev-tools/node_modules/pyright/langserver.index.js'):null,
+  prefix?join(prefix,'lib/dsh-dev-tools/node_modules/pyright/dist/pyright-langserver.js'):null,
+  join(process.cwd(),'node_modules/pyright/langserver.index.js')]
+ for(const path of candidates){
+  if(!path)continue
+  try{const meta=await lstat(path);if(meta.isFile())return path}catch{}
+ }
+ return null
+}
 async function probeBackend(name){
  const backend=BACKENDS[name]
+ if(name==='pyright'){
+  const path=await bundledPyright()
+  if(path)return {backend:name,command:'node',installed:true,source:'bundled-pyright',entrypoint:path}
+ }
  const prefix=process.env.TERMUX__PREFIX||process.env.PREFIX||''
  if(prefix.startsWith('/data/')){
   const path=join(prefix,'bin',backend.command)
@@ -161,7 +178,8 @@ export async function lspCall(name,args={}){
  const status=await probeBackend(backend)
  if(!status.installed)return {available:false,backend,reason:'Language server missing: '+status.command}
  const profile=BACKENDS[backend]
- const response=await lspExchange({command:profile.command,args:profile.args,root,file,
+ const response=await lspExchange({command:status.source==='bundled-pyright'?'node':profile.command,
+  args:status.source==='bundled-pyright'?[status.entrypoint,'--stdio']:profile.args,root,file,
   language:profile.language,action:args.action,line:args.line||1,column:args.column||1,
   timeoutMs:args.timeoutMs||15000})
  return {available:true,backend,...response}
