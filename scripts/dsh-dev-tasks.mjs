@@ -74,8 +74,11 @@ async function start(a){
    state.error=String(error.message||error).slice(0,1000)
   }finally{
    state.finishedAt=new Date().toISOString()
-   active.delete(id)
+   // Persist final status before removing the in-memory running marker.
+   // Otherwise concurrent status reads can misclassify a completed job
+   // as "interrupted" during this short write window.
    await persist(state).catch(()=>{})
+   active.delete(id)
   }
  })()
  // Keep the rejection observed, never let one failed build crash the MCP server.
