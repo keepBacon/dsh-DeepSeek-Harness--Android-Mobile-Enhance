@@ -5,6 +5,7 @@ import {createHash} from 'node:crypto'
 import {TextDecoder} from 'node:util'
 import {codeCall} from './dsh-code-engine.mjs'
 import {codeV4Call} from './dsh-code-engine-v4.mjs'
+import {workspaceCall} from './dsh-project-index.mjs'
 import {codeAstCall} from './dsh-code-engine-ast.mjs'
 import {createTransaction,setTransactionPhase,rollbackTransaction,removeTransaction,recoverTransactions,acquirePathLocks,expandTransactionLockPaths} from './dsh-code-engine-journal.mjs'
 
@@ -198,12 +199,16 @@ async function changeImpact(args){
  const file=resolve(args.file),root=resolve(args.root||'.')
  const references=await codeAstCall('code_ast_references',{file,line:args.line,column:args.column,projectFiles:args.projectFiles,maxResults:args.maxResults})
  const dependency=await codeV4Call('code_impact',{root,changedFiles:[file],maxFiles:args.maxFiles,maxDepth:args.maxDepth})
+ const indexedImpact=await workspaceCall('workspace_impact',{root,changedFiles:[file],
+  limit:Math.min(500,Math.max(1,args.maxFiles||100))}).catch(error=>({available:false,error:String(error.message||error)}))
  const refFiles=[...new Set(references.locations.map(x=>x.path))]
  const dependentAbsolute=dependency.affectedFiles.map(p=>resolve(root,p))
- return {strategy:'typescript-symbol-references+static-module-graph',file,referenceCount:references.total,
-  references:references.locations,referenceFiles:refFiles,dependencyImpact:dependency,
-  candidateFiles:[...new Set([file,...refFiles,...dependentAbsolute])],
-  limitations:['Symbol references cover only the supplied projectFiles plus the selected file.','Module impact is a bounded static-import heuristic; inspect scan.complete before relying on completeness.']}
+ const indexedAbsolute=(indexedImpact.affected||[]).map(x=>resolve(root,x.file))
+ return {strategy:'typescript-symbol-references+indexed-static-project-graph',file,referenceCount:references.total,
+  references:references.locations,referenceFiles:refFiles,dependencyImpact:dependency,indexedImpact,
+  candidateFiles:[...new Set([file,...refFiles,...dependentAbsolute,...indexedAbsolute])],
+  limitations:['Symbol references cover only the supplied projectFiles plus the selected file.',
+   'The multi-language project index is static and bounded; dynamic imports/reflection require validation.']}
 }
 export async function codeWorkflowCall(name,args={}){
  switch(name){
