@@ -16,6 +16,7 @@ const MANIFEST=new Set(['package.json','build.gradle','build.gradle.kts','settin
 const rootProp={root:{type:'string',description:'Existing project root (default: MCP cwd).'}};
 export const inspectorTools=[
  {name:'webview_inspect',description:'Request a read-only DOM/layout/performance snapshot from the current trusted DSH Android WebView. Does not read text, field values, cookies, storage or tokens.',inputSchema:{type:'object',properties:{timeoutMs:{type:'integer',minimum:500,maximum:10000,default:5000}},additionalProperties:false}},
+ {name:'dev_environment_doctor',description:'Read-only Android ARM64 compiler, QEMU, pip and kernel CAP_NET_RAW capability diagnostics. Does not install packages or change device permissions.',inputSchema:{type:'object',properties:{probeCommands:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'apt_doctor',description:'Read-only APT/dpkg/libc++ Android linker and prefix diagnostics. Does not install, update or modify packages.',inputSchema:{type:'object',properties:{probeCommands:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'runtime_doctor',description:'Read-only Android DSH native runtime diagnostic: command execution, ELF, missing entrypoints and Web Host TCP reachability.',inputSchema:{type:'object',properties:{probeCommands:{type:'boolean',default:true},probeHost:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'project_overview',description:'Bounded project inventory by languages, manifests and largest files; ignores symlinks and dependencies.',inputSchema:{type:'object',properties:{...rootProp},additionalProperties:false}},
@@ -57,6 +58,41 @@ function hostProbe(){
   socket.once('error',e=>finish(false,e.code||'tcp_error'));
   socket.setTimeout(1200,()=>finish(false,'timeout'));
  });
+}
+async function devEnvironmentDoctor(args={}){
+ const commands=[
+  ['clang',['--version']],['clang++',['--version']],['gcc',['--version']],
+  ['make',['--version']],['cmake',['--version']],['ninja',['--version']],
+  ['ld.lld',['--version']],['pkg-config',['--version']],['qemu-x86_64',['--version']],
+  ['python3',['-m','pip','--version']],['python3',['-m','venv','--help']]
+ ];
+ let status={};
+ try{
+  const content=await readFile('/proc/self/status','utf8');
+  const match=content.match(/^CapEff:\\s*([a-fA-F0-9]+)\\s*$/m);
+  if(match){const cap=BigInt('0x'+match[1]);status={capEff:match[1],capNetRaw:(cap&(1n<<13n))!==0n};}
+  else status={available:false,reason:'CapEff missing in /proc/self/status'};
+ }catch(e){status={available:false,reason:String(e.code||e.message)}}
+ const files=[];
+ for(const name of ['bin/clang','bin/clang++','bin/make','bin/cmake','bin/ninja','bin/ld.lld','bin/pkg-config','bin/qemu-x86_64','bin/python3','bin/pip3','include/stdio.h','lib/libc++_shared.so']){
+  try{const st=await lstat(join(PREFIX,name));files.push({path:name,present:true,type:st.isSymbolicLink()?'symlink':st.isFile()?'file':'other'});}
+  catch(e){files.push({path:name,present:false,reason:e.code||String(e)})}
+ }
+ const probes=[];
+ if(args.probeCommands!==false){
+  for(const [name,argv] of commands){
+   try{
+    const launch=androidToolLaunch(join(PREFIX,'bin',name),argv,process.env);
+    const result=await boundedSpawn(launch.command,launch.args,{env:process.env,timeoutMs:4500,maxOutputBytes:1024});
+    const out=String(result.stderr||result.stdout||'');
+    probes.push({command:name,arguments:argv,exitCode:result.exitCode,timedOut:!!result.timedOut,bridged:launch.bridged,diagnostic:out.split('\n')[0].slice(0,180)});
+   }catch(e){probes.push({command:name,error:String(e.code||e.message).slice(0,180)})}
+  }
+ }
+ return {platform:process.platform,arch:process.arch,prefix:PREFIX,capabilities:status,files,probes,
+  summary:{missing:files.filter(x=>!x.present).map(x=>x.path),failed:probes.filter(x=>x.error||x.timedOut||x.exitCode!==0).map(x=>x.command)},
+  limitations:['CAP_NET_RAW cannot be granted from user-space app tools','QEMU needs a compatible x86_64 Linux guest sysroot for dynamically linked programs','Version probes do not prove C/C++ compile and link','pip network restrictions and Python packaging policy cannot be bypassed by this tool'],
+  readOnly:true};
 }
 async function aptDoctor(args={}){
  const targets=['bin/apt','bin/apt-get','bin/apt-cache','bin/apt-config','bin/dpkg','bin/dpkg-query','bin/pkg','lib/libc++_shared.so','libexec/dsh-mobile/android-exec.sh','libexec/dsh/wrappers/apt','libexec/dsh/wrappers/dpkg','etc/apt/sources.list','var/lib/dpkg/status'];
@@ -217,6 +253,7 @@ export async function inspectorCall(name,args={}){
  if(name==='webview_inspect')return webviewSnapshot(args.timeoutMs);
  if(name==='runtime_doctor')return runtimeDoctor(args);
  if(name==='apt_doctor')return aptDoctor(args);
+ if(name==='dev_environment_doctor')return devEnvironmentDoctor(args);
  const inv=await inventory(args.root);
  if(name==='project_overview')return overview(inv);
  const graph=await dependencyGraph(inv);
