@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
+import { access } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { devRun } from './dsh-dev-process.mjs'
 import { TextDecoder } from 'node:util'
@@ -53,6 +54,17 @@ async function rename(a){
  if(!edits.length)throw Error('identifier not found in selected source files')
  return {...await codeCall('code_multi_edit',{edits,dryRun:a.dryRun===true}),mode:'lexical-js-ts',scopeAware:false,files}
 }
+async function typescriptRunner(custom){
+ if(custom)return {command:custom,args:[]}
+ const prefix=process.env.TERMUX__PREFIX||process.env.PREFIX||''
+ const candidates=[
+  process.env.DSH_CODE_TSC_PATH,
+  prefix?join(prefix,'lib/dsh-dev-tools/node_modules/typescript/lib/tsc.js'):null,
+  join(process.cwd(),'node_modules/typescript/lib/tsc.js'),
+ ]
+ for(const p of candidates){if(p){try{await access(p);return {command:process.execPath,args:[p]}}catch{}}}
+ return {command:'tsc',args:[]}
+}
 async function run(command,args,cwd,timeoutMs=15000,maxOutputBytes=131072){
  return devRun(command,args,{cwd,timeoutMs,maxOutputBytes})
 }
@@ -64,7 +76,8 @@ export async function codeV3Call(name,a={}){
   for(const source of a.paths){
    const path=resolve(source),ts=/\.tsx?$/i.test(path),js=/\.(js|mjs|cjs)$/i.test(path)
    if(!ts&&!js){results.push({path,ok:false,error:'unsupported source extension'});continue}
-   results.push({path,...await run(ts?(a.typescriptCommand||'tsc'):process.execPath,ts?['--pretty','false','--noEmit',path]:['--check',path],undefined,Math.min(120000,Math.max(100,a.timeoutMs||15000)),65536)})
+   const cmd=ts?await typescriptRunner(a.typescriptCommand):{command:process.execPath,args:[]}
+   results.push({path,...await run(cmd.command,[...cmd.args,...(ts?['--pretty','false','--noEmit',path]:['--check',path])],undefined,Math.min(120000,Math.max(100,a.timeoutMs||15000)),65536)})
   }
   return {ok:results.every(x=>x.ok),results}
  }
