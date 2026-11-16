@@ -40,6 +40,31 @@ class DeveloperRuntimeContract(unittest.TestCase):
         for command in ("clang","clang++","make","cmake","ninja","ld.lld","pkg-config","qemu-x86_64"):
             self.assertIn("'usr/bin/"+command+"'",archive)
 
+    def test_lua_lsp_runtime_launcher(self):
+        import importlib.util
+        import tempfile
+        spec=importlib.util.spec_from_file_location(
+            "dsh_ci_runtime",ROOT/"scripts/ci-assemble-github-runtime.py")
+        module=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertIn("lua-language-server",module.TOOL_SEEDS)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=pathlib.Path(tmp)/"stage"
+            native=root/"usr/share/lua-language-server/bin/lua-language-server"
+            native.parent.mkdir(parents=True)
+            header=bytearray(20)
+            header[:4]=b"\\x7fELF"
+            header[18:20]=(183).to_bytes(2,"little")
+            native.write_bytes(header)
+            module.install_lua_language_server_launcher(root)
+            launcher=root/"usr/bin/lua-language-server"
+            shell=launcher.read_text()
+            self.assertIn("#!/system/bin/sh",shell)
+            self.assertIn("/system/bin/linker64",shell)
+            self.assertIn('TERMUX__PREFIX',shell)
+            self.assertNotIn("/data/data/com.termux",shell)
+            self.assertIn("/system/bin/rm",shell)
+
     def test_bundled_python_language_server(self):
         builder=source("scripts/ci-assemble-github-runtime.py")
         validator=source("scripts/ci-validate-runtime.py")
