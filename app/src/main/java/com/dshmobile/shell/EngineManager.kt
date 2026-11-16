@@ -430,6 +430,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       }
     }
     declaredTools("toolbox-mcp.mjs", "mobile_tools", false)
+    declaredTools("dsh-inspector-tools.mjs", "mobile_tools", false)
     // Code Engine definitions live in a sibling runtime module.
     declaredTools("dsh-code-engine.mjs", "mobile_tools", false)
     declaredTools("dsh-code-engine-v3.mjs", "mobile_tools", false)
@@ -1411,6 +1412,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(rootUsr, "libexec/dsh-mobile/android-exec.sh") to "usr/libexec/dsh-mobile/android-exec.sh",
       File(rootUsr, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-inspector-tools.mjs") to "usr/libexec/dsh-mobile/dsh-inspector-tools.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-bounded-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-bounded-spawn.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
@@ -3570,6 +3572,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(usrDir, "libexec/dsh-mobile/android-exec.sh") to "usr/libexec/dsh-mobile/android-exec.sh",
       File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-inspector-tools.mjs") to "usr/libexec/dsh-mobile/dsh-inspector-tools.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
       File(usrDir, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js") to "usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js",
