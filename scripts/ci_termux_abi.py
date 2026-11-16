@@ -104,20 +104,42 @@ def validate_apt_abi(stage, expected_cpp_sha256, replacements):
         needed_by[path.relative_to(root).as_posix()] = elf_details(path)
     if not libraries:
         raise ValueError("libapt-pkg/libapt-private native library missing")
+    # APT can load libapt successfully yet fail on an indirect libcurl,
+    # libssl, libc++ or compression dependency. Resolve the complete local
+    # DT_NEEDED graph, not just the first tier from the apt executables.
     missing = []
-    for rel, deps in needed_by.items():
+    examined = set(needed_by)
+    pending = list(needed_by.items())
+    while pending:
+        rel, deps = pending.pop()
         for soname in deps:
             if "/" in soname or "\x00" in soname:
                 raise ValueError("invalid DT_NEEDED SONAME in " + rel)
-            if soname not in SYSTEM_SONAMES and not (root / "lib" / soname).exists():
+            if soname in SYSTEM_SONAMES:
+                continue
+            child = root / "lib" / soname
+            if not child.is_file():
                 missing.append(rel + " -> " + soname)
+                continue
+            # Follow relative symlinks within the staging lib directory only.
+            resolved = child.resolve()
+            if not resolved.is_relative_to((root / "lib").resolve()):
+                raise ValueError("APT DT_NEEDED path escapes local library tree: " + soname)
+            canonical = resolved.relative_to(root).as_posix()
+            if canonical not in examined:
+                if len(examined) >= 192:
+                    raise ValueError("APT native dependency graph unexpectedly large")
+                examined.add(canonical)
+                child_deps = elf_details(resolved)
+                pending.append((canonical, child_deps))
     if missing:
-        raise ValueError("APT native DT_NEEDED library closure incomplete: " + ", ".join(missing[:16]))
+        raise ValueError("APT transitive DT_NEEDED closure incomplete: " + ", ".join(sorted(set(missing))[:16]))
     if not any(name.endswith("/libc++_shared.so") for name in replacements):
         raise ValueError("libc++_shared.so was not refreshed from verified package archive")
     return {
         "libcxx_sha256": actual_sha,
         "checked_elf": len(needed_by),
+        "transitive_elf": len(examined),
         "refreshed_abi_files": len(replacements),
         "apt_native_libraries": len(libraries),
     }
