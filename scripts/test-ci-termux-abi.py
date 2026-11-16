@@ -36,6 +36,8 @@ class AbiTest(unittest.TestCase):
             alias.symlink_to("binary")
             self.assertTrue(should_replace_native("libc++", cohort, alias, Path("lib/libc++.so")))
             self.assertFalse(should_replace_native("libc++", cohort, alias, Path("bin/apt")))
+            self.assertTrue(should_replace_native("clang", {"clang"}, alias, Path("bin/clang++")))
+            self.assertFalse(should_replace_native("noncohort", {"clang"}, alias, Path("bin/clang++")))
 
     def test_overlay_does_not_follow_seed_symlink(self):
         with tempfile.TemporaryDirectory() as d:
