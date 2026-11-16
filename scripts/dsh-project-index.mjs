@@ -261,7 +261,7 @@ function projectedEntries(state,args){
 // candidates. A scoped result is never reported as full-project exhaustive.
 function semanticScope(state,base,args){
  const selected=normalizeFile(args.file,base)
- const jsRe=/\\.([cm]?js|[cm]?ts|jsx|tsx)$/
+ const jsRe=/\.([cm]?js|[cm]?ts|jsx|tsx)$/
  const all=allEntries(state).filter(([file])=>jsRe.test(file))
  const available=new Set(all.map(([file])=>file))
  if(!available.has(selected))return {files:[join(base,selected)],total:all.length,complete:false,
