@@ -21,7 +21,7 @@ import tarfile
 import tempfile
 from ci_fix_web_fetch_limits import patch as patch_web_fetch_limits
 from ci_modsearch_recovery import stage_modsearch
-from ci_termux_abi import apt_abi_packages, should_replace_native, overlay_one, validate_apt_abi
+from ci_termux_abi import apt_abi_packages, should_replace_native, overlay_one, validate_apt_abi, NATIVE_TOOL_PACKAGES
 from urllib.request import Request, urlopen
 
 REPOS = {
@@ -171,7 +171,9 @@ def fetch_packages(stage, workspace):
         for name, value in index.items():
             if name not in packages:
                 packages[name] = (base, value)
-    abi_cohort = apt_abi_packages(packages, dependency_names)
+    # Refresh the full native ABI cohort for the newly bundled compiler and QEMU.
+    # Otherwise stale seed libLLVM / libclang / symlink aliases can mismatch current packages.
+    abi_cohort = apt_abi_packages(packages, dependency_names, roots=("apt", "libc++", *sorted(NATIVE_TOOL_PACKAGES)))
     needed = []
     done = set()
     def include(name):
