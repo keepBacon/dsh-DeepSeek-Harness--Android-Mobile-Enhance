@@ -2,7 +2,7 @@
 // statuses are written durably so a restarted MCP reports "interrupted" rather
 // than inventing success. User workspaces and build outputs are never deleted.
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { devRun } from './dsh-dev-process.mjs'
@@ -13,6 +13,7 @@ const prefix=()=>process.env.DSH_DEV_TASK_DIR||join(process.env.HOME||homedir()|
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
 export const devTaskTools=[
+ {name:'dev_toolchain_smoke',description:'Compile, link and execute minimal C/C++ sources and check Python pip in an isolated disposable HOME directory. No package installation.',inputSchema:obj({pythonVenv:{type:'boolean',default:false},timeoutMs:{type:'integer',minimum:1000,maximum:60000}},[])},
  {name:'dev_task_start',description:'Start a bounded build/test command without shell interpretation; Android ELF bridge, output caps, cancellation and durable task status.',inputSchema:obj({command:str,args:{type:'array',maxItems:128,items:str},cwd:str,timeoutMs:{type:'integer',minimum:100,maximum:3600000}},['command'])},
  {name:'dev_task_status',description:'Read durable build/test task state and bounded output; stale running tasks are marked interrupted after service restart.',inputSchema:obj({id:str},['id'])},
  {name:'dev_task_cancel',description:'Cancel a running build/test job and its active process group.',inputSchema:obj({id:str},['id'])},
@@ -44,6 +45,41 @@ function capAppend(text,chunk){
  if(Buffer.byteLength(combined)<=MAX_LOG)return combined
  // Keep the most recent 128 KiB, including compiler errors at the tail.
  return Buffer.from(combined).subarray(-MAX_LOG).toString('utf8')
+}
+async function smoke(a={}){
+ const home=process.env.HOME||homedir()
+ const parent=join(home,'.cache','dsh-p0')
+ await mkdir(parent,{recursive:true,mode:0o700})
+ const temp=await mkdtemp(join(parent,'verify-'))
+ const timeoutMs=Math.max(1000,Math.min(60000,a.timeoutMs||30000))
+ const phases=[]
+ const run=async (phase,command,args)=> {
+  const result=await devRun(command,args,{cwd:temp,timeoutMs,maxOutputBytes:4096})
+  phases.push({phase,ok:result.ok,exitCode:result.exitCode,timedOut:result.timedOut,bridged:result.bridged,
+   stdout:result.stdout.slice(0,512),stderr:result.stderr.slice(0,1024)})
+  return result.ok
+ }
+ try{
+  const c=join(temp,'test.c'),cpp=join(temp,'test.cpp')
+  await writeFile(c,'#include <stdio.h>\nint main(void){puts("DSH_C_OK");return 0;}\n')
+  await writeFile(cpp,'#include <iostream>\nint main(){std::cout<<"DSH_CPP_OK\\n";return 0;}\n')
+  if(await run('clang-c','clang',[c,'-o',join(temp,'test-c')]))
+   await run('run-c',join(temp,'test-c'),[])
+  if(await run('clang-cpp','clang++',[cpp,'-o',join(temp,'test-cpp')]))
+   await run('run-cpp',join(temp,'test-cpp'),[])
+  await run('pip-version','python3',['-m','pip','--version'])
+  if(a.pythonVenv===true){
+   const venv=join(temp,'venv')
+   if(await run('venv-create','python3',['-m','venv',venv]))
+    await run('venv-pip',join(venv,'bin','python'),['-m','pip','--version'])
+  }
+  const cRun=phases.find(p=>p.phase==='run-c')
+  const cppRun=phases.find(p=>p.phase==='run-cpp')
+  const outputs=phases.filter(x=>x.phase.startsWith('run-'))
+  return {ok:phases.every(x=>x.ok)&&outputs.length===2 &&
+   cRun?.stdout.includes('DSH_C_OK')&&cppRun?.stdout.includes('DSH_CPP_OK'),phases,
+   note:'Device result required. Build runner has not installed or downloaded packages.'}
+ }finally{await rm(temp,{recursive:true,force:true}).catch(()=>{})}
 }
 async function start(a){
  if(typeof a.command!=='string'||!a.command.trim())throw Error('command required')
@@ -102,6 +138,7 @@ async function list(limit=20){
 }
 export async function devTaskCall(name,args={}){
  switch(name){
+  case 'dev_toolchain_smoke':return smoke(args)
   case 'dev_task_start':return start(args)
   case 'dev_task_status':return publicState(await getState(args.id))
   case 'dev_task_cancel':return cancel(args.id)
