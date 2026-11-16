@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
 import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
 import { boundedSpawn } from './dsh-bounded-spawn.mjs'
+import { devRun } from './dsh-dev-process.mjs'
 import { connect as netConnect } from 'node:net'
 import { createRequire } from 'node:module'
 import { dirname, resolve, relative, isAbsolute, sep } from 'node:path'
@@ -84,12 +85,8 @@ async function checkedDir(p='.'){const path=await realpath(userPath(p)),s=await 
 async function exists(p){try{await lstat(p);return true}catch(e){if(e?.code==='ENOENT')return false;throw e}}
 function trim(s,n=1200){const a=String(s).split(/\r?\n/);return{output:a.slice(0,n).join('\n').slice(0,MAX_OUTPUT),truncated:a.length>n,totalLines:a.length}}
 async function run(cmd,args=[],opts={}){
- const env=opts.env||process.env
- const launch=androidToolLaunch(cmd,args,env)
- const r=await boundedSpawn(launch.command,launch.args,{
-  cwd:opts.cwd||process.cwd(),env,timeoutMs:opts.timeout||30000,maxOutputBytes:MAX_OUTPUT,
- })
- return {exitCode:r.exitCode,signal:r.signal,stdout:r.stdout,stderr:r.stderr,timedOut:r.timedOut}
+ const r=await devRun(cmd,args,{cwd:opts.cwd||process.cwd(),env:opts.env||process.env,timeoutMs:opts.timeout||30000,maxOutputBytes:MAX_OUTPUT})
+ return {exitCode:r.exitCode,signal:r.signal,stdout:r.stdout,stderr:r.stderr,timedOut:r.timedOut,cancelled:r.cancelled}
 }
 
 // Prefer the standalone 7zz binary; it does not require external 7z.so codecs.
