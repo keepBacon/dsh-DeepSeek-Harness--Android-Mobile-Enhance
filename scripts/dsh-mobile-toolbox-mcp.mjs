@@ -8,6 +8,7 @@ import { codeWorkflowTools, codeWorkflowCall } from './dsh-code-engine-workflow.
 import { luaTools, luaCall } from './dsh-lua-tools.mjs'
 import { inspectorTools, inspectorCall, isInspectorTool } from './dsh-inspector-tools.mjs'
 import { workspaceTools, workspaceCall, isWorkspaceTool } from './dsh-project-index.mjs'
+import { lspTools, lspCall, isLspTool } from './dsh-workspace-lsp.mjs'
 import { spawn } from 'node:child_process'
 import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
 import { boundedSpawn } from './dsh-bounded-spawn.mjs'
@@ -33,7 +34,7 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
-const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,...inspectorTools,...workspaceTools,...devTaskTools,readPageTool,
+const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,...inspectorTools,...workspaceTools,...lspTools,...devTaskTools,readPageTool,
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and actual CLI wrappers (Bash, Python, curl, Git, rg). Reports per-command execution failures rather than only checking entrypoint existence. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -395,6 +396,7 @@ async function closeDebug(session){
 }
 
 async function call(name,a={}){
+ if(isLspTool(name))return lspCall(name,a)
  if(isWorkspaceTool(name))return workspaceCall(name,a)
  if(isDevTaskTool(name))return devTaskCall(name,a)
  if(isInspectorTool(name))return inspectorCall(name,a)
