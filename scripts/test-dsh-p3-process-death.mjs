@@ -8,6 +8,7 @@ import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {fileURLToPath} from 'node:url'
+import {devLaunch} from './dsh-dev-process.mjs'
 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))
 if(process.argv[2]==='--worker'){
@@ -33,8 +34,10 @@ else {
    {kind:'edit',args:{system:'python',timeoutMs:30000,
     edits:[{path:'value.py',oldText:'return 5',newText:'return 5 # uncommitted'}]}}
   ]})
-  child=spawn(process.execPath,[fileURLToPath(import.meta.url),'--worker',created.id],{
-   env:process.env,stdio:'ignore',detached:process.platform!=='win32'})
+  const launch=await devLaunch(process.execPath,[fileURLToPath(import.meta.url),'--worker',created.id],{
+   cwd:join(import.meta.dirname,'..')})
+  child=spawn(launch.command,launch.args,{
+   cwd:launch.cwd,env:launch.env,stdio:'ignore',detached:process.platform!=='win32'})
   let mutated=false
   for(let i=0;i<400;i++){
    const state=await devPlanCall('dev_plan_status',{id:created.id})
