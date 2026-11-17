@@ -73,7 +73,7 @@ try{
  // A live, non-mutating project command is terminated through its
  // process group; its checkpoint is safe to retry after explicit resume.
  await writeFile(join(root,'test_cancel.py'),
-  'import unittest,time,os\\nclass Cancel(unittest.TestCase):\\n def test_slow(self):\\n  time.sleep(10)\\n')
+  'import unittest,time,os\nclass Cancel(unittest.TestCase):\n def test_slow(self):\n  time.sleep(10)\n')
  const live=await devPlanCall('dev_plan_create',{root,steps:[
   {kind:'test',label:'slow cancellable Python test',args:{system:'python',timeoutMs:30000}}
  ]})
