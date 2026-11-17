@@ -35,8 +35,38 @@ try{
  await symlink(outside,join(root,'link'))
  await assert.rejects(projectFileCall('workspace_refactor',{root,operations:[{type:'create',path:'link/evil.ts',content:'bad'}]}),/directory parent/)
  assert.equal(await readFile(original,'utf8'),'export const p2 = 1\n')
+ const edited=await projectFileCall('workspace_refactor',{root,operations:[
+  {type:'replace',path:'src/original.ts',expectedSha256:hash('export const p2 = 1\n'),
+   content:'export const p2 = 2\n'},
+  {type:'create',path:'src/added.ts',content:'export const added = true\n'}]})
+ assert.equal(edited.ok,true)
+ assert.equal(await readFile(original,'utf8'),'export const p2 = 2\n')
+ assert.match(await readFile(join(root,'src/added.ts'),'utf8'),/added/)
+ await assert.rejects(projectFileCall('workspace_refactor',{root,operations:[
+   {type:'replace',path:'src/original.ts',expectedSha256:hash('export const p2 = 1\n'),
+    content:'export const p2 = 3\n'}]}),/stale source hash/)
+ // Simulate a stopped process after a file was deleted but before journal
+ // commit. The recovery tool must restore the exact preimage.
+ const journalHash=hash(await (await import('node:fs/promises')).realpath(root))
+ const manualDir=join(process.env.DSH_WORKSPACE_JOURNAL_DIR,journalHash,'simulated-crash')
+ await mkdir(manualDir,{recursive:true})
+ const before=await readFile(original)
+ await writeFile(join(manualDir,'file-0.bak'),before)
+ const manifest={version:1,id:'simulated-crash',root:await (await import('node:fs/promises')).realpath(root),
+  phase:'applying',createdAt:new Date().toISOString(),
+  actions:[{type:'delete',from:original,to:null,oldHash:hash(before),afterHash:hash(before),
+    mode:0o644,size:before.length,backup:'file-0.bak'}]}
+ await writeFile(join(manualDir,'manifest.json'),JSON.stringify(manifest))
+ await rm(original)
+ const previewRecover=await projectFileCall('workspace_refactor_recover',{root,dryRun:true})
+ assert.ok(previewRecover.transactions.some(x=>x.status==='recovery-available'))
+ await assert.rejects(lstat(original),{code:'ENOENT'})
+ const realRecover=await projectFileCall('workspace_refactor_recover',{root})
+ assert.ok(realRecover.ok)
+ assert.deepEqual(await readFile(original),before)
  const journals=await projectFileCall('workspace_refactor_recover',{root})
  assert.equal(journals.ok,true)
  assert.equal(journals.transactions.length,0)
+ assert.equal(await readFile(original,'utf8'),'export const p2 = 2\n')
  console.log('[DSH] P2 project-file transaction create/move/delete/dry-run/concurrency/path safety: OK')
 }finally{await rm(home,{recursive:true,force:true})}
