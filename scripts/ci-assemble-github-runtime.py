@@ -64,6 +64,7 @@ SCRIPT_MAP = {
     "dsh-project-language.mjs": "dsh-project-language.mjs",
     "dsh-project-index.mjs": "dsh-project-index.mjs",
     "dsh-workspace-lsp.mjs": "dsh-workspace-lsp.mjs",
+    "dsh-lsp-session.mjs": "dsh-lsp-session.mjs",
     "dsh-workspace-files.mjs": "dsh-workspace-files.mjs",
     "dsh-project-build.mjs": "dsh-project-build.mjs",
     "dsh-dev-plan.mjs": "dsh-dev-plan.mjs",
