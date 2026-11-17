@@ -10,6 +10,7 @@ import {workspaceCall} from './dsh-project-index.mjs'
 import {projectBuildCall} from './dsh-project-build.mjs'
 import {projectFileCall} from './dsh-workspace-files.mjs'
 import {codeWorkflowCall} from './dsh-code-engine-workflow.mjs'
+import {recoverTransactions} from './dsh-code-engine-journal.mjs'
 
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
@@ -281,7 +282,7 @@ async function recovery(args){
    // reconcile them before replaying a mutation.
    const pending=step.kind==='refactor'?
     await projectFileCall('workspace_refactor_recover',{root:state.root,dryRun:true}):
-    await codeWorkflowCall('code_edit_recover',{paths:targetPaths(state.root,step),dryRun:true})
+    await recoverTransactions({onlyPaths:targetPaths(state.root,step),dryRun:true})
    const conflicts=(pending.transactions||pending.results||[]).filter(x=>
     !['verified-committed-cleaned','rolled-back-cleaned','incomplete-prepare-discarded'].includes(x.status))
    if(!conflicts.length){
@@ -294,7 +295,7 @@ async function recovery(args){
   try{
    journal=step.kind==='refactor'?
     await projectFileCall('workspace_refactor_recover',{root:state.root,dryRun:!restoring}):
-    await codeWorkflowCall('code_edit_recover',{paths:targetPaths(state.root,step),dryRun:!restoring})
+    await recoverTransactions({onlyPaths:targetPaths(state.root,step),dryRun:!restoring})
   }catch(e){journal={ok:false,error:String(e.message||e)}}
   const restored=await sameFingerprints(inflight.preimage)
   if(restoring&&restored&&journal.ok!==false){
@@ -319,7 +320,7 @@ async function resume(args){
    // A terminal failure had already advanced the cursor. Retrying requires
    // deliberate choice; P2 transactions already handled source rollback.
    const prior=state.steps[state.cursor-1]
-   if(!prior||MUTATING.has(prior.kind)&&prior.result?.rollback?.ok===false)
+   if(!prior||(MUTATING.has(prior.kind)&&prior.result?.rollback?.ok!==true))
     throw Error('failed mutating step has unresolved rollback conflict; inspect first')
    prior.status='pending';state.cursor--
   }
