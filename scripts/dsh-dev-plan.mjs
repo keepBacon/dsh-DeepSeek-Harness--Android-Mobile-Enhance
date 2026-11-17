@@ -362,7 +362,7 @@ async function recovery(args){
   try{
    journal=step.kind==='refactor'?
     await projectFileCall('workspace_refactor_recover',{root:state.root,dryRun:!restoring}):
-    await recoverTransactions({onlyPaths:targetPaths(state.root,step),dryRun:!restoring})
+    await recoverTransactions({onlyPaths:targetPaths(state.root,step),dryRun:!restoring,lockStaleMs:1500})
   }catch(e){journal={ok:false,error:String(e.message||e)}}
   const restored=await sameFingerprints(inflight.preimage)
   const entries=journal?.results||journal?.transactions||[]
