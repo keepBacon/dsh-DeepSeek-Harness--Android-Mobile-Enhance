@@ -298,7 +298,11 @@ async function recovery(args){
     await recoverTransactions({onlyPaths:targetPaths(state.root,step),dryRun:!restoring})
   }catch(e){journal={ok:false,error:String(e.message||e)}}
   const restored=await sameFingerprints(inflight.preimage)
-  if(restoring&&restored&&journal.ok!==false){
+  const entries=journal?.results||journal?.transactions||[]
+  const acceptable=new Set(['recovered','rolled-back-cleaned','verified-committed-cleaned',
+   'incomplete-prepare-discarded','committed','already-recovered'])
+  const journalSafe=journal&&journal.ok!==false&&entries.every(item=>acceptable.has(item.status))
+  if(restoring&&restored&&journalSafe){
    step.status='pending';state.status='paused';state.inflight=null
    state.nextAction='Journal recovery restored original sources; dev_plan_run may retry.'
    await save(state);return {...view(state),recovery:{ok:true,restored:true,journal}}
