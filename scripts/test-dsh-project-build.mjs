@@ -42,6 +42,13 @@ try{
  const preview=await projectBuildCall('workspace_build',{root:cmake,dryRun:true})
  assert.equal(preview.prerequisites.length,1)
  assert.deepEqual(preview.prerequisites[0].args.slice(0,2),['-S',cmake])
+ await writeFile(join(cmake,'main.c'),'int main(void) { return 0; }\n')
+ await writeFile(join(cmake,'CMakeLists.txt'),
+  'cmake_minimum_required(VERSION 3.15)\nproject(P2Test C)\nenable_testing()\nadd_executable(p2 main.c)\nadd_test(NAME run_p2 COMMAND p2)\n')
+ const compiled=await projectBuildCall('workspace_verify',{root:cmake,system:'cmake',timeoutMs:30000})
+ assert.equal(compiled.ok,true,JSON.stringify(compiled.steps))
+ assert.equal(compiled.steps[1].exitCode,0)
+
  await assert.rejects(projectBuildCall('workspace_detect',{root:join(home,'missing')}),/ENOENT/)
  console.log('[DSH] P2 project detection, Python build/test, diagnostics, npm manifest and CMake plan: OK')
 }finally{await rm(home,{recursive:true,force:true})}
