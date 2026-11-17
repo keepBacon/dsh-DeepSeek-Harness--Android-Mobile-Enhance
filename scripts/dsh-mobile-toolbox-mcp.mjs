@@ -11,6 +11,7 @@ import { workspaceTools, workspaceCall, isWorkspaceTool } from './dsh-project-in
 import { lspTools, lspCall, isLspTool } from './dsh-workspace-lsp.mjs'
 import { projectFileTools, projectFileCall, isProjectFileTool } from './dsh-workspace-files.mjs'
 import { projectBuildTools, projectBuildCall, isProjectBuildTool } from './dsh-project-build.mjs'
+import { devPlanTools, devPlanCall, isDevPlanTool } from './dsh-dev-plan.mjs'
 import { spawn } from 'node:child_process'
 import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
 import { boundedSpawn } from './dsh-bounded-spawn.mjs'
@@ -36,7 +37,7 @@ const MAX_SEARCH_OUTPUT=2*1024*1024
 const MAX_HTTP_CAPTURE=4*1024*1024
 
 const fileSchema={type:'object',properties:{path:{type:'string',description:'Absolute path or path relative to the MCP working directory.'}},required:['path'],additionalProperties:false}
-const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,...inspectorTools,...workspaceTools,...lspTools,...projectFileTools,...projectBuildTools,...devTaskTools,readPageTool,
+const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeWorkflowTools,...luaTools,...inspectorTools,...workspaceTools,...lspTools,...projectFileTools,...projectBuildTools,...devPlanTools,...devTaskTools,readPageTool,
  {name:'android_shell_health',description:'Diagnose embedded DSH Node/Bash/PRoot and actual CLI wrappers (Bash, Python, curl, Git, rg). Reports per-command execution failures rather than only checking entrypoint existence. Wrapper may initialize private mountpoint directories; user HOME contents are not cleared.',inputSchema:{type:'object',properties:{probeExecutables:{type:'boolean',default:true}},additionalProperties:false}},
 // Read-only introspection of existing profile plugins and live MCP catalogue.
  {name:'plugin_list',description:'List installed DSH Web-profile plugin packages without changing activation or files.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
@@ -398,6 +399,7 @@ async function closeDebug(session){
 }
 
 async function call(name,a={}){
+ if(isDevPlanTool(name))return devPlanCall(name,a)
  if(isProjectFileTool(name))return projectFileCall(name,a)
  if(isProjectBuildTool(name))return projectBuildCall(name,a)
  if(isLspTool(name))return lspCall(name,a)
@@ -926,7 +928,7 @@ async function selfTest(){
    if(writeResult.isError)throw new Error('MCP dispatch fs_write self-test failed: '+writeResult.content[0].text)
    const readResult=await dispatchToolCall({name:'fs_read',arguments:{path:sample}})
    if(readResult.isError||readResult.structuredContent?.content!==payload)throw new Error('MCP dispatch argument round-trip self-test failed')
-   for(const requiredName of ['code_context','code_search','code_patch','code_multi_edit','code_symbols','code_references','code_apply_patch','code_diff','code_rename_identifier','code_check','code_test','code_ast_symbols','code_ast_references','code_ast_rename','code_ast_prepare_rename','code_ast_diagnostics','code_ast_project_symbols','workspace_edit_verify','code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact','workspace_refactor','workspace_refactor_recover','workspace_detect','workspace_build','workspace_test','workspace_verify']){
+   for(const requiredName of ['code_context','code_search','code_patch','code_multi_edit','code_symbols','code_references','code_apply_patch','code_diff','code_rename_identifier','code_check','code_test','code_ast_symbols','code_ast_references','code_ast_rename','code_ast_prepare_rename','code_ast_diagnostics','code_ast_project_symbols','dev_plan_create','dev_plan_run','dev_plan_status','dev_plan_recover','dev_plan_report','workspace_edit_verify','code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact','workspace_refactor','workspace_refactor_recover','workspace_detect','workspace_build','workspace_test','workspace_verify']){
     if(!tools.some(tool=>tool.name===requiredName))throw new Error('Code Engine tool missing from registry: '+requiredName)
    }
    const codeContext=await dispatchToolCall({name:'code_context',arguments:{path:sample}})

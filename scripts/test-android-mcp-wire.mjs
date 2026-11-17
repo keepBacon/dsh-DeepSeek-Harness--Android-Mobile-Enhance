@@ -65,7 +65,7 @@ async function test(kind,dir){
     assert.equal(names.length,new Set(names).size,'duplicate tool names');
     assert.ok(names.length>=(kind==='mobile'?100:50),'tool registry incomplete: '+names.length);
     if(kind==='mobile'){
-      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','workspace_edit_verify','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start','read_page','modsearch_health','apt_doctor','workspace_index','workspace_symbols','workspace_references','workspace_definition','workspace_dependencies','workspace_impact','workspace_diagnostics','workspace_lsp_status','workspace_refactor','workspace_refactor_recover','workspace_detect','workspace_build','workspace_test','workspace_verify']){
+      for(const tool of ['fs_write','fs_read','fs_patch','code_context','code_multi_edit','dev_plan_create','dev_plan_run','dev_plan_status','dev_plan_recover','dev_plan_report','workspace_edit_verify','code_edit_verify','code_edit_recover','protocol_parse_http','debug_session_start','read_page','modsearch_health','apt_doctor','workspace_index','workspace_symbols','workspace_references','workspace_definition','workspace_dependencies','workspace_impact','workspace_diagnostics','workspace_lsp_status','workspace_refactor','workspace_refactor_recover','workspace_detect','workspace_build','workspace_test','workspace_verify']){
         assert.ok(names.includes(tool),'missing mobile MCP tool: '+tool);
       }
     }else{
@@ -130,6 +130,11 @@ async function test(kind,dir){
       const dryPlan=await call('workspace_refactor',{root:dir,dryRun:true,
         operations:[{type:'create',path:'p2-created.ts',content:'export const result=3\\n'}]});
       assert.equal(dryPlan.ok,true);
+      const plan=await call('dev_plan_create',{root:dir,name:'P3 wire smoke',
+        steps:[{kind:'detect'},{kind:'index'}]});
+      assert.equal(plan.status,'ready');
+      const status=await call('dev_plan_status',{id:plan.id});
+      assert.equal(status.total,2);
       const detected=await call('workspace_detect',{root:dir});
       assert.ok(Array.isArray(detected.systems));
       const context=await call('code_context',{path:file});
