@@ -66,6 +66,30 @@ try{
  assert.equal(cancelled.cursor,0)
  await devPlanCall('dev_plan_resume',{id:cancelledPlan.id})
  assert.equal((await run(cancelledPlan.id)).status,'completed')
+ // A live, non-mutating project command is terminated through its
+ // process group; its checkpoint is safe to retry after explicit resume.
+ await writeFile(join(root,'test_cancel.py'),
+  'import unittest,time,os\\nclass Cancel(unittest.TestCase):\\n def test_slow(self):\\n  time.sleep(10)\\n')
+ const live=await devPlanCall('dev_plan_create',{root,steps:[
+  {kind:'test',label:'slow cancellable Python test',args:{system:'python',timeoutMs:30000}}
+ ]})
+ const pendingRun=run(live.id)
+ let observed=false
+ for(let attempt=0;attempt<100;attempt++){
+  const snapshot=await devPlanCall('dev_plan_status',{id:live.id})
+  if(snapshot.status==='running'){observed=true;break}
+  await new Promise(resolve=>setTimeout(resolve,30))
+ }
+ assert.equal(observed,true)
+ await devPlanCall('dev_plan_cancel',{id:live.id})
+ const stopped=await pendingRun
+ assert.equal(stopped.status,'cancelled')
+ assert.equal(stopped.cursor,0)
+ assert.equal(stopped.steps[0].status,'pending')
+ assert.equal(stopped.steps[0].result.cancelled,true)
+ await rm(join(root,'test_cancel.py'))
+ await devPlanCall('dev_plan_resume',{id:live.id})
+ assert.equal((await run(live.id)).status,'completed')
  const conditional=await devPlanCall('dev_plan_create',{root,steps:[
   {kind:'detect'},
   {kind:'diagnostics',when:'onPreviousFailure'},
