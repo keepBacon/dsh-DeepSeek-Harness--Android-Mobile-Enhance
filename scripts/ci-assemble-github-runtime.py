@@ -66,6 +66,7 @@ SCRIPT_MAP = {
     "dsh-workspace-lsp.mjs": "dsh-workspace-lsp.mjs",
     "dsh-workspace-files.mjs": "dsh-workspace-files.mjs",
     "dsh-project-build.mjs": "dsh-project-build.mjs",
+    "dsh-dev-plan.mjs": "dsh-dev-plan.mjs",
     "dsh-web-page-reader.mjs": "dsh-web-page-reader.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
     "dsh-android-tool-spawn.mjs": "dsh-android-tool-spawn.mjs",
