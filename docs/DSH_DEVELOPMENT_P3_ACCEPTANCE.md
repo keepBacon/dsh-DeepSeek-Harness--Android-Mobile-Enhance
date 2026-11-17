@@ -73,7 +73,7 @@ Call `dev_plan_run` with the created `id`; inspect `dev_plan_status` or `dev_pla
 
 ## Final P3 implementation scope
 
-The source implementation now includes dependency-aware sequential DAG scheduling, persistent document-aware LSP sessions (bounded to two processes, 24 documents per session, two-minute lazy idle eviction, per-session serialized queries, explicit close), build/test/verify cancellation, rollback-safe cancellation of verified edits and supplied repair candidates, crash-aware dead-owner lock reclamation and read-only diagnostic triage. No autonomous model agent or unsafe mutation-retry feature is implied.
+The source implementation now includes dependency-aware sequential DAG scheduling, persistent document-aware LSP sessions (bounded to two processes, 24 documents per session, two-minute idle eviction with an unref'ed 30-second sweep, per-session serialized queries, explicit close), build/test/verify cancellation, rollback-safe cancellation of verified edits and supplied repair candidates, crash-aware dead-owner lock reclamation and read-only diagnostic triage. No autonomous model agent or unsafe mutation-retry feature is implied.
 
 ### Android app-UID acceptance (must run on a device)
 
