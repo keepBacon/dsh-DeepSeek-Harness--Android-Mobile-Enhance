@@ -123,6 +123,7 @@ jobs:
           node scripts/test-dsh-project-build.mjs
           node scripts/test-dsh-workspace-edit-verify.mjs
           node scripts/test-dsh-dev-plan.mjs
+          node scripts/test-dsh-p3-process-death.mjs
           node scripts/test-code-engine-workflow.mjs
           node scripts/test-code-engine-journal.mjs
           node --check app/src/main/assets/codex-relay-tdz-compat.mjs
