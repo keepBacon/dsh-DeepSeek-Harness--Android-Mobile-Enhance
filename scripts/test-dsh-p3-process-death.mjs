@@ -58,7 +58,8 @@ else {
   assert.equal(recovered.status,'paused',JSON.stringify(recovered.recovery).slice(0,1500))
   assert.equal(recovered.recovery.ok,true)
   assert.equal(await readFile(join(root,'value.py'),'utf8'),'def value():\n return 5\n')
-  await rm(join(root,'test_value.py'))
+  await writeFile(join(root,'test_value.py'),
+   'import unittest\nfrom value import value\nclass V(unittest.TestCase):\n def test_value(self):\n  self.assertEqual(value(),5)\n')
   const after=await devPlanCall('dev_plan_run',{id:created.id,maxSteps:1,budgetMs:30000})
   assert.equal(after.status,'completed',JSON.stringify(after).slice(0,2500))
   console.log('[DSH] P3 process-death journal rollback and resume: OK')
