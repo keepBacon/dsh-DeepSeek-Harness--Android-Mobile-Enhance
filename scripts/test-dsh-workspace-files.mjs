@@ -67,6 +67,19 @@ try{
  const journals=await projectFileCall('workspace_refactor_recover',{root})
  assert.equal(journals.ok,true)
  assert.equal(journals.transactions.length,0)
+ await writeFile(join(root,'pyproject.toml'),'[build-system]\nrequires=[]\n')
+ const invalidProject=await projectFileCall('workspace_refactor',{root,system:'python',verify:true,runTests:false,
+  timeoutMs:15000,operations:[{type:'create',path:'src/invalid.py',content:'def invalid(:\n'}]})
+ assert.equal(invalidProject.ok,false)
+ assert.equal(invalidProject.verification.failedPhase,'build')
+ assert.equal(invalidProject.rollback.ok,true)
+ await assert.rejects(lstat(join(root,'src/invalid.py')),{code:'ENOENT'})
+ const verifiedProject=await projectFileCall('workspace_refactor',{root,system:'python',verify:true,runTests:false,
+  timeoutMs:15000,operations:[{type:'create',path:'src/valid.py',content:'def valid():\n return True\n'}]})
+ assert.equal(verifiedProject.ok,true)
+ assert.equal(verifiedProject.verification.ok,true)
+ assert.match(await readFile(join(root,'src/valid.py'),'utf8'),/def valid/)
+
  assert.equal(await readFile(original,'utf8'),'export const p2 = 2\n')
  console.log('[DSH] P2 project-file transaction create/move/delete/dry-run/concurrency/path safety: OK')
 }finally{await rm(home,{recursive:true,force:true})}
