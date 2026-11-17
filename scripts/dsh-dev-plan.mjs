@@ -369,7 +369,10 @@ export async function devPlanCall(name,args={}){
     skipped:state.steps.filter(s=>s.status==='skipped').length,
     pending:state.steps.filter(s=>['pending','running'].includes(s.status)).length,
     issues:state.steps.filter(s=>s.status==='failed').map(s=>({kind:s.kind,label:s.label,
-     diagnostic:s.result?.nextAction||s.result?.error||s.result?.failedPhase||null})),
+     diagnostic:s.result?.nextAction||s.result?.verification?.nextAction||
+      s.result?.steps?.find(x=>x.ok===false)?.nextAction||s.result?.error||
+      s.result?.failedPhase||s.result?.phase||'Step failed without structured diagnostics',
+     rollback:s.result?.rollback?{ok:s.result.rollback.ok}:null})),
     completed:state.status==='completed',needsReview:state.status==='needs_review'}}
   }
   default:throw Error('unknown P3 plan tool: '+name)
