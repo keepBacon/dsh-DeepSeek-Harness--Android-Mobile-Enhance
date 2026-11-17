@@ -8,7 +8,7 @@ import {codeWorkflowTools,codeWorkflowCall} from './dsh-code-engine-workflow.mjs
 import {createTransaction,setTransactionPhase,recoverTransactions,acquirePathLocks,expandTransactionLockPaths} from './dsh-code-engine-journal.mjs'
 
 assert.deepEqual(codeWorkflowTools.map(x=>x.name),[
- 'code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact'
+ 'workspace_edit_verify','code_edit_verify','code_repair_candidates','code_diagnostics_compare','code_edit_recover','code_change_impact'
 ])
 const root=await mkdtemp(join(tmpdir(),'dsh-code-workflow-'))
 const journal=join(root,'journal');process.env.DSH_CODE_ENGINE_STATE_DIR=journal
