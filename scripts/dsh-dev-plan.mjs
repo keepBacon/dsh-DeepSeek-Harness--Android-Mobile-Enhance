@@ -405,6 +405,40 @@ async function list(args={}){
  out.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))
  return {plans:out.slice(0,clamp(args.limit,20,50)),truncated:entries.length>250}
 }
+// Structured, read-only failure triage. No patches are synthesized or applied.
+// All suggested repair candidates remain explicit user/model-authored edits.
+function classifyFailure(step){
+ const r=step.result||{},v=r.verification||{}
+ const first=(r.steps||v.results||[]).find(x=>x.ok===false)||{}
+ const issue=(first.diagnostics||r.diagnostics||[]).find(x=>x.severity==='error')||null
+ const text=[r.error,r.nextAction,v.nextAction,first.stderr,first.stdout,issue?.message]
+  .filter(x=>typeof x==='string').join('\n').slice(0,16000)
+ const has=(pattern)=>pattern.test(text)
+ let category='unknown',suggestion='Inspect bounded stderr, exit code and the failing phase before supplying a correction.'
+ if(r.rollback?.ok===false||r.stoppedForConflict||r.phase==='recovery'){
+  category='rollback_conflict';suggestion='Inspect the conflicting source journal and files; do not retry mutations.'
+ }else if(r.cancelled||first.cancelled){
+  category='cancelled';suggestion='Review partial output and explicitly resume the plan if retry is appropriate.'
+ }else if(r.timedOut||first.timedOut){
+  category='timeout';suggestion='Check for a hung process or increase the bounded command timeout.'
+ }else if(has(/ENOENT|not found|No such file|missing executable|not_on_path/i)){
+  category='missing_tool';suggestion='Verify the project toolchain and Android linker bridge before retrying.'
+ }else if(has(/permission denied|EACCES|SELinux|operation not permitted/i)){
+  category='permission';suggestion='Inspect Android app UID permissions and linker routing; avoid disabling security checks.'
+ }else if(has(/syntaxerror|unexpected token|invalid syntax|parse error/i)){
+  category='syntax';suggestion='Correct the reported syntax issue and rerun verification.'
+ }else if(has(/assertionerror|tests? failed|FAIL:|FAILED \(/i)){
+  category='test_failure';suggestion='Inspect the failing test assertion and provide a targeted source edit candidate.'
+ }else if(issue||first.exitCode!==undefined&&first.exitCode!==0||r.ok===false){
+  category='build_or_test';suggestion='Review structured compiler diagnostics and submit a verified repair candidate.'
+ }
+ return {sourceIndex:step.sourceIndex??null,kind:step.kind,category,
+  failedPhase:r.failedPhase||v.failedPhase||first.phase||r.phase||null,
+  exitCode:Number.isInteger(first.exitCode)?first.exitCode:null,
+  issue:issue?{file:issue.file||null,line:issue.line||null,column:issue.column||null,
+   message:String(issue.message||'').slice(0,400)}:null,
+  suggestedAction:suggestion,requiresExplicitRepair:true}
+}
 export async function devPlanCall(name,args={}){
  switch(name){
   case 'dev_plan_create':return create(args)
@@ -422,6 +456,7 @@ export async function devPlanCall(name,args={}){
     skipped:state.steps.filter(s=>s.status==='skipped').length,
     blocked:state.steps.filter(s=>s.result?.reason==='dependency_not_passed').map(s=>({sourceIndex:s.sourceIndex??state.steps.indexOf(s),label:s.label,blockedBy:s.result.blockedBy})),
     pending:state.steps.filter(s=>['pending','running'].includes(s.status)).length,
+    triage:state.steps.filter(s=>s.status==='failed').map(classifyFailure),
     issues:state.steps.filter(s=>s.status==='failed').map(s=>({kind:s.kind,label:s.label,
      diagnostic:s.result?.nextAction||s.result?.verification?.nextAction||
       s.result?.steps?.find(x=>x.ok===false)?.nextAction||s.result?.error||
