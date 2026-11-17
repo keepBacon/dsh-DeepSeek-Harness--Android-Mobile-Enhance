@@ -6,6 +6,7 @@ import { realpath, readFile, lstat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { devLaunch } from './dsh-dev-process.mjs'
+import {lspSessionQuery,lspSessionStatus,lspSessionClose} from './dsh-lsp-session.mjs'
 
 const BACKENDS={
  clangd:{command:'clangd',args:['--background-index=false','--log=error'],ext:['.c','.cc','.cpp','.cxx','.h','.hpp','.hh'],language:'cpp'},
@@ -18,7 +19,9 @@ const LIMIT=2, active={count:0}
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 export const lspTools=[
  {name:'workspace_lsp_status',description:'Check which optional C/C++/Python/Java/Kotlin/Lua language-server executables are installed. No server is launched.',inputSchema:obj({})},
- {name:'workspace_lsp_query',description:'Ask an installed language server for definition, references or document symbols using bounded JSON-RPC; returns explicit missing-backend errors.',inputSchema:obj({
+ {name:'workspace_lsp_session_status',description:'Inspect bounded persistent LSP sessions and their cached document counts.',inputSchema:obj({})},
+ {name:'workspace_lsp_session_close',description:'Close idle or active pooled language servers for one project root or all projects.',inputSchema:obj({root:{type:'string'}})},
+ {name:'workspace_lsp_query',description:'Ask an installed language server for definition, references or document symbols using pooled JSON-RPC sessions; returns explicit missing-backend errors.',inputSchema:obj({
   root:{type:'string'},file:{type:'string'},backend:{type:'string',enum:['auto',...Object.keys(BACKENDS)],default:'auto'},
   action:{type:'string',enum:['definition','references','documentSymbols']},
   line:{type:'integer',minimum:1},column:{type:'integer',minimum:1},
@@ -166,6 +169,8 @@ export async function lspExchange({command,args=[],root,file,language,action,lin
  }
 }
 export async function lspCall(name,args={}){
+ if(name==='workspace_lsp_session_status')return lspSessionStatus()
+ if(name==='workspace_lsp_session_close')return lspSessionClose({root:args.root?await realpath(resolve(args.root)):undefined})
  if(name==='workspace_lsp_status')
   return {backends:await Promise.all(Object.keys(BACKENDS).map(probeBackend)),
    note:'Language server must be present to provide semantic results; unavailable tools are not simulated.'}
@@ -178,7 +183,7 @@ export async function lspCall(name,args={}){
  const status=await probeBackend(backend)
  if(!status.installed)return {available:false,backend,reason:'Language server missing: '+status.command}
  const profile=BACKENDS[backend]
- const response=await lspExchange({command:status.source==='bundled-pyright'?'node':profile.command,
+ const response=await lspSessionQuery({command:status.source==='bundled-pyright'?'node':profile.command,
   args:status.source==='bundled-pyright'?[status.entrypoint,'--stdio']:profile.args,root,file,
   language:profile.language,action:args.action,line:args.line||1,column:args.column||1,
   timeoutMs:args.timeoutMs||15000})
