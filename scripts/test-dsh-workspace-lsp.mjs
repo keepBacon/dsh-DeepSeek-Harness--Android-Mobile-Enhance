@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
-import {mkdtemp,writeFile,rm} from 'node:fs/promises'
+import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {lspExchange,lspCall,lspTools} from './dsh-workspace-lsp.mjs'
@@ -21,7 +21,27 @@ try{
  const recovered=await lspExchange({command:process.execPath,args:[mock],root,file:source,
   language:'cpp',action:'definition',timeoutMs:3000})
  assert.equal(recovered.result.length,1)
- assert.equal(lspTools.length,2)
+ // Pool one physical LSP process per project/backend, track changed
+ // documents with didChange and allow explicitly closing each session.
+ const {lspSessionQuery,lspSessionClose,lspSessionStatus}=await import('./dsh-lsp-session.mjs')
+ const input={command:process.execPath,args:[mock],root,file:source,language:'cpp',
+  action:'definition',line:1,column:6,timeoutMs:3000}
+ const pooled1=await lspSessionQuery(input)
+ const pooled2=await lspSessionQuery({...input,action:'references'})
+ assert.equal(pooled1.persistent,true)
+ assert.equal(pooled1.sessionPid,pooled2.sessionPid)
+ assert.equal(pooled2.documentVersion,1)
+ await writeFile(source,'int answer() { return 43; }\\n')
+ const pooled3=await lspSessionQuery(input)
+ assert.equal(pooled3.documentVersion,2)
+ assert.equal(pooled3.sessionPid,pooled1.sessionPid)
+ assert.equal(lspSessionStatus().size,1)
+ assert.equal((await lspSessionClose({root})).closed,1)
+ assert.equal(lspSessionStatus().size,0)
+ const restarted=await lspSessionQuery(input)
+ assert.equal(restarted.documentVersion,1)
+ await lspSessionClose()
+ assert.equal(lspTools.length,4)
  const bundled=join(root,'fake-pyright-langserver.js')
  await writeFile(bundled,'// test-only Pyright entrypoint\n')
  process.env.DSH_PYRIGHT_LANGSERVER_PATH=bundled
