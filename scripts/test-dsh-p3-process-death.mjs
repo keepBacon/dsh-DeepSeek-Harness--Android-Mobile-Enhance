@@ -60,7 +60,7 @@ else {
   assert.equal(await readFile(join(root,'value.py'),'utf8'),'def value():\n return 5\n')
   await rm(join(root,'test_value.py'))
   const after=await devPlanCall('dev_plan_run',{id:created.id,maxSteps:1,budgetMs:30000})
-  assert.equal(after.status,'completed')
+  assert.equal(after.status,'completed',JSON.stringify(after).slice(0,2500))
   console.log('[DSH] P3 process-death journal rollback and resume: OK')
  }finally{
   if(child){child.kill('SIGKILL');await sleep(150)}
