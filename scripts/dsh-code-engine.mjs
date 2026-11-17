@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { readFile, writeFile, rename, unlink, stat } from 'node:fs/promises'
 import { dirname, basename, resolve, relative, isAbsolute, sep } from 'node:path'
-import { spawn } from 'node:child_process'
+import { devRun } from './dsh-dev-process.mjs'
 import { TextDecoder } from 'node:util'
 
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
@@ -70,15 +70,9 @@ async function search(a){
  if(a.regex!==true)args.push('--fixed-strings')
  args.push('--',pattern,cwd)
  const limit=Math.min(200,Math.max(1,Number(a.maxResults)||80))
- const result=await new Promise((ok,fail)=>{
-  const proc=spawn('rg',args,{stdio:['ignore','pipe','pipe'],shell:false})
-  let stdout='',stderr='',truncated=false
-  const timer=setTimeout(()=>proc.kill('SIGKILL'),15000)
-  proc.stdout.on('data',d=>{if(stdout.length<2*1024*1024)stdout+=d;else truncated=true})
-  proc.stderr.on('data',d=>{stderr=(stderr+d).slice(-2048)})
-  proc.on('error',fail)
-  proc.on('close',code=>{clearTimeout(timer);if(code!==0&&code!==1)fail(Error('rg failed: '+stderr));else ok({stdout,truncated})})
- })
+ const result=await devRun('rg',args,{cwd,timeoutMs:15000,maxOutputBytes:1048576,captureTail:false})
+ if(result.timedOut)throw Error('rg search timed out')
+ if(result.exitCode!==0&&result.exitCode!==1)throw Error('rg failed: '+(result.stderr||'unknown error').slice(0,2048))
  const matches=[]
  for(const line of result.stdout.split(/\r?\n/)){if(!line)continue;let event;try{event=JSON.parse(line)}catch{continue}
   if(event.type!=='match')continue
