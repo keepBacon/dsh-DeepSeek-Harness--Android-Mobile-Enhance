@@ -152,6 +152,7 @@ jobs:
           cp scripts/dsh-project-language.mjs "$stage/libexec/dsh-mobile/dsh-project-language.mjs"
           cp scripts/dsh-project-index.mjs "$stage/libexec/dsh-mobile/dsh-project-index.mjs"
           cp scripts/dsh-workspace-lsp.mjs "$stage/libexec/dsh-mobile/dsh-workspace-lsp.mjs"
+          cp scripts/dsh-lsp-session.mjs "$stage/libexec/dsh-mobile/dsh-lsp-session.mjs"
           cp scripts/dsh-workspace-files.mjs "$stage/libexec/dsh-mobile/dsh-workspace-files.mjs"
           cp scripts/dsh-project-build.mjs "$stage/libexec/dsh-mobile/dsh-project-build.mjs"
           cp scripts/dsh-dev-plan.mjs "$stage/libexec/dsh-mobile/dsh-dev-plan.mjs"
