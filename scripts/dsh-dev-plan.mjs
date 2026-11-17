@@ -23,7 +23,7 @@ export const devPlanTools=[
  {name:'dev_plan_run',description:'Execute up to 4 plan steps synchronously, checkpointing each result. Safe to call repeatedly; never runs in the background.',inputSchema:obj({id:str,maxSteps:{type:'integer',minimum:1,maximum:4},budgetMs:{type:'integer',minimum:1000,maximum:180000}},['id'])},
  {name:'dev_plan_status',description:'Get durable step statuses and compact errors without exposing persisted source-edit contents.',inputSchema:obj({id:str},['id'])},
  {name:'dev_plan_list',description:'List up to 50 stored engineering plans and progress.',inputSchema:obj({limit:{type:'integer',minimum:1,maximum:50}})},
- {name:'dev_plan_cancel',description:'Request cancellation at next step boundary; does not terminate an active build or roll back a committed step.',inputSchema:obj({id:str},['id'])},
+ {name:'dev_plan_cancel',description:'Request cancellation, aborting an active build/test/verify process group and stopping other steps at the next boundary. Mutation journals remain protected.',inputSchema:obj({id:str},['id'])},
  {name:'dev_plan_resume',description:'Resume a paused or cancelled plan; failed steps require recovery and an explicit retry decision.',inputSchema:obj({id:str},['id'])},
  {name:'dev_plan_recover',description:'Inspect interrupted plan work and safely recover project transaction journals; resume only if source preimages match.',inputSchema:obj({id:str,restore:{type:'boolean'}} ,['id'])},
  {name:'dev_plan_report',description:'Summarize execution steps, failure causes, compact diagnostics and outstanding actions.',inputSchema:obj({id:str},['id'])},
@@ -192,15 +192,15 @@ async function sameFingerprints(preimage){
  const fresh=await fingerprints(preimage.map(x=>x.path))
  return fresh.every((value,i)=>value.exists===preimage[i].exists&&value.sha256===preimage[i].sha256)
 }
-async function execute(root,step){
+async function execute(root,step,{signal}={}){
  const args={...step.args}
  switch(step.kind){
   case 'detect':return projectBuildCall('workspace_detect',{root})
   case 'index':return workspaceCall('workspace_index',{root,...args})
   case 'diagnostics':return workspaceCall('workspace_diagnostics',{root,...args})
-  case 'build':return projectBuildCall('workspace_build',{root,...args})
-  case 'test':return projectBuildCall('workspace_test',{root,...args})
-  case 'verify':return projectBuildCall('workspace_verify',{root,...args})
+  case 'build':return projectBuildCall('workspace_build',{root,...args},{signal})
+  case 'test':return projectBuildCall('workspace_test',{root,...args},{signal})
+  case 'verify':return projectBuildCall('workspace_verify',{root,...args},{signal})
   case 'edit':return codeWorkflowCall('workspace_edit_verify',{...args,root,
    edits:args.edits.map(e=>({...e,path:projectFile(root,e.path)}))})
   case 'refactor':return projectFileCall('workspace_refactor',{...args,root})
@@ -263,7 +263,29 @@ async function run(args){
     preimage:MUTATING.has(step.kind)?await fingerprints(targetPaths(state.root,step)):[]}
    await save(state)
    let result,exception
-   try{result=await execute(state.root,step)}catch(e){exception=String(e.message||e).slice(0,1200)}
+   // Only non-mutating build/test/verify calls are asynchronously cancellable.
+   // Cancelling an edit here could interrupt its rollback journal halfway.
+   const cancellable=['build','test','verify'].includes(step.kind)
+   const controller=cancellable?new AbortController():null
+   let checking=false
+   const watcher=controller?setInterval(async()=>{
+    if(checking||controller.signal.aborted)return
+    checking=true
+    try{if(await isCancelled(id))controller.abort()}catch{}
+    finally{checking=false}
+   },100):null
+   watcher?.unref?.()
+   try{
+    if(controller&&await isCancelled(id))controller.abort()
+    result=await execute(state.root,step,{signal:controller?.signal})
+   }catch(e){exception=String(e.message||e).slice(0,1200)}
+   finally{if(watcher)clearInterval(watcher)}
+   if(controller?.signal.aborted||result?.cancelled||result?.steps?.some(x=>x.cancelled)){
+    step.result=smallResult({ok:false,cancelled:true,partial:result||null})
+    step.status='pending';step.finishedAt=now();state.inflight=null
+    state.status='cancelled';state.nextAction='Active command was cancelled; inspect partial results and use dev_plan_resume to retry.'
+    await save(state);break
+   }
    const ok=!exception&&isSuccess(step,result)
    step.result=exception?{ok:false,error:exception}:smallResult(result)
    step.status=ok?'passed':'failed';step.finishedAt=now();state.inflight=null
@@ -369,7 +391,7 @@ async function cancel(args){
  await load(id)
  const fd=await open(cancelledFile(id),'w',0o600)
  try{await fd.writeFile(now());await fd.sync()}finally{await fd.close()}
- return {id,cancellationRequested:true,meaning:'Stop at next step boundary. Active builds are not forcibly terminated.'}
+ return {id,cancellationRequested:true,meaning:'Active build/test/verify commands receive AbortSignal; source edits stop at safe step boundaries.'}
 }
 async function list(args={}){
  let entries
