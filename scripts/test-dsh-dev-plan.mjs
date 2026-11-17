@@ -74,6 +74,34 @@ try{
  const conditionResult=await run(conditional.id)
  assert.equal(conditionResult.steps[1].status,'skipped')
  assert.equal(conditionResult.steps[2].status,'skipped')
+ // Stable DAG scheduling permits out-of-order declarations and preserves
+ // caller indices for visibility, while executing only ready prerequisites.
+ const dag=await devPlanCall('dev_plan_create',{root,name:'P3 DAG ordering',steps:[
+  {kind:'verify',label:'final verification',dependsOn:[2],args:{system:'python',runTests:true}},
+  {kind:'detect',label:'independent detection'},
+  {kind:'index',label:'index sources',dependsOn:[1]}
+ ]})
+ assert.deepEqual(dag.steps.map(x=>x.sourceIndex),[1,2,0])
+ assert.deepEqual(dag.steps.map(x=>x.dependsOn),[[],[1],[2]])
+ assert.equal((await run(dag.id)).status,'completed')
+ const depFailure=await devPlanCall('dev_plan_create',{root,steps:[
+  {kind:'test',label:'intentional failure',onFailure:'continue',args:{system:'python',args:['--bad-option']}},
+  {kind:'detect',label:'blocked step',dependsOn:[0]},
+  {kind:'detect',label:'independent step'}
+ ]})
+ const blockedRun=await run(depFailure.id)
+ assert.equal(blockedRun.steps[0].status,'failed')
+ assert.equal(blockedRun.steps[1].status,'skipped')
+ assert.equal(blockedRun.steps[1].result.reason,'dependency_not_passed')
+ assert.equal(blockedRun.steps[2].status,'passed')
+ const blockedReport=await devPlanCall('dev_plan_report',{id:depFailure.id})
+ assert.equal(blockedReport.report.blocked.length,1)
+ for(const bad of [
+  [{kind:'detect',dependsOn:[1]},{kind:'detect',dependsOn:[0]}],
+  [{kind:'detect',dependsOn:[0]}],
+  [{kind:'detect',dependsOn:[1]}],
+  [{kind:'detect',dependsOn:[1,1]},{kind:'detect'}]
+ ])await assert.rejects(devPlanCall('dev_plan_create',{root,steps:bad}),/dependencies|cycle/)
  // Simulate restarting after source mutation was checkpointed but before
  // its result was recorded. An unchanged preimage is safe to retry.
  const crash=await devPlanCall('dev_plan_create',{root,steps:[
