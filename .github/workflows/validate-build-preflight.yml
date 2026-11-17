@@ -122,6 +122,7 @@ jobs:
           node scripts/test-dsh-workspace-files.mjs
           node scripts/test-dsh-project-build.mjs
           node scripts/test-dsh-workspace-edit-verify.mjs
+          node scripts/test-dsh-dev-plan.mjs
           node scripts/test-code-engine-workflow.mjs
           node scripts/test-code-engine-journal.mjs
           node --check app/src/main/assets/codex-relay-tdz-compat.mjs
@@ -153,6 +154,7 @@ jobs:
           cp scripts/dsh-workspace-lsp.mjs "$stage/libexec/dsh-mobile/dsh-workspace-lsp.mjs"
           cp scripts/dsh-workspace-files.mjs "$stage/libexec/dsh-mobile/dsh-workspace-files.mjs"
           cp scripts/dsh-project-build.mjs "$stage/libexec/dsh-mobile/dsh-project-build.mjs"
+          cp scripts/dsh-dev-plan.mjs "$stage/libexec/dsh-mobile/dsh-dev-plan.mjs"
           cp scripts/dsh-web-page-reader.mjs "$stage/libexec/dsh-mobile/dsh-web-page-reader.mjs"
           cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
           cp scripts/dsh-android-tool-spawn.mjs "$stage/libexec/dsh-mobile/dsh-android-tool-spawn.mjs"
