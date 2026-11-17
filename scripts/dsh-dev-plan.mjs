@@ -202,18 +202,20 @@ async function execute(root,step,{signal}={}){
   case 'test':return projectBuildCall('workspace_test',{root,...args},{signal})
   case 'verify':return projectBuildCall('workspace_verify',{root,...args},{signal})
   case 'edit':return codeWorkflowCall('workspace_edit_verify',{...args,root,
-   edits:args.edits.map(e=>({...e,path:projectFile(root,e.path)}))})
+   edits:args.edits.map(e=>({...e,path:projectFile(root,e.path)}))},{signal})
   case 'refactor':return projectFileCall('workspace_refactor',{...args,root})
   case 'repair':{
    const attempts=[]
    for(const [i,candidate] of args.candidates.entries()){
     const response=await codeWorkflowCall('workspace_edit_verify',{root,system:args.system,
      edits:candidate.edits.map(e=>({...e,path:projectFile(root,e.path)})),
-     runTests:args.runTests!==false,timeoutMs:args.timeoutMs,lockTimeoutMs:args.lockTimeoutMs})
+     runTests:args.runTests!==false,timeoutMs:args.timeoutMs,lockTimeoutMs:args.lockTimeoutMs},{signal})
     attempts.push({candidate:i,label:String(candidate.label||'candidate '+(i+1)).slice(0,100),
      ok:response.ok,phase:response.phase||null,verification:smallResult(response.verification||null),
      rollback:response.rollback?{ok:response.rollback.ok,conflicts:response.rollback.conflicts||[]}:null})
     if(response.ok)return {ok:true,selected:i,attempts}
+    if(signal?.aborted||response.cancelled)return {ok:false,cancelled:true,rollback:response.rollback,attempts,
+     nextAction:'Repair cancelled; source rollback was attempted. Inspect recovery state before resuming.'}
     if(response.rollback?.ok===false||response.phase==='recovery'||response.phase==='lock')
      return {ok:false,stoppedForConflict:true,attempts,
       nextAction:'Review unresolved transaction or source conflict before trying another repair.'}
@@ -265,7 +267,9 @@ async function run(args){
    let result,exception
    // Only non-mutating build/test/verify calls are asynchronously cancellable.
    // Cancelling an edit here could interrupt its rollback journal halfway.
-   const cancellable=['build','test','verify'].includes(step.kind)
+   // For mutations, signal only interrupts verification commands; the edit
+   // transaction must finish rollback before the step may be cancelled.
+   const cancellable=['build','test','verify','edit','repair'].includes(step.kind)
    const controller=cancellable?new AbortController():null
    let checking=false
    const watcher=controller?setInterval(async()=>{
@@ -281,9 +285,19 @@ async function run(args){
    }catch(e){exception=String(e.message||e).slice(0,1200)}
    finally{if(watcher)clearInterval(watcher)}
    if(controller?.signal.aborted||result?.cancelled||result?.steps?.some(x=>x.cancelled)){
-    step.result=smallResult({ok:false,cancelled:true,partial:result||null})
-    step.status='pending';step.finishedAt=now();state.inflight=null
-    state.status='cancelled';state.nextAction='Active command was cancelled; inspect partial results and use dev_plan_resume to retry.'
+    const mutation=MUTATING.has(step.kind)
+    const rollback=result?.rollback?.ok===true
+    const unresolved=mutation&&!rollback
+    step.result=smallResult({ok:false,cancelled:true,partial:result||null,rollback:result?.rollback})
+    step.status=unresolved?'failed':'pending';step.finishedAt=now()
+    if(unresolved){
+     state.status='needs_review'
+     state.nextAction='Cancellation interrupted a mutation without proven rollback; recover the source journal before replay.'
+     // Keep the preimage and inflight marker for crash-aware recovery.
+    }else{
+     state.inflight=null;state.status='cancelled'
+     state.nextAction='Active command was cancelled and sources are safe; inspect results before resuming.'
+    }
     await save(state);break
    }
    const ok=!exception&&isSuccess(step,result)
