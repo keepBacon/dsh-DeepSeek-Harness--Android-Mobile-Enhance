@@ -94,7 +94,7 @@ function diagnostics(text,root,limit=80){
  }
  return {issues,truncated:false}
 }
-async function phaseRun(root,system,phase,opts={}){
+async function phaseRun(root,system,phase,opts={},signal){
  const names=await listDir(root)
  const spec=commandFor(root,system,phase,{
   ...opts,wrapper:names.has('gradlew'),pytest:names.has('pytest.ini')})
@@ -111,22 +111,23 @@ async function phaseRun(root,system,phase,opts={}){
   }
  }
  if(setup){
-  const pre=await devRun(setup.command,setup.args,{cwd:root,timeoutMs,maxOutputBytes:MAX_OUTPUT,captureTail:true})
+  const pre=await devRun(setup.command,setup.args,{cwd:root,timeoutMs,maxOutputBytes:MAX_OUTPUT,captureTail:true,signal})
   if(!pre.ok){
    const parsed=diagnostics(pre.stdout+'\n'+pre.stderr,root)
    return {ok:false,phase:'configure',system,command:setup.command,args:setup.args,cwd:root,
-    exitCode:pre.exitCode,timedOut:pre.timedOut,stdout:pre.stdout,stderr:pre.stderr,
+    exitCode:pre.exitCode,timedOut:pre.timedOut,cancelled:pre.cancelled,stdout:pre.stdout,stderr:pre.stderr,
     diagnostics:parsed.issues,nextAction:'CMake configuration failed; correct toolchain or CMakeLists.txt before building.'}
   }
  }
  // No shell; project-owned build scripts still execute with the privileges of
  // the DSH application. Use trusted project sources only.
- const run=await devRun(spec.command,spec.args,{cwd:root,timeoutMs,maxOutputBytes:MAX_OUTPUT,captureTail:true})
+ const run=await devRun(spec.command,spec.args,{cwd:root,timeoutMs,maxOutputBytes:MAX_OUTPUT,captureTail:true,signal})
  const parsed=diagnostics(run.stdout+'\n'+run.stderr,root)
  return {ok:run.ok,phase,system,command:spec.command,args:spec.args,cwd:root,
   exitCode:run.exitCode,timedOut:run.timedOut,cancelled:run.cancelled,truncated:run.truncated,
   durationMs:run.durationMs,stdout:run.stdout,stderr:run.stderr,diagnostics:parsed.issues,
-  diagnosticsTruncated:parsed.truncated,nextAction:run.ok?null:run.timedOut?
+  diagnosticsTruncated:parsed.truncated,nextAction:run.ok?null:run.cancelled?
+   'Build/test was cancelled; inspect partial outputs before resuming.':run.timedOut?
    'Build/test timed out; inspect output and raise timeoutMs if needed.':
    parsed.issues.length?'Fix reported errors and run workspace_verify again.':
    'Inspect stdout/stderr and verify required Android toolchain executables are available.'}
@@ -138,19 +139,22 @@ async function selected(args){
   throw Error('build system not detected in root; inspect workspace_detect or specify a supported project manifest')
  return {root,system,detected}
 }
-export async function projectBuildCall(name,args={}){
+export async function projectBuildCall(name,args={},context={}){
+ const signal=context.signal
  if(name==='workspace_detect')return detect(await rootDir(args.root))
  if(!isProjectBuildTool(name))throw Error('unknown project build tool')
  const {root,system,detected}=await selected(args)
- if(name==='workspace_build')return phaseRun(root,system,'build',args)
- if(name==='workspace_test')return phaseRun(root,system,'test',args)
+ if(name==='workspace_build')return phaseRun(root,system,'build',args,signal)
+ if(name==='workspace_test')return phaseRun(root,system,'test',args,signal)
  if(name==='workspace_verify'){
   const steps=[]
-  const build=await phaseRun(root,system,'build',args);steps.push(build)
+  const build=await phaseRun(root,system,'build',args,signal);steps.push(build)
   if(!build.ok)return {ok:false,system,root,failedPhase:'build',steps,nextAction:build.nextAction}
-  if(args.runTests!==false)steps.push(await phaseRun(root,system,'test',args))
+  if(signal?.aborted)return {ok:false,cancelled:true,system,root,failedPhase:'cancelled',steps,
+   nextAction:'Verification cancelled before tests; resume only after reviewing partial build outputs.'}
+  if(args.runTests!==false)steps.push(await phaseRun(root,system,'test',args,signal))
   const failed=steps.find(s=>!s.ok)
-  return {ok:!failed,system,root,failedPhase:failed?.phase||null,steps,
+  return {ok:!failed,cancelled:!!failed?.cancelled,system,root,failedPhase:failed?.phase||null,steps,
    nextAction:failed?.nextAction||null}
  }
  throw Error('unknown P2 project build tool')
