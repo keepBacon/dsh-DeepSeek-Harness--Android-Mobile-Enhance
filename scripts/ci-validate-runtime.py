@@ -28,6 +28,7 @@ REQUIRED = (
  'usr/libexec/dsh-mobile/dsh-workspace-lsp.mjs',
  'usr/libexec/dsh-mobile/dsh-workspace-files.mjs',
  'usr/libexec/dsh-mobile/dsh-project-build.mjs',
+ 'usr/libexec/dsh-mobile/dsh-dev-plan.mjs',
  'usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs',
  'usr/libexec/dsh-mobile/dsh-bounded-spawn.mjs',
  'usr/libexec/dsh-mobile/dsh-dev-process.mjs',
