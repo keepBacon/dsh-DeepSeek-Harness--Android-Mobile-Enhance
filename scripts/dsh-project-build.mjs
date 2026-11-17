@@ -63,7 +63,7 @@ function commandFor(root,system,phase,opts){
    return {command:'ctest',args:['--test-dir',join(root,'build'),'--output-on-failure',...args]}
   case 'npm':return {command:'npm',args:['run',phase==='build'?'build':'test','--',...args]}
   case 'python':
-   return {command:'python3',args:phase==='build'?['-m','compileall','-q',root,...args]:
+   return {command:'python3',args:phase==='build'?['-m','compileall','-q','-f',root,...args]:
      opts.pytest?['-m','pytest',...args]:['-m','unittest','discover',...args]}
   case 'cargo':return {command:'cargo',args:[phase,...args]}
   case 'go':return {command:'go',args:[phase==='build'?'build':'test','./...',...args]}
