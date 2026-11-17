@@ -3,7 +3,6 @@
 import {lstat,realpath,readdir,readFile} from 'node:fs/promises'
 import {resolve,join,dirname,relative,sep} from 'node:path'
 import {devRun} from './dsh-dev-process.mjs'
-import {workspaceCall} from './dsh-project-index.mjs'
 
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
@@ -58,13 +57,14 @@ function commandFor(root,system,phase,opts){
   throw Error('invalid target')
  switch(system){
   case 'gradle':
-   return {command:'./gradlew',args:[phase==='build'?'assemble':'test',...args]}
+   return {command:opts.wrapper===false?'gradle':'./gradlew',args:[phase==='build'?'assemble':'test',...args]}
   case 'cmake':
    if(phase==='build')return {command:'cmake',args:['--build',join(root,'build'),...(target?['--target',target]:[]),...args]}
    return {command:'ctest',args:['--test-dir',join(root,'build'),'--output-on-failure',...args]}
   case 'npm':return {command:'npm',args:['run',phase==='build'?'build':'test','--',...args]}
   case 'python':
-   return {command:'python3',args:phase==='build'?['-m','compileall','-q',root,...args]:['-m','pytest',...args]}
+   return {command:'python3',args:phase==='build'?['-m','compileall','-q',root,...args]:
+     opts.pytest?['-m','pytest',...args]:['-m','unittest','discover',...args]}
   case 'cargo':return {command:'cargo',args:[phase,...args]}
   case 'go':return {command:'go',args:[phase==='build'?'build':'test','./...',...args]}
   case 'make':return {command:'make',args:[target||(phase==='build'?'all':'test'),...args]}
@@ -95,8 +95,30 @@ function diagnostics(text,root,limit=80){
  return {issues,truncated:false}
 }
 async function phaseRun(root,system,phase,opts={}){
- const spec=commandFor(root,system,phase,opts),timeoutMs=Math.min(3600000,Math.max(1000,opts.timeoutMs||600000))
- if(opts.dryRun===true)return {ok:true,dryRun:true,phase,system,...spec,cwd:root}
+ const names=await listDir(root)
+ const spec=commandFor(root,system,phase,{
+  ...opts,wrapper:names.has('gradlew'),pytest:names.has('pytest.ini')})
+ const timeoutMs=Math.min(3600000,Math.max(1000,opts.timeoutMs||600000))
+ const setup=system==='cmake'&&phase==='build'?
+  {command:'cmake',args:['-S',root,'-B',join(root,'build')]}:null
+ if(opts.dryRun===true)return {ok:true,dryRun:true,phase,system,...spec,cwd:root,
+  prerequisites:setup?[setup]:[]}
+ if(system==='npm'){
+  const packageFile=JSON.parse(await readFile(join(root,'package.json'),'utf8'))
+  if(!Object.hasOwn(packageFile.scripts||{},phase)){
+   return {ok:false,phase,system,command:spec.command,args:spec.args,cwd:root,exitCode:null,
+    diagnostics:[],nextAction:'package.json lacks a '+phase+' script; define one or select another build system.'}
+  }
+ }
+ if(setup){
+  const pre=await devRun(setup.command,setup.args,{cwd:root,timeoutMs,maxOutputBytes:MAX_OUTPUT,captureTail:true})
+  if(!pre.ok){
+   const parsed=diagnostics(pre.stdout+'\n'+pre.stderr,root)
+   return {ok:false,phase:'configure',system,command:setup.command,args:setup.args,cwd:root,
+    exitCode:pre.exitCode,timedOut:pre.timedOut,stdout:pre.stdout,stderr:pre.stderr,
+    diagnostics:parsed.issues,nextAction:'CMake configuration failed; correct toolchain or CMakeLists.txt before building.'}
+  }
+ }
  // No shell; project-owned build scripts still execute with the privileges of
  // the DSH application. Use trusted project sources only.
  const run=await devRun(spec.command,spec.args,{cwd:root,timeoutMs,maxOutputBytes:MAX_OUTPUT,captureTail:true})
