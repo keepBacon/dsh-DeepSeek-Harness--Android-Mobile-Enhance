@@ -21,6 +21,7 @@ on:
       - 'scripts/dsh-project-build.mjs'
       - 'scripts/test-dsh-workspace-files.mjs'
       - 'scripts/test-dsh-project-build.mjs'
+      - 'scripts/test-dsh-workspace-edit-verify.mjs'
       - 'scripts/test-dsh-workspace-lsp.mjs'
       - 'scripts/test-dsh-project-index.mjs'
       - 'scripts/test-dsh-inspector-tools.mjs'
