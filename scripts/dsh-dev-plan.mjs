@@ -133,7 +133,7 @@ const view=state=>({id:state.id,name:state.name,root:state.root,status:state.sta
   startedAt:s.startedAt,finishedAt:s.finishedAt,result:s.result})),nextAction:state.nextAction||null})
 async function save(state){state.updatedAt=now();await durableJson(filename(state.id),state)}
 async function withLock(id,fn){
- const lock=await acquirePathLocks([filename(id)],{timeoutMs:15000})
+ const lock=await acquirePathLocks([filename(id)],{timeoutMs:15000,staleMs:1500})
  try{return await fn()}finally{await lock.release()}
 }
 async function create(args){
