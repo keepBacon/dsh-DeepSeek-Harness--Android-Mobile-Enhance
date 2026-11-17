@@ -2,11 +2,23 @@
 // Only regular files inside the explicit project root are eligible. Existing
 // source-text edits continue to use code_edit_verify and its journal.
 import {createHash,randomBytes} from 'node:crypto'
-import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,link} from 'node:fs/promises'
+import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,link,open} from 'node:fs/promises'
 import {resolve,join,dirname,basename,sep,isAbsolute,relative} from 'node:path'
 import {homedir} from 'node:os'
 import {acquirePathLocks} from './dsh-code-engine-journal.mjs'
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex')
+async function durableWrite(path,data,mode=0o600){
+ const fd=await open(path,'wx',mode)
+ try{await fd.writeFile(data);await fd.sync()}finally{await fd.close()}
+}
+async function syncDir(dir){
+ let fd
+ try{fd=await open(dir,'r');await fd.sync()}
+ catch(e){
+  // Some Android filesystems do not allow opening directories as FDs.
+  if(!['EINVAL','EISDIR','EPERM','EACCES','EOPNOTSUPP'].includes(e.code))throw e
+ }finally{await fd?.close()}
+}
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
 const operation=obj({type:{type:'string',enum:['create','replace','move','delete']},path:str,to:str,content:str,expectedSha256:str},['type','path'])
@@ -73,7 +85,7 @@ async function validated(root,ops){
 }
 async function atomicJson(file,data){
  const tmp=file+'.'+randomBytes(6).toString('hex')+'.tmp'
- try{await writeFile(tmp,JSON.stringify(data),{flag:'wx',mode:0o600});await rename(tmp,file)}
+ try{await durableWrite(tmp,JSON.stringify(data),0o600);await rename(tmp,file);await syncDir(dirname(file))}
  finally{await rm(tmp,{force:true}).catch(()=>{})}
 }
 async function stateOf(dir){return JSON.parse(await readFile(join(dir,'manifest.json'),'utf8'))}
@@ -81,12 +93,13 @@ async function stage(root,rows){
  const store=journalPath(root)
  await mkdir(store,{recursive:true,mode:0o700})
  const id=Date.now().toString(36)+'-'+randomBytes(8).toString('hex')
- const dir=join(store,id);await mkdir(dir,{mode:0o700})
+ const dir=join(store,id);await mkdir(dir,{mode:0o700});await syncDir(store)
  const manifest={version:1,id,root,phase:'prepared',createdAt:new Date().toISOString(),
   actions:rows.map(({type,from,to,oldHash,afterHash,mode,size},i)=>({type,from,to,oldHash,afterHash,mode,size,backup:'file-'+i+'.bak'}))}
  try{
-  for(let i=0;i<rows.length;i++)if(rows[i].bytes)await writeFile(join(dir,manifest.actions[i].backup),rows[i].bytes,{flag:'wx',mode:0o600})
+  for(let i=0;i<rows.length;i++)if(rows[i].bytes)await durableWrite(join(dir,manifest.actions[i].backup),rows[i].bytes,0o600)
   await atomicJson(join(dir,'manifest.json'),manifest)
+  await syncDir(dir)
   return {dir,manifest}
  }catch(e){await rm(dir,{recursive:true,force:true});throw e}
 }
@@ -96,28 +109,32 @@ async function apply(row){
   if(original?.hash!==row.oldHash)throw Error('concurrent edit of project source: '+row.from)
   const tmp=join(dirname(row.from),'.'+basename(row.from)+'.dsh-stage-'+randomBytes(6).toString('hex'))
   try{
-   await writeFile(tmp,row.content,{flag:'wx',mode:row.mode&0o777})
+   await durableWrite(tmp,row.content,row.mode&0o777)
    const recheck=await existing(row.from)
    if(recheck?.hash!==row.oldHash)throw Error('concurrent edit of project source: '+row.from)
    await rename(tmp,row.from)
+   await syncDir(dirname(row.from))
   }finally{await rm(tmp,{force:true}).catch(()=>{})}
  }else if(row.type==='delete'){
   const current=await existing(row.from)
   if(current?.hash!==row.oldHash)throw Error('concurrent change before delete: '+row.from)
   await rm(row.from)
+  await syncDir(dirname(row.from))
  }else if(row.type==='move'){
   const current=await existing(row.from)
   if(current?.hash!==row.oldHash||await existing(row.to))throw Error('concurrent change before move')
   await rename(row.from,row.to)
+  await syncDir(dirname(row.from));await syncDir(dirname(row.to))
  }else{
   if(await existing(row.from))throw Error('concurrent create target: '+row.from)
   const tmp=join(dirname(row.from),'.'+basename(row.from)+'.dsh-stage-'+randomBytes(6).toString('hex'))
   try{
-   await writeFile(tmp,row.content,{flag:'wx',mode:0o600})
+   await durableWrite(tmp,row.content,0o600)
    if(await existing(row.from))throw Error('concurrent create target: '+row.from)
    // link() is exclusive: unlike rename(), it cannot overwrite a
    // concurrently-created target between the last check and commit.
    await link(tmp,row.from)
+   await syncDir(dirname(row.from))
   }finally{await rm(tmp,{force:true}).catch(()=>{})}
  }
 }
