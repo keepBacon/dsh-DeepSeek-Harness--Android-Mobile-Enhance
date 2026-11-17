@@ -2,7 +2,7 @@
 // Only regular files inside the explicit project root are eligible. Existing
 // source-text edits continue to use code_edit_verify and its journal.
 import {createHash,randomBytes} from 'node:crypto'
-import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,open} from 'node:fs/promises'
+import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,link} from 'node:fs/promises'
 import {resolve,join,dirname,basename,sep,isAbsolute,relative} from 'node:path'
 import {homedir} from 'node:os'
 import {acquirePathLocks} from './dsh-code-engine-journal.mjs'
@@ -103,7 +103,9 @@ async function apply(row){
   try{
    await writeFile(tmp,row.content,{flag:'wx',mode:0o600})
    if(await existing(row.from))throw Error('concurrent create target: '+row.from)
-   await rename(tmp,row.from)
+   // link() is exclusive: unlike rename(), it cannot overwrite a
+   // concurrently-created target between the last check and commit.
+   await link(tmp,row.from)
   }finally{await rm(tmp,{force:true}).catch(()=>{})}
  }
 }
@@ -159,6 +161,12 @@ async function recoverUnlocked(root,{dryRun=false}={}){
  }
  return {ok:transactions.every(x=>x.status!=='conflict'&&x.status!=='unreadable-journal'),transactions}
 }
+async function pendingJournals(root){
+ const store=journalPath(root)
+ let entries=[]
+ try{entries=await readdir(store,{withFileTypes:true})}catch(e){if(e.code!=='ENOENT')throw e}
+ return entries.filter(e=>e.isDirectory()).length
+}
 async function refactor(args){
  const root=await rootPath(args.root),rows=await validated(root,args.operations)
  const summary=rows.map(({type,from,to,oldHash,afterHash})=>({type,path:relative(root,from),to:to?relative(root,to):null,beforeSha256:oldHash,afterSha256:afterHash}))
@@ -166,8 +174,9 @@ async function refactor(args){
  const paths=rows.flatMap(x=>[x.from,x.to].filter(Boolean))
  const locks=await acquirePathLocks(paths,{timeoutMs:args.lockTimeoutMs})
  try{
-  const recovered=await recoverUnlocked(root)
-  if(!recovered.ok)throw Error('unresolved workspace file journal conflicts; recover first')
+  // Do not recover unrelated transactions while holding locks for only
+  // this batch. Explicit recovery acquires every journal path first.
+  if(await pendingJournals(root))throw Error('pending workspace file journal; use workspace_refactor_recover before starting a new operation')
   // Revalidate AFTER lock acquisition: the preview cannot be a write precondition.
   const current=await validated(root,args.operations)
   if(current.some((r,i)=>r.oldHash!==rows[i].oldHash))throw Error('workspace changed during file transaction')
