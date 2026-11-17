@@ -6,6 +6,7 @@ import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,link,open} fro
 import {resolve,join,dirname,basename,sep,isAbsolute,relative} from 'node:path'
 import {homedir} from 'node:os'
 import {acquirePathLocks} from './dsh-code-engine-journal.mjs'
+import {projectBuildCall} from './dsh-project-build.mjs'
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex')
 async function durableWrite(path,data,mode=0o600){
  const fd=await open(path,'wx',mode)
@@ -23,7 +24,7 @@ const obj=(properties,required=[])=>({type:'object',properties,required,addition
 const str={type:'string'}
 const operation=obj({type:{type:'string',enum:['create','replace','move','delete']},path:str,to:str,content:str,expectedSha256:str},['type','path'])
 export const projectFileTools=[
- {name:'workspace_refactor',description:'Create, replace, move or delete up to 24 regular project files with dry-run and durable transaction recovery. Text edits use code_edit_verify.',inputSchema:obj({root:str,operations:{type:'array',items:operation,minItems:1,maxItems:24},dryRun:{type:'boolean'},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}},['root','operations'])},
+ {name:'workspace_refactor',description:'Create, replace, move or delete up to 24 regular project files with dry-run and durable transaction recovery. Text edits use code_edit_verify.',inputSchema:obj({root:str,operations:{type:'array',items:operation,minItems:1,maxItems:24},dryRun:{type:'boolean'},verify:{type:'boolean'},runTests:{type:'boolean'},system:str,timeoutMs:{type:'integer',minimum:1000,maximum:3600000},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}},['root','operations'])},
  {name:'workspace_refactor_recover',description:'Recover incomplete project file transactions without overwriting files changed externally. Reports conflicts.',inputSchema:obj({root:str,dryRun:{type:'boolean'}},['root'])},
 ]
 export const isProjectFileTool=name=>projectFileTools.some(x=>x.name===name)
@@ -224,16 +225,22 @@ async function refactor(args){
   const current=await validated(root,args.operations)
   if(current.some((r,i)=>r.oldHash!==rows[i].oldHash))throw Error('workspace changed during file transaction')
   const t=await stage(root,current)
+  let verification=null
   try{
    t.manifest.phase='applying';await atomicJson(join(t.dir,'manifest.json'),t.manifest)
    for(const row of current)await apply(row)
+   if(args.verify===true){
+    verification=await projectBuildCall('workspace_verify',{root,system:args.system,
+     runTests:args.runTests!==false,timeoutMs:args.timeoutMs||600000})
+    if(!verification.ok)throw Error('project verification failed at '+(verification.failedPhase||'unknown')+' phase')
+   }
    t.manifest.phase='committed';await atomicJson(join(t.dir,'manifest.json'),t.manifest)
    await rm(t.dir,{recursive:true,force:true}).catch(()=>{})
-   return {ok:true,dryRun:false,transactionId:t.manifest.id,files:summary}
+   return {ok:true,dryRun:false,transactionId:t.manifest.id,files:summary,verification}
   }catch(e){
    const rollback=await restore(t.dir,t.manifest)
    if(rollback.ok)await rm(t.dir,{recursive:true,force:true}).catch(()=>{})
-   return {ok:false,error:String(e.message||e),rollback,transactionId:t.manifest.id}
+   return {ok:false,error:String(e.message||e),rollback,verification,transactionId:t.manifest.id}
   }
  }finally{await locks.release()}
 }
