@@ -19,6 +19,24 @@ P3 introduces **explicit, reproducible engineering plans** across the existing P
 
 Supported step kinds: `detect`, `index`, `diagnostics`, `build`, `test`, `verify`, `edit`, `refactor`, `repair`.
 
+## Explicit dependency graph (DAG)
+
+Plan steps may declare `dependsOn` as a list of zero-based indices into the **original submitted steps**. Creation validates references, rejects self-dependencies, duplicates and cycles, and persists a stable topological order. The plan status includes both the execution index and the original `sourceIndex`. Plans without dependencies preserve their original order. No parallel execution is implied.
+
+Dependencies require a **passed** prerequisite: if any prerequisite fails or is skipped, the dependent step is skipped with `reason: dependency_not_passed`, and the report identifies `blockedBy` original indices. Unrelated steps may still run after a non-mutating step with `onFailure: continue`. A plan with blocked dependencies reports `completed_with_failures`, not a successful completion.
+
+Example, where source step 0 is deliberately listed before its prerequisites:
+
+```json
+{"root":"/path/to/project","steps":[
+  {"kind":"verify","dependsOn":[2],"args":{"system":"python","runTests":true}},
+  {"kind":"detect"},
+  {"kind":"index","dependsOn":[1]}
+]}
+```
+
+The persisted execution order is detect (source 1), index (source 2), verify (source 0).
+
 ## Execution contract
 
 - Plan state is under `$HOME/.dsh/dev-plans`; use `DSH_DEV_PLAN_DIR` only for testing. Plan IDs are random, state persists as atomic snapshots, and each plan acquires a process-shared lock.
@@ -44,11 +62,11 @@ Call `dev_plan_run` with the created `id`; inspect `dev_plan_status` or `dev_pla
 
 ## Acceptance tests
 
-- `scripts/test-dsh-dev-plan.mjs` validates plan persistence, phased execution, edits verified through Python build/test, skipped conditions, cancellation and retry decisions.
+- `scripts/test-dsh-dev-plan.mjs` validates plan persistence, phased execution, DAG ordering/cycle rejection/failed-prerequisite propagation, edits verified through Python build/test, skipped conditions, cancellation and retry decisions.
 - `scripts/test-android-mcp-wire.mjs` checks real stdio MCP discovery and plan creation/status through the final runtime bundle.
 - GitHub preflight, Runtime Graph, Gradle packaging, and signed ARM64 APK checks are separate tests.
 - Real Android app-UID behavior, process-death recovery, physical power-loss durability and long-lived multi-project memory pressure still require device acceptance.
 
 ## Remaining P3 phases
 
-This first P3 delivery is a deterministic engineering **execution engine**, not a complete autonomous coding agent. Further work includes dependency-aware task graph scheduling, subprocess cancellation of active builds, more detailed diagnostics-to-repair routing, persistent language-server reuse, and Android true-device recovery benchmarks. Do not mark those as completed.
+This first P3 delivery is a deterministic engineering **execution engine**, not a complete autonomous coding agent. Dependency-aware **sequential** task graph scheduling is implemented. Further work includes active subprocess cancellation during builds, richer diagnostics-to-repair routing, persistent language-server reuse, and Android true-device recovery benchmarks. Do not mark those as completed.
