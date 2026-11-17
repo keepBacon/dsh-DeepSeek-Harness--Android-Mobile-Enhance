@@ -130,6 +130,11 @@ async function test(kind,dir){
       const dryPlan=await call('workspace_refactor',{root:dir,dryRun:true,
         operations:[{type:'create',path:'p2-created.ts',content:'export const result=3\\n'}]});
       assert.equal(dryPlan.ok,true);
+      const plan=await call('dev_plan_create',{root:dir,name:'P3 wire smoke',
+        steps:[{kind:'detect'},{kind:'index'}]});
+      assert.equal(plan.status,'ready');
+      const status=await call('dev_plan_status',{id:plan.id});
+      assert.equal(status.total,2);
       const detected=await call('workspace_detect',{root:dir});
       assert.ok(Array.isArray(detected.systems));
       const context=await call('code_context',{path:file});
