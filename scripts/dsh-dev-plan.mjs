@@ -316,7 +316,7 @@ async function run(args){
    state.status='paused';state.nextAction=null
    await save(state)
   }
-  if(state.cursor>=state.steps.length){
+  if(state.cursor>=state.steps.length&&state.status!=='failed'&&state.status!=='cancelled'&&state.status!=='needs_review'){
    state.status=state.steps.some(s=>s.status==='failed'||s.result?.reason==='dependency_not_passed')?'completed_with_failures':'completed'
    state.nextAction=state.status==='completed_with_failures'?
     'A step failed but was configured to continue; review the report.':null
