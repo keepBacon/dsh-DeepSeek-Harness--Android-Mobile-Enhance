@@ -18,7 +18,7 @@ P2 builds upon the existing P0 Android argv-only process runner and P1 workspace
 
 - Up to 24 create/replace/move/delete operations per batch, up to 8 MiB per changed file. Directories must already exist; directory-tree renames/deletes are intentionally excluded.
 - Relative project-contained paths only. Traversal refuses symlink parents and symlink files. A file cannot occur twice in one transaction.
-- Every batch supports dry-run and SHA-256 source preconditions.
+- Every batch supports dry-run and SHA-256 source preconditions. An optional `verify:true` runs `workspace_verify` before committing the structural changes; failed build/test triggers the same source-file recovery journal. The build system may generate files that are not included in that source-file rollback.
 - The journal lives under `$HOME/.dsh/workspace-refactor` (or the test-only `DSH_WORKSPACE_JOURNAL_DIR`); it stores original bytes before modifications.
 - Application crashes leave pending journals, rather than silently discarding recovery metadata. A later invocation explicitly calls `workspace_refactor_recover` before another modification. Conflicting external modifications are reported, not overwritten.
 - This is file-level recovery, **not a single atomically durable transaction across all filesystem operations**. Power failure/fsync durability and malicious concurrent writes still require device-specific validation.
