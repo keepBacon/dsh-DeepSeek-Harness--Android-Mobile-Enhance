@@ -45,6 +45,10 @@ try{
  assert.equal(failed.status,'failed')
  assert.equal(failed.steps[0].status,'failed')
  assert.match(await readFile(join(root,'value.py'),'utf8'),/return 4 # P3/)
+ const failureReport=await devPlanCall('dev_plan_report',{id:failedPlan.id})
+ assert.equal(failureReport.report.triage.length,1)
+ assert.equal(failureReport.report.triage[0].requiresExplicitRepair,true)
+ assert.ok(typeof failureReport.report.triage[0].suggestedAction==='string')
  const corrected=await devPlanCall('dev_plan_resume',{id:failedPlan.id})
  assert.equal(corrected.cursor,0)
  assert.equal(corrected.steps[0].status,'pending')
@@ -118,8 +122,10 @@ try{
  assert.equal(blockedRun.steps[1].status,'skipped')
  assert.equal(blockedRun.steps[1].result.reason,'dependency_not_passed')
  assert.equal(blockedRun.steps[2].status,'passed')
+ const reportBefore=(await readFile(join(root,'value.py'),'utf8'))
  const blockedReport=await devPlanCall('dev_plan_report',{id:depFailure.id})
  assert.equal(blockedReport.report.blocked.length,1)
+ assert.equal(await readFile(join(root,'value.py'),'utf8'),reportBefore)
  for(const bad of [
   [{kind:'detect',dependsOn:[1]},{kind:'detect',dependsOn:[0]}],
   [{kind:'detect',dependsOn:[0]}],
