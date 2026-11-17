@@ -63,6 +63,36 @@ try{
  const conditionResult=await run(conditional.id)
  assert.equal(conditionResult.steps[1].status,'skipped')
  assert.equal(conditionResult.steps[2].status,'skipped')
+ // Simulate restarting after source mutation was checkpointed but before
+ // its result was recorded. An unchanged preimage is safe to retry.
+ const crash=await devPlanCall('dev_plan_create',{root,steps:[
+  {kind:'edit',args:{system:'python',edits:[{path:'value.py',oldText:'return 4 # P3',newText:'return 5'}]}}
+ ]})
+ const crashFile=join(process.env.DSH_DEV_PLAN_DIR,crash.id+'.json')
+ const original=await readFile(join(root,'value.py'))
+ const {createHash}=await import('node:crypto')
+ const fingerprint=createHash('sha256').update(original).digest('hex')
+ const state=JSON.parse(await readFile(crashFile,'utf8'))
+ state.status='running';state.steps[0].status='running'
+ state.inflight={index:0,kind:'edit',preimage:[{path:join(root,'value.py'),exists:true,sha256:fingerprint}]}
+ await writeFile(crashFile,JSON.stringify(state))
+ const safe=await devPlanCall('dev_plan_recover',{id:crash.id})
+ assert.equal(safe.recovery.ok,true)
+ assert.equal(safe.status,'paused')
+ assert.equal(safe.cursor,0)
+ // A source hash that no longer matches an inflight journal must require
+ // manual review instead of repeating a potentially successful write.
+ const ambiguous=await devPlanCall('dev_plan_create',{root,steps:[
+  {kind:'edit',args:{system:'python',edits:[{path:'value.py',oldText:'return 4 # P3',newText:'return 5'}]}}
+ ]})
+ const unsafeState=JSON.parse(await readFile(join(process.env.DSH_DEV_PLAN_DIR,ambiguous.id+'.json'),'utf8'))
+ unsafeState.status='running';unsafeState.steps[0].status='running'
+ unsafeState.inflight={index:0,kind:'edit',preimage:[{path:join(root,'value.py'),exists:true,sha256:'0'.repeat(64)}]}
+ await writeFile(join(process.env.DSH_DEV_PLAN_DIR,ambiguous.id+'.json'),JSON.stringify(unsafeState))
+ const uncertain=await devPlanCall('dev_plan_recover',{id:ambiguous.id})
+ assert.equal(uncertain.status,'needs_review')
+ assert.equal(uncertain.recovery.needsReview,true)
+ await assert.rejects(devPlanCall('dev_plan_resume',{id:ambiguous.id}),/resolve or recover/)
  await assert.rejects(devPlanCall('dev_plan_create',{root,steps:[{
   kind:'edit',maxAttempts:2,args:{edits:[{path:'value.py',oldText:'a',newText:'b'}]}
  }]}),/cannot automatically retry/)
