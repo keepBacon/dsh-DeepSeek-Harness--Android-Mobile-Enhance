@@ -45,6 +45,11 @@ try{
  assert.equal(failed.status,'failed')
  assert.equal(failed.steps[0].status,'failed')
  assert.match(await readFile(join(root,'value.py'),'utf8'),/return 4 # P3/)
+ const lastStepFailure=await devPlanCall('dev_plan_create',{root,steps:[
+  {kind:'test',args:{system:'python',args:['--bad-option']}}
+ ]})
+ assert.equal((await run(lastStepFailure.id)).status,'failed',
+  'a final-step failure must never become completed_with_failures')
  const failureReport=await devPlanCall('dev_plan_report',{id:failedPlan.id})
  assert.equal(failureReport.report.triage.length,1)
  assert.equal(failureReport.report.triage[0].requiresExplicitRepair,true)
