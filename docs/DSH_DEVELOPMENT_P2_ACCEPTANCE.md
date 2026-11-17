@@ -6,7 +6,7 @@ P2 builds upon the existing P0 Android argv-only process runner and P1 workspace
 
 | MCP tool | Description |
 |---|---|
-| `workspace_refactor` | Dry-run or execute a bounded batch of regular-file creations, moves and deletions within the selected project. Existing file content editing continues through `code_edit_verify`. |
+| `workspace_refactor` | Dry-run or execute a bounded batch of regular-file creations, source replacements, moves and deletions within the selected project. Existing file content editing continues through `code_edit_verify`. |
 | `workspace_refactor_recover` | Examine and restore unfinished file-operation journals without overwriting conflicting external changes. |
 | `workspace_detect` | Identify build systems from Gradle, CMake, npm, Python, Cargo, Go or Make manifests. |
 | `workspace_build` | Run the selected build system on the P0 Android-aware process runner with bounded execution and compiler diagnostics. |
@@ -16,7 +16,7 @@ P2 builds upon the existing P0 Android argv-only process runner and P1 workspace
 
 ### File transaction limits
 
-- Up to 24 create/move/delete operations per batch, up to 8 MiB per changed file. Directories must already exist; directory-tree renames/deletes are intentionally excluded.
+- Up to 24 create/replace/move/delete operations per batch, up to 8 MiB per changed file. Directories must already exist; directory-tree renames/deletes are intentionally excluded.
 - Relative project-contained paths only. Traversal refuses symlink parents and symlink files. A file cannot occur twice in one transaction.
 - Every batch supports dry-run and SHA-256 source preconditions.
 - The journal lives under `$HOME/.dsh/workspace-refactor` (or the test-only `DSH_WORKSPACE_JOURNAL_DIR`); it stores original bytes before modifications.
@@ -60,4 +60,4 @@ GitHub preflight, Runtime Graph, ARM64 Runtime packing, Gradle compile, and the 
 
 ### P2 scope boundary
 
-P2 provides file-level project structural operations and rollback-verified source edits. It does **not** implement scope-aware AST renaming across all languages, automatic Gradle dependency-file editing, persistent build processes after MCP process exit, or P3's autonomous planning and multi-stage recovery agent. These remain explicit future work rather than being incorrectly claimed as completed.
+P2 provides file-level create/replace/move/delete operations and rollback-verified source edits. It does **not** implement scope-aware AST renaming across all languages, automatic Gradle dependency-file editing, persistent build processes after MCP process exit, or P3's autonomous planning and multi-stage recovery agent. These remain explicit future work rather than being incorrectly claimed as completed.
