@@ -409,7 +409,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         Log.w(TAG, "Cannot read installed MCP tool declarations: $fileName", t)
         return
       }
-      if (!source.contains("const tools=[") && !source.contains("const codeTools=[") && !source.contains("const codeV3Tools=[") && !source.contains("const codeV4Tools=[") && !source.contains("const codeAstTools = [") && !source.contains("const codeWorkflowTools=[") && !source.contains("const workspaceTools=[") && !source.contains("const lspTools=[")) return
+      if (!source.contains("const tools=[") && !source.contains("const codeTools=[") && !source.contains("const codeV3Tools=[") && !source.contains("const codeV4Tools=[") && !source.contains("const codeAstTools = [") && !source.contains("const codeWorkflowTools=[") && !source.contains("const workspaceTools=[") && !source.contains("const lspTools=[") && !source.contains("const projectFileTools=[") && !source.contains("const projectBuildTools=[")) return
       val seen = HashSet<String>()
       for (match in toolPattern.findAll(source)) {
         val name = match.groupValues[1]
@@ -433,6 +433,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
     declaredTools("dsh-inspector-tools.mjs", "mobile_tools", false)
     declaredTools("dsh-project-index.mjs", "mobile_tools", false)
     declaredTools("dsh-workspace-lsp.mjs", "mobile_tools", false)
+    declaredTools("dsh-workspace-files.mjs", "mobile_tools", false)
+    declaredTools("dsh-project-build.mjs", "mobile_tools", false)
     // Code Engine definitions live in a sibling runtime module.
     declaredTools("dsh-code-engine.mjs", "mobile_tools", false)
     declaredTools("dsh-code-engine-v3.mjs", "mobile_tools", false)
@@ -1418,6 +1420,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh-mobile/dsh-project-language.mjs") to "usr/libexec/dsh-mobile/dsh-project-language.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-project-index.mjs") to "usr/libexec/dsh-mobile/dsh-project-index.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-workspace-lsp.mjs") to "usr/libexec/dsh-mobile/dsh-workspace-lsp.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-workspace-files.mjs") to "usr/libexec/dsh-mobile/dsh-workspace-files.mjs",
+      File(rootUsr, "libexec/dsh-mobile/dsh-project-build.mjs") to "usr/libexec/dsh-mobile/dsh-project-build.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-bounded-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-bounded-spawn.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-dev-process.mjs") to "usr/libexec/dsh-mobile/dsh-dev-process.mjs",
@@ -3583,6 +3587,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh-mobile/dsh-project-language.mjs") to "usr/libexec/dsh-mobile/dsh-project-language.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-project-index.mjs") to "usr/libexec/dsh-mobile/dsh-project-index.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-workspace-lsp.mjs") to "usr/libexec/dsh-mobile/dsh-workspace-lsp.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-workspace-files.mjs") to "usr/libexec/dsh-mobile/dsh-workspace-files.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-project-build.mjs") to "usr/libexec/dsh-mobile/dsh-project-build.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-dev-process.mjs") to "usr/libexec/dsh-mobile/dsh-dev-process.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-dev-tasks.mjs") to "usr/libexec/dsh-mobile/dsh-dev-tasks.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
