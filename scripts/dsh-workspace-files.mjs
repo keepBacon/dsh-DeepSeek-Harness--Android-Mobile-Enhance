@@ -9,9 +9,9 @@ import {acquirePathLocks} from './dsh-code-engine-journal.mjs'
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex')
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
-const operation=obj({type:{type:'string',enum:['create','move','delete']},path:str,to:str,content:str,expectedSha256:str},['type','path'])
+const operation=obj({type:{type:'string',enum:['create','replace','move','delete']},path:str,to:str,content:str,expectedSha256:str},['type','path'])
 export const projectFileTools=[
- {name:'workspace_refactor',description:'Create, move or delete up to 24 regular project files with dry-run and durable transaction recovery. Text edits use code_edit_verify.',inputSchema:obj({root:str,operations:{type:'array',items:operation,minItems:1,maxItems:24},dryRun:{type:'boolean'},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}},['root','operations'])},
+ {name:'workspace_refactor',description:'Create, replace, move or delete up to 24 regular project files with dry-run and durable transaction recovery. Text edits use code_edit_verify.',inputSchema:obj({root:str,operations:{type:'array',items:operation,minItems:1,maxItems:24},dryRun:{type:'boolean'},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}},['root','operations'])},
  {name:'workspace_refactor_recover',description:'Recover incomplete project file transactions without overwriting files changed externally. Reports conflicts.',inputSchema:obj({root:str,dryRun:{type:'boolean'}},['root'])},
 ]
 export const isProjectFileTool=name=>projectFileTools.some(x=>x.name===name)
@@ -49,7 +49,7 @@ async function validated(root,ops){
  if(!Array.isArray(ops)||ops.length<1||ops.length>24)throw Error('operations require 1..24 actions')
  const used=new Set(),rows=[]
  for(const op of ops){
-  if(!op||!['create','move','delete'].includes(op.type))throw Error('unsupported operation')
+  if(!op||!['create','replace','move','delete'].includes(op.type))throw Error('unsupported operation')
   const from=filePath(root,decode(op.path,'path')),to=op.type==='move'?filePath(root,decode(op.to,'to')):null
   for(const path of [from,to].filter(Boolean)){
    if(used.has(path))throw Error('each file may occur in only one operation: '+path)
@@ -59,13 +59,15 @@ async function validated(root,ops){
   const dest=to?await existing(to):null
   if(op.type==='create'){
    if(old)throw Error('create target already exists: '+from)
-   if(typeof op.content!=='string'||Buffer.byteLength(op.content)>8*1024*1024)throw Error('create content must be UTF-8 text <= 8 MiB')
   }else if(!old)throw Error('operation source missing: '+from)
+  if(['create','replace'].includes(op.type)&&
+     (typeof op.content!=='string'||Buffer.byteLength(op.content)>8*1024*1024))
+    throw Error('content must be UTF-8 text <= 8 MiB')
   if(dest)throw Error('move target exists: '+to)
   if(op.expectedSha256&&old?.hash!==op.expectedSha256.toLowerCase())throw Error('stale source hash: '+from)
-  const after=op.type==='create'?Buffer.from(op.content,'utf8'):old?.bytes||null
+  const after=['create','replace'].includes(op.type)?Buffer.from(op.content,'utf8'):old?.bytes||null
   rows.push({type:op.type,from,to,oldHash:old?.hash||null,afterHash:after?sha(after):null,
-   size:after?.length||0,mode:old?.mode||0o600,bytes:old?.bytes||null,content:op.type==='create'?op.content:null})
+   size:after?.length||0,mode:old?.mode||0o600,bytes:old?.bytes||null,content:['create','replace'].includes(op.type)?op.content:null})
  }
  return rows
 }
@@ -89,7 +91,17 @@ async function stage(root,rows){
  }catch(e){await rm(dir,{recursive:true,force:true});throw e}
 }
 async function apply(row){
- if(row.type==='delete'){
+ if(row.type==='replace'){
+  const original=await existing(row.from)
+  if(original?.hash!==row.oldHash)throw Error('concurrent edit of project source: '+row.from)
+  const tmp=join(dirname(row.from),'.'+basename(row.from)+'.dsh-stage-'+randomBytes(6).toString('hex'))
+  try{
+   await writeFile(tmp,row.content,{flag:'wx',mode:row.mode&0o777})
+   const recheck=await existing(row.from)
+   if(recheck?.hash!==row.oldHash)throw Error('concurrent edit of project source: '+row.from)
+   await rename(tmp,row.from)
+  }finally{await rm(tmp,{force:true}).catch(()=>{})}
+ }else if(row.type==='delete'){
   const current=await existing(row.from)
   if(current?.hash!==row.oldHash)throw Error('concurrent change before delete: '+row.from)
   await rm(row.from)
@@ -118,6 +130,20 @@ async function restore(dir,manifest,{dryRun=false}={}){
   if(action.type==='create'){
    if(at?.hash===action.afterHash){status='remove-created';if(!dryRun)await rm(action.from)}
    else if(at)conflict='created file was changed externally'
+  }else if(action.type==='replace'){
+   if(!at)conflict='replaced file is missing'
+   else if(at.hash===action.oldHash)status='unchanged'
+   else if(at.hash!==action.afterHash)conflict='replaced file changed externally'
+   else{
+    status='restore-replaced'
+    if(!dryRun){
+     const bytes=await readFile(join(dir,action.backup))
+     if(sha(bytes)!==action.oldHash)throw Error('journal backup hash mismatch')
+     const tmp=action.from+'.dsh-restore-'+randomBytes(6).toString('hex')
+     try{await writeFile(tmp,bytes,{flag:'wx',mode:action.mode&0o777});await rename(tmp,action.from)}
+     finally{await rm(tmp,{force:true}).catch(()=>{})}
+    }
+   }
   }else if(action.type==='delete'){
    if(!at){
     status='restore-deleted'
