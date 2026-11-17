@@ -48,6 +48,17 @@ try{
  const corrected=await devPlanCall('dev_plan_resume',{id:failedPlan.id})
  assert.equal(corrected.cursor,0)
  assert.equal(corrected.steps[0].status,'pending')
+ const repairs=await devPlanCall('dev_plan_create',{root,steps:[{
+  kind:'repair',args:{system:'python',candidates:[
+   {label:'incorrect value',edits:[{path:'value.py',oldText:'return 4 # P3',newText:'return 5'}]},
+   {label:'correct value',edits:[{path:'value.py',oldText:'return 4 # P3',newText:'return 4 # P3 repaired'}]}
+  ]}
+ }]})
+ const repaired=await run(repairs.id)
+ assert.equal(repaired.status,'completed')
+ assert.equal(repaired.steps[0].result.selected,1)
+ assert.equal(repaired.steps[0].result.attempts[0].rollback.ok,true)
+ assert.match(await readFile(join(root,'value.py'),'utf8'),/P3 repaired/)
  const cancelledPlan=await devPlanCall('dev_plan_create',{root,steps:[{kind:'detect'},{kind:'index'}]})
  await devPlanCall('dev_plan_cancel',{id:cancelledPlan.id})
  const cancelled=await run(cancelledPlan.id)
