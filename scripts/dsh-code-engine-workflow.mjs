@@ -1,11 +1,12 @@
 // DSH Code Engine: durable edit/verify/repair workflows.
-import {readFile,lstat} from 'node:fs/promises'
-import {resolve,extname} from 'node:path'
+import {readFile,lstat,realpath} from 'node:fs/promises'
+import {resolve,extname,sep} from 'node:path'
 import {createHash} from 'node:crypto'
 import {TextDecoder} from 'node:util'
 import {codeCall} from './dsh-code-engine.mjs'
 import {codeV4Call} from './dsh-code-engine-v4.mjs'
 import {workspaceCall} from './dsh-project-index.mjs'
+import {projectBuildCall} from './dsh-project-build.mjs'
 import {codeAstCall} from './dsh-code-engine-ast.mjs'
 import {createTransaction,setTransactionPhase,rollbackTransaction,removeTransaction,recoverTransactions,acquirePathLocks,expandTransactionLockPaths} from './dsh-code-engine-journal.mjs'
 
@@ -16,6 +17,7 @@ const edits={type:'array',minItems:1,maxItems:32,items:edit}
 const paths={type:'array',minItems:1,maxItems:32,items:str}
 const verifyArgs={checkPaths:paths,command:str,args:{type:'array',maxItems:128,items:str},cwd:str,timeoutMs:{type:'integer',minimum:100,maximum:120000},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}}
 export const codeWorkflowTools=[
+ {name:'workspace_edit_verify',description:'Journal edits, automatically build and optionally test the project, commit only after both pass or restore originals on failure.',inputSchema:obj({root:str,system:str,edits,runTests:{type:'boolean'},timeoutMs:{type:'integer',minimum:1000,maximum:3600000},dryRun:{type:'boolean'},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}},['root','edits'])},
  {name:'code_edit_verify',description:'Journal exact-context edits durably, run syntax/test verification, commit on success, and recover originals on failure or process crash.',inputSchema:obj({edits,...verifyArgs,dryRun:{type:'boolean'}},['edits'])},
  {name:'code_repair_candidates',description:'Try up to six model-supplied alternative edit batches; durably journal each, verify, recover failed candidates and stop on the first passing candidate or a rollback conflict.',inputSchema:obj({candidates:{type:'array',minItems:1,maxItems:6,items:obj({label:str,edits},['edits'])},...verifyArgs,dryRun:{type:'boolean'}},['candidates'])},
  {name:'code_diagnostics_compare',description:'Durably journal a temporary edit, compare TypeScript diagnostics before/after, and restore original files even after a process crash.',inputSchema:obj({edits,files:paths,projectFiles:{type:'array',maxItems:128,items:str},semantic:{type:'boolean'},lockTimeoutMs:{type:'integer',minimum:100,maximum:60000}},['edits'])},
@@ -54,7 +56,7 @@ async function planEdits(batch){
 function verificationArgs(args,changed){
  if(args.checkPaths!==undefined&&(!Array.isArray(args.checkPaths)||args.checkPaths.length<1||args.checkPaths.length>32))throw Error('checkPaths must contain 1..32 files')
  const supplied=args.checkPaths??changed.filter(p=>['.js','.mjs','.cjs'].includes(extname(p).toLowerCase()))
- if(!supplied.length&&args.command===undefined)throw Error('a verification command or JS checkPaths is required')
+ if(!supplied.length&&args.command===undefined&&!args.workspaceRoot)throw Error('a verification command, workspaceRoot or JS checkPaths is required')
  if(args.command!==undefined&&(typeof args.command!=='string'||!args.command.trim()))throw Error('command must be a nonempty executable')
  if(args.args!==undefined&&(!Array.isArray(args.args)||args.args.length>128||args.args.some(x=>typeof x!=='string')))throw Error('args must contain at most 128 strings')
  return supplied.length?{paths:supplied,command:args.command,args:args.args,cwd:args.cwd,timeoutMs:args.timeoutMs}:{command:args.command,args:args.args,cwd:args.cwd,timeoutMs:args.timeoutMs}
@@ -104,8 +106,20 @@ async function executeLocked(batch,args){
   return {ok:false,phase:'edit',error:String(error.message||error),rollback,recovery}
  }
  let result
- try{result=await codeV4Call('code_verify',verify)}
- catch(error){result={ok:false,failedPhase:'verification',results:[],nextAction:String(error.message||error)}}
+ try{
+  if(args.workspaceRoot){
+   let syntax={ok:true,results:[]}
+   if(verify.paths?.length)syntax=await codeV4Call('code_verify',{paths:verify.paths,timeoutMs:Math.min(120000,args.timeoutMs||120000)})
+   if(!syntax.ok)result=syntax
+   else {
+    const project=await projectBuildCall('workspace_verify',{
+     root:args.workspaceRoot,system:args.workspaceSystem,runTests:args.runTests!==false,
+     timeoutMs:args.timeoutMs||600000})
+    result={ok:project.ok,failedPhase:project.failedPhase,
+     results:[...(syntax.results||[]),...(project.steps||[])],nextAction:project.nextAction}
+   }
+  }else result=await codeV4Call('code_verify',verify)
+ }catch(error){result={ok:false,failedPhase:'verification',results:[],nextAction:String(error.message||error)}}
  if(result.ok){
   try{
    const finalized=await finalizeCommitted(transaction)
@@ -212,6 +226,16 @@ async function changeImpact(args){
 }
 export async function codeWorkflowCall(name,args={}){
  switch(name){
+  case 'workspace_edit_verify':{
+   const root=await realpath(resolve(args.root))
+   const files=(args.edits||[]).map(x=>resolve(x.path))
+   for(const path of files){
+    if(!path.startsWith(root+sep))throw Error('workspace edit escapes project root')
+    const actual=await realpath(path)
+    if(!actual.startsWith(root+sep))throw Error('workspace edit resolves outside root')
+   }
+   return execute(args.edits,{...args,workspaceRoot:root,workspaceSystem:args.system})
+  }
   case 'code_edit_verify':return execute(args.edits,args)
   case 'code_repair_candidates':return candidates(args)
   case 'code_diagnostics_compare':return compare(args)
