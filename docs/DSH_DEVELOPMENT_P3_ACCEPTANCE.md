@@ -12,7 +12,7 @@ P3 introduces **explicit, reproducible engineering plans** across the existing P
 | `dev_plan_run` | Run up to four steps **during the current MCP call**; checkpoints are persisted after every step. No background jobs. |
 | `dev_plan_status` | Show current plan and step status without including raw stored edit payloads. |
 | `dev_plan_list` | List recently saved plans. |
-| `dev_plan_cancel` | Request cancellation between steps. Running commands are not forcibly terminated. |
+| `dev_plan_cancel` | Cancel at a safe step boundary, and abort active `build`/`test`/`verify` process groups through the P0 bounded runner. Source mutations remain step-boundary-only. |
 | `dev_plan_resume` | Resume paused plans, with strict handling for unresolved mutations. |
 | `dev_plan_recover` | Inspect interrupted steps; verify target file fingerprints and conditionally recover existing P2 transaction journals. |
 | `dev_plan_report` | Return a bounded, structured outcome report and suggested next action. |
@@ -43,6 +43,8 @@ The persisted execution order is detect (source 1), index (source 2), verify (so
 - A single run call executes **no more than four steps** with a scheduling budget up to 180 seconds. The deadline is assessed **between** steps; a single build's duration is controlled by its own `timeoutMs` and may exceed the scheduling budget.
 - A successful step is checkpointed before the next step. Repeat calls continue from the cursor and do not re-run previously completed steps.
 - `when` supports `always`, `onPreviousFailure` and `onPreviousSuccess`; `onFailure` supports `stop` and `continue`, with mutating steps prohibited from silently continuing on failure.
+- Active `build`, `test`, and `verify` steps poll cancellation and propagate an AbortSignal into the Android-aware process runner. Cancelled command checkpoints remain pending and require an explicit `dev_plan_resume`; mutation steps are never asynchronously killed because transaction journals must stay consistent.
+- `dev_plan_report.triage` categorizes failures (rollback conflict, cancellation, timeout, missing tool, permission, syntax, test failure, generic build/test) with an actionable, read-only hint. The categorizer never synthesizes patches or silently retries edits.
 - Read-only, build and test steps may have up to three explicit retry attempts. Source-mutating steps never retry automatically.
 - `repair` tries **model/user-supplied** edit candidates sequentially through `workspace_edit_verify`; a rollback conflict prevents further attempts. There is no arbitrary mutation synthesis.
 - On restart, a checkpoint marked `running` cannot simply be retried. Use `dev_plan_recover`. It detects unchanged source fingerprints or uses existing transaction journals for recovery; ambiguous external edits stop with `needs_review`.
@@ -62,11 +64,11 @@ Call `dev_plan_run` with the created `id`; inspect `dev_plan_status` or `dev_pla
 
 ## Acceptance tests
 
-- `scripts/test-dsh-dev-plan.mjs` validates plan persistence, phased execution, DAG ordering/cycle rejection/failed-prerequisite propagation, edits verified through Python build/test, skipped conditions, cancellation and retry decisions.
+- `scripts/test-dsh-dev-plan.mjs` validates plan persistence, phased execution, DAG ordering/cycle rejection/failed-prerequisite propagation, edits verified through Python build/test, skipped conditions, live cancellation, explicit resume, read-only triage and retry decisions.
 - `scripts/test-android-mcp-wire.mjs` checks real stdio MCP discovery and plan creation/status through the final runtime bundle.
 - GitHub preflight, Runtime Graph, Gradle packaging, and signed ARM64 APK checks are separate tests.
 - Real Android app-UID behavior, process-death recovery, physical power-loss durability and long-lived multi-project memory pressure still require device acceptance.
 
 ## Remaining P3 phases
 
-This first P3 delivery is a deterministic engineering **execution engine**, not a complete autonomous coding agent. Dependency-aware **sequential** task graph scheduling is implemented. Further work includes active subprocess cancellation during builds, richer diagnostics-to-repair routing, persistent language-server reuse, and Android true-device recovery benchmarks. Do not mark those as completed.
+This first P3 delivery is a deterministic engineering **execution engine**, not a complete autonomous coding agent. Dependency-aware **sequential** task graph scheduling is implemented. Active subprocess cancellation for build/test/verify and structured, read-only diagnostics-to-repair triage are implemented. Open validation work includes persistent language-server reuse, Android true-device recovery benchmarks, active cancellation for `workspace_edit_verify` without risking incomplete rollbacks, and full device-level performance/robustness testing. These are not declared Android-verified. Do not mark those as completed.
