@@ -190,6 +190,10 @@ export async function lspSessionQuery(options){
  try{return await output}
  catch(error){destroy(session,'LSP query failed');throw error}
 }
+// Sweep idle sessions even if no further LSP requests arrive; unref avoids
+// keeping the MCP host alive solely to preserve cached servers.
+const idleSweep=setInterval(expire,30000)
+idleSweep.unref?.()
 // Keep pooled children from becoming orphans on normal MCP process exit.
 process.once('exit',()=>{for(const slot of sessions.values()){
  if(slot.instance)destroy(slot.instance,'LSP host exiting')
