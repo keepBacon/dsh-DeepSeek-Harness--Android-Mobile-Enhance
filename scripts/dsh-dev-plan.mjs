@@ -16,7 +16,8 @@ const obj=(properties,required=[])=>({type:'object',properties,required,addition
 const str={type:'string'}
 const stepSchema=obj({kind:{type:'string',enum:['detect','index','diagnostics','build','test','verify','edit','refactor','repair']},
  label:str,args:{type:'object'},when:{type:'string',enum:['always','onPreviousFailure','onPreviousSuccess']},
- onFailure:{type:'string',enum:['stop','continue']},maxAttempts:{type:'integer',minimum:1,maximum:3}},['kind'])
+ onFailure:{type:'string',enum:['stop','continue']},maxAttempts:{type:'integer',minimum:1,maximum:3},
+ dependsOn:{type:'array',maxItems:15,uniqueItems:true,items:{type:'integer',minimum:0,maximum:15}}},['kind'])
 export const devPlanTools=[
  {name:'dev_plan_create',description:'Persist an explicit bounded engineering plan without executing steps. Supports conditional verification and supplied repair candidates.',inputSchema:obj({root:str,name:str,steps:{type:'array',minItems:1,maxItems:16,items:stepSchema}},['root','steps'])},
  {name:'dev_plan_run',description:'Execute up to 4 plan steps synchronously, checkpointing each result. Safe to call repeatedly; never runs in the background.',inputSchema:obj({id:str,maxSteps:{type:'integer',minimum:1,maximum:4},budgetMs:{type:'integer',minimum:1000,maximum:180000}},['id'])},
@@ -117,7 +118,7 @@ function normalizedStep(root,input,i){
   }
  }
  return {kind:input.kind,label:String(input.label||input.kind).slice(0,120),
-  args:a,when:input.when||'always',onFailure:input.onFailure||'stop',maxAttempts,
+  sourceIndex:i,dependsOn:[],args:a,when:input.when||'always',onFailure:input.onFailure||'stop',maxAttempts,
   status:'pending',attempts:0,result:null,startedAt:null,finishedAt:null}
 }
 async function load(id){
@@ -127,7 +128,8 @@ async function load(id){
 }
 const view=state=>({id:state.id,name:state.name,root:state.root,status:state.status,createdAt:state.createdAt,
  updatedAt:state.updatedAt,cursor:state.cursor,total:state.steps.length,interrupted:state.status==='running',
- steps:state.steps.map((s,i)=>({index:i,kind:s.kind,label:s.label,status:s.status,attempts:s.attempts,
+ steps:state.steps.map((s,i)=>({index:i,sourceIndex:s.sourceIndex??i,kind:s.kind,label:s.label,
+  dependsOn:(s.dependsOn||[]).map(d=>state.steps[d]?.sourceIndex??d),status:s.status,attempts:s.attempts,
   startedAt:s.startedAt,finishedAt:s.finishedAt,result:s.result})),nextAction:state.nextAction||null})
 async function save(state){state.updatedAt=now();await durableJson(filename(state.id),state)}
 async function withLock(id,fn){
@@ -137,7 +139,25 @@ async function withLock(id,fn){
 async function create(args){
  const root=await rootPath(args.root)
  if(!Array.isArray(args.steps)||args.steps.length<1||args.steps.length>16)throw Error('plan requires 1..16 steps')
- const steps=args.steps.map((s,i)=>normalizedStep(root,s,i))
+ // Dependencies refer to zero-based indices of the caller's original steps.
+ // Stable topological sorting preserves legacy sequential order for plans
+ // without dependencies and keeps the existing durable cursor/checkpoints.
+ const original=args.steps.map((s,i)=>normalizedStep(root,s,i))
+ for(const [i,input] of args.steps.entries()){
+  const deps=input.dependsOn??[]
+  if(!Array.isArray(deps)||deps.length>15||
+   deps.some(d=>!Number.isInteger(d)||d<0||d>=original.length||d===i)||
+   new Set(deps).size!==deps.length)throw Error('invalid plan dependencies at step '+i)
+  original[i].dependsOn=deps
+ }
+ const remaining=new Set(original.map((_,i)=>i)),order=[]
+ while(remaining.size){
+  const next=[...remaining].find(i=>original[i].dependsOn.every(d=>!remaining.has(d)))
+  if(next===undefined)throw Error('plan dependencies contain a cycle')
+  order.push(next);remaining.delete(next)
+ }
+ const positions=new Map(order.map((originalIndex,orderedIndex)=>[originalIndex,orderedIndex]))
+ const steps=order.map(i=>({...original[i],dependsOn:original[i].dependsOn.map(d=>positions.get(d))}))
  const jsonSize=Buffer.byteLength(JSON.stringify(steps))
  if(jsonSize>256*1024)throw Error('development plan exceeds 256 KiB')
  await mkdir(storageRoot(),{recursive:true,mode:0o700})
@@ -223,10 +243,21 @@ async function run(args){
   while(state.cursor<state.steps.length&&consumed<maxSteps&&Date.now()<deadline){
    if(await isCancelled(id)){state.status='cancelled';state.nextAction='Use dev_plan_resume to continue after cancellation.';break}
    const step=state.steps[state.cursor]
+   // A skipped/failed prerequisite never authorizes downstream execution.
+   // Independent branches still run when a non-mutating failure is configured
+   // onFailure:'continue'; no parallel source mutations are introduced.
+   const blocked=(step.dependsOn||[]).filter(d=>state.steps[d]?.status!=='passed')
+   if(blocked.length){
+    step.status='skipped';step.finishedAt=now()
+    step.result={ok:false,reason:'dependency_not_passed',
+     blockedBy:blocked.map(d=>({sourceIndex:state.steps[d].sourceIndex??d,
+      status:state.steps[d].status}))}
+    state.cursor++;await save(state);consumed++;continue
+   }
    const previous=state.cursor>0?state.steps[state.cursor-1].status:null
    const skip=(step.when==='onPreviousFailure'&&previous!=='failed')||
               (step.when==='onPreviousSuccess'&&previous!=='passed')
-   if(skip){step.status='skipped';step.finishedAt=now();state.cursor++;await save(state);consumed++;continue}
+   if(skip){step.status='skipped';step.finishedAt=now();step.result={reason:'condition_not_met',when:step.when,previousStatus:previous};state.cursor++;await save(state);consumed++;continue}
    state.status='running';step.status='running';step.startedAt=now();step.attempts++
    state.inflight={index:state.cursor,kind:step.kind,
     preimage:MUTATING.has(step.kind)?await fingerprints(targetPaths(state.root,step)):[]}
@@ -367,6 +398,7 @@ export async function devPlanCall(name,args={}){
     total:state.steps.length,passed:state.steps.filter(s=>s.status==='passed').length,
     failed:state.steps.filter(s=>s.status==='failed').length,
     skipped:state.steps.filter(s=>s.status==='skipped').length,
+    blocked:state.steps.filter(s=>s.result?.reason==='dependency_not_passed').map(s=>({sourceIndex:s.sourceIndex??state.steps.indexOf(s),label:s.label,blockedBy:s.result.blockedBy})),
     pending:state.steps.filter(s=>['pending','running'].includes(s.status)).length,
     issues:state.steps.filter(s=>s.status==='failed').map(s=>({kind:s.kind,label:s.label,
      diagnostic:s.result?.nextAction||s.result?.verification?.nextAction||
