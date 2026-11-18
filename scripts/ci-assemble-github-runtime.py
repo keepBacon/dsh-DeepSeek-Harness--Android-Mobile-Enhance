@@ -86,6 +86,7 @@ SCRIPT_MAP = {
     "dsh-luau-runner.mjs": "dsh-luau-runner.mjs",
     "dsh-android-sandbox-runner.sh": "android-sandbox-runner.sh",
     "dsh-android-exec.sh": "android-exec.sh",
+    "dsh-android-plugin-git-spawn.cjs": "dsh-android-plugin-git-spawn.cjs",
     "dsh-android-bash-env.sh": "android-bash-env.sh",
 }
 
