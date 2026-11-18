@@ -167,7 +167,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
 
   /** Runtime capabilities relevant to community plugin installation. */
   fun pluginRuntimeSummary(): String {
-    val gitHttps = gitBin.isFile && File(gitExecDir, "git-remote-https").isFile && caBundleFile.isFile
+    val gitHttps = gitBin.isFile && listOf(gitExecDir, File(usrDir, "lib/git-core"))
+      .any { File(it, "git-remote-https").isFile } && caBundleFile.isFile && pluginGitPreload.isFile
     val ssh = sshBin.isFile
     val npmTools = npmBin.isFile && npxBin.isFile
     val sshKey = listOf("id_dsh", "id_ed25519", "id_rsa", "id_ecdsa").any { File(homeDir, ".ssh/$it").isFile }
