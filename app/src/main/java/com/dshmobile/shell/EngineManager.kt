@@ -2262,8 +2262,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun pluginEnv(preload: File = preloadBin): Map<String, String> {
     val cache = File(homeDir, ".cache").apply { mkdirs() }
     val pnpmHome = File(homeDir, ".local/share/pnpm").apply { mkdirs() }
-    val bash = File(usrDir, "bin/bash")
-    val shell = if (bash.isFile) bash.absolutePath else "/system/bin/sh"
+    // npm/pnpm execs the configured script shell directly. The bundled
+    // Bash ELF is under Android app-private noexec storage, whereas the
+    // platform shell is executable and supports standard npm lifecycle syntax.
+    val shell = "/system/bin/sh"
     val env = (engineEnv(preload) + mapOf(
       "PNPM_HOME" to pnpmHome.absolutePath,
       "XDG_CACHE_HOME" to cache.absolutePath,
