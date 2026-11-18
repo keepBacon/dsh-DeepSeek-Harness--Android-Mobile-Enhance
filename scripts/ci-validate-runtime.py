@@ -26,6 +26,7 @@ REQUIRED = (
  'usr/libexec/dsh-mobile/dsh-project-language.mjs',
  'usr/libexec/dsh-mobile/dsh-project-index.mjs',
  'usr/libexec/dsh-mobile/dsh-workspace-lsp.mjs',
+ 'usr/libexec/dsh-mobile/dsh-lsp-session.mjs',
  'usr/libexec/dsh-mobile/dsh-workspace-files.mjs',
  'usr/libexec/dsh-mobile/dsh-project-build.mjs',
  'usr/libexec/dsh-mobile/dsh-dev-plan.mjs',

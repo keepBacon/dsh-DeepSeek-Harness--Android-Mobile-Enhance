@@ -45,6 +45,11 @@ try{
  assert.equal(failed.status,'failed')
  assert.equal(failed.steps[0].status,'failed')
  assert.match(await readFile(join(root,'value.py'),'utf8'),/return 4 # P3/)
+ const lastStepFailure=await devPlanCall('dev_plan_create',{root,steps:[
+  {kind:'test',args:{system:'python',args:['--bad-option']}}
+ ]})
+ assert.equal((await run(lastStepFailure.id)).status,'failed',
+  'a final-step failure must never become completed_with_failures')
  const failureReport=await devPlanCall('dev_plan_report',{id:failedPlan.id})
  assert.equal(failureReport.report.triage.length,1)
  assert.equal(failureReport.report.triage[0].requiresExplicitRepair,true)
@@ -94,6 +99,35 @@ try{
  await rm(join(root,'test_cancel.py'))
  await devPlanCall('dev_plan_resume',{id:live.id})
  assert.equal((await run(live.id)).status,'completed')
+ // Cancelling verification after an edit MUST finish the transaction
+ // rollback before the durable checkpoint is marked safe for resume.
+ await writeFile(join(root,'test_cancel.py'),
+  'import unittest,time\nclass Cancel(unittest.TestCase):\n def test_slow(self):\n  time.sleep(10)\n')
+ const beforeEdit=await readFile(join(root,'value.py'),'utf8')
+ const editCancelled=await devPlanCall('dev_plan_create',{root,steps:[{
+  kind:'edit',label:'cancel after applying verified edit',
+  args:{system:'python',timeoutMs:30000,edits:[
+   {path:'value.py',oldText:'return 4 # P3 repaired',newText:'return 4 # P3 cancel candidate'}
+  ]}
+ }]})
+ const editing=run(editCancelled.id)
+ let applied=false
+ for(let attempt=0;attempt<160;attempt++){
+  const source=await readFile(join(root,'value.py'),'utf8')
+  if(source.includes('P3 cancel candidate')){applied=true;break}
+  await new Promise(resolve=>setTimeout(resolve,25))
+ }
+ assert.equal(applied,true,'edited source should be observable before cancelling verification')
+ await devPlanCall('dev_plan_cancel',{id:editCancelled.id})
+ const editStopped=await editing
+ assert.equal(editStopped.status,'cancelled')
+ assert.equal(editStopped.cursor,0)
+ assert.equal(editStopped.steps[0].result.rollback.ok,true)
+ assert.equal(await readFile(join(root,'value.py'),'utf8'),beforeEdit)
+ await rm(join(root,'test_cancel.py'))
+ await devPlanCall('dev_plan_resume',{id:editCancelled.id})
+ assert.equal((await run(editCancelled.id)).status,'completed')
+ assert.match(await readFile(join(root,'value.py'),'utf8'),/P3 cancel candidate/)
  const conditional=await devPlanCall('dev_plan_create',{root,steps:[
   {kind:'detect'},
   {kind:'diagnostics',when:'onPreviousFailure'},

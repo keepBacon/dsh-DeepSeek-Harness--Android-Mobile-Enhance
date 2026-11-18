@@ -83,7 +83,7 @@ async function finalizeCommitted(transaction){
  try{await removeTransaction(transaction);return {cleanupPending:false}}
  catch(error){return {cleanupPending:true,error:String(error.message||error)}}
 }
-async function executeLocked(batch,args){
+async function executeLocked(batch,args,context={}){
  if(!Array.isArray(batch)||batch.length<1||batch.length>32)throw Error('edits must contain 1..32 entries')
  const requestedPaths=[...new Set(batch.map(entry=>normalizePath(entry.path)))]
  let recovery={results:[]}
@@ -114,8 +114,9 @@ async function executeLocked(batch,args){
    else {
     const project=await projectBuildCall('workspace_verify',{
      root:args.workspaceRoot,system:args.workspaceSystem,runTests:args.runTests!==false,
-     timeoutMs:args.timeoutMs||600000})
-    result={ok:project.ok,failedPhase:project.failedPhase,
+     timeoutMs:args.timeoutMs||600000},{signal:context.signal})
+    result={ok:project.ok,cancelled:project.cancelled||project.steps?.some(s=>s.cancelled)||false,
+     failedPhase:project.failedPhase,
      results:[...(syntax.results||[]),...(project.steps||[])],nextAction:project.nextAction}
    }
   }else result=await codeV4Call('code_verify',verify)
@@ -132,16 +133,17 @@ async function executeLocked(batch,args){
  }
  let rollback
  try{rollback=await rollbackTransaction(transaction)}catch(error){rollback={ok:false,id:transaction.id,error:String(error.message||error)}}
- return {ok:false,dryRun:false,phase:result.failedPhase,preview,verification:compactVerification(result),rollback,changedFiles:changed,recovery}
+ return {ok:false,cancelled:!!result.cancelled,dryRun:false,phase:result.failedPhase,
+  preview,verification:compactVerification(result),rollback,changedFiles:changed,recovery}
 }
-async function execute(batch,args={}){
+async function execute(batch,args={},context={}){
  if(!Array.isArray(batch)||batch.length<1||batch.length>32)throw Error('edits must contain 1..32 entries')
  const paths=[...new Set(batch.map(entry=>normalizePath(entry.path)))]
- if(args.dryRun===true)return executeLocked(batch,args)
+ if(args.dryRun===true)return executeLocked(batch,args,context)
  let locks
  try{const lockPaths=await expandTransactionLockPaths(paths);locks=await acquirePathLocks(lockPaths,{timeoutMs:args.lockTimeoutMs});args={...args,_lockPathsHeld:lockPaths}}
  catch(error){return {ok:false,phase:'lock',error:String(error.message||error),nextAction:'Retry after the conflicting edit finishes; no files were changed.'}}
- try{return await executeLocked(batch,args)}
+ try{return await executeLocked(batch,args,context)}
  finally{await locks.release()}
 }
 async function candidates(args){
@@ -224,7 +226,7 @@ async function changeImpact(args){
   limitations:['Symbol references cover only the supplied projectFiles plus the selected file.',
    'The multi-language project index is static and bounded; dynamic imports/reflection require validation.']}
 }
-export async function codeWorkflowCall(name,args={}){
+export async function codeWorkflowCall(name,args={},context={}){
  switch(name){
   case 'workspace_edit_verify':{
    const root=await realpath(resolve(args.root))
@@ -234,7 +236,7 @@ export async function codeWorkflowCall(name,args={}){
     const actual=await realpath(path)
     if(!actual.startsWith(root+sep))throw Error('workspace edit resolves outside root')
    }
-   return execute(args.edits,{...args,workspaceRoot:root,workspaceSystem:args.system})
+   return execute(args.edits,{...args,workspaceRoot:root,workspaceSystem:args.system},context)
   }
   case 'code_edit_verify':return execute(args.edits,args)
   case 'code_repair_candidates':return candidates(args)

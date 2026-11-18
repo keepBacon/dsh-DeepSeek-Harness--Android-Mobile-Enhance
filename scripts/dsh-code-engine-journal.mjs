@@ -276,7 +276,7 @@ async function recoverOne(dir,options={}){
  const held=new Set((options.lockPathsHeld||[]).map(path=>resolve(path)))
  const paths=[...new Set(manifest.files.map(entry=>resolve(entry.path)).filter(path=>!held.has(path)))]
  let locks
- try{if(paths.length)locks=await acquirePathLocks(paths,{timeoutMs:options.lockTimeoutMs})}
+ try{if(paths.length)locks=await acquirePathLocks(paths,{timeoutMs:options.lockTimeoutMs,staleMs:options.lockStaleMs})}
  catch(error){return summary(manifest,'lock-busy',{error:String(error.message||error)})}
  try{
   let current
@@ -309,6 +309,6 @@ export async function recoverTransactions(options={}){
  }
  dirs=dirs.slice(0,limit)
  const results=[]
- for(const dir of dirs)results.push(await recoverOne(dir,{dryRun:options.dryRun===true,lockPathsHeld:options.lockPathsHeld,lockTimeoutMs:options.lockTimeoutMs}))
+ for(const dir of dirs)results.push(await recoverOne(dir,{dryRun:options.dryRun===true,lockPathsHeld:options.lockPathsHeld,lockTimeoutMs:options.lockTimeoutMs,lockStaleMs:options.lockStaleMs}))
  return {root,checked:results.length,results}
 }
