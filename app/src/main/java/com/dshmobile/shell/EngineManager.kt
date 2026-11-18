@@ -80,6 +80,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private val runtimeIdMarker = File(context.filesDir, "runtime-version.txt")
   private val userHomeInitializedMarker = File(context.filesDir, "user-home-initialized")
   private val gitBin = File(usrDir, "bin/git")
+  private val pluginGitPreload = File(usrDir, "libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs")
   private val sshBin = File(usrDir, "bin/ssh")
   private val npmBin = File(usrDir, "bin/npm")
   private val npxBin = File(usrDir, "bin/npx")
@@ -1035,6 +1036,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
     "build-blocked" -> if (result.pendingBuilds.isEmpty())
       "pnpm 阻止了安装期构建脚本。请只对可信插件授权其 prepare/install 脚本后重试。"
     else "pnpm 阻止了安装期构建脚本；可授权并重试：${result.pendingBuilds.joinToString(", ")}"
+    "git-runtime" -> "内置 Git 无法由 pnpm/Node 子进程执行。已阻止安装，避免更改插件配置；请使用包含 Git noexec 修复的新 APK。"
     "network" -> "网络请求连续失败。已自动重试两次；检查 VPN、DNS、npm registry 或 GitHub 连通性。"
     "not-found" -> "注册表或远程仓库未找到该插件。检查包名、仓库地址、分支或私有仓库凭据。"
     "no-matching-version" -> "没有匹配的插件版本。检查版本范围，或改用插件作者明确支持的版本。"
@@ -2216,8 +2218,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
     // The Termux Git/OpenSSH binaries are relocatable only when their prefix-
     // relative resources are supplied explicitly. This also prevents git/pnpm
     // from hanging on an invisible credential or host-key prompt in WebView.
-    if (gitBin.isFile && gitExecDir.isDirectory) {
-      env["GIT_EXEC_PATH"] = gitExecDir.absolutePath
+    val gitHelperDir = listOf(gitExecDir, File(usrDir, "lib/git-core"))
+      .firstOrNull { File(it, "git-remote-https").isFile }
+    if (gitBin.isFile && gitHelperDir != null) {
+      env["GIT_EXEC_PATH"] = gitHelperDir.absolutePath
       env["GIT_TEMPLATE_DIR"] = File(usrDir, "share/git-core/templates").absolutePath
       env["GIT_CONFIG_SYSTEM"] = gitConfigFile.absolutePath
       env["GIT_TERMINAL_PROMPT"] = "0"
@@ -2273,6 +2277,16 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "CI" to "true",
       "NO_COLOR" to "1",
     )).toMutableMap()
+
+    // pnpm and the DSH CLI spawn Git from Node using child_process. Android
+    // prohibits direct execve on app-private ELF files; a PATH entry alone
+    // cannot fix that. Preload a narrowly scoped Git-only process adapter.
+    if (gitBin.isFile && pluginGitPreload.isFile) {
+      val existing = env["NODE_OPTIONS"].orEmpty().trim()
+      val require = "--require=" + pluginGitPreload.absolutePath
+      env["NODE_OPTIONS"] = listOf(existing, require).filter { it.isNotBlank() }.joinToString(" ")
+      env["npm_config_git"] = gitBin.absolutePath
+    }
 
     // Private HTTPS Git credentials are exposed only to plugin-manager child
     // processes. The helper rejects prompts for any host other than the one
@@ -2330,6 +2344,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun classifyPluginFailure(text: String, timedOut: Boolean = false): String? {
     if (timedOut) return "timeout"
     val rules = listOf(
+      "git-runtime" to Regex("""spawn git ENOENT|git ls-remote.*ENOENT|DSH_ANDROID_EXEC_NOT_FOUND.*git|Git 子进程执行失败""", RegexOption.IGNORE_CASE),
       "build-blocked" to Regex("""ERR_PNPM_IGNORED_BUILDS|Ignored build scripts|ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED|not in the ["']allowBuilds["'] allowlist""", RegexOption.IGNORE_CASE),
       "not-found" to Regex("""ERR_PNPM_FETCH_404|\bE404\b|404 Not Found|Not Found - GET""", RegexOption.IGNORE_CASE),
       "no-matching-version" to Regex("""ERR_PNPM_NO_MATCHING_VERSION|\bETARGET\b|No matching version""", RegexOption.IGNORE_CASE),
@@ -2617,6 +2632,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
     }
     return try {
       ensurePluginWorkspaceCompat(profile)
+      // Git URLs fail later in pnpm as a misleading package-resolution error
+      // if the embedded Git cannot actually be spawned by Node. Fail here with
+      // a focused, real process execution check rather than checking isFile.
+      if (tail.any { it.startsWith("git+") || it.startsWith("github:") }) {
+        val smoke = pluginGitSpawnProbe()
+        if (!smoke.ok) return smoke
+      }
       pluginLogFile.parentFile?.mkdirs()
       pluginLogFile.writeText("")
       val args = mutableListOf(
@@ -2642,6 +2664,37 @@ class EngineManager(private val context: Context, private val pickToken: String?
       Log.e(TAG, "plugin command failed", t)
       val output = (readPluginLog() + "\n" + (t.message ?: t.javaClass.simpleName)).trim()
       PluginCommandResult(false, -3, output, failureKind = classifyPluginFailure(output))
+    }
+  }
+
+  /** Run the actual Git spawn path that pnpm uses; never access the network. */
+  private fun pluginGitSpawnProbe(): PluginCommandResult {
+    if (!gitBin.isFile || !pluginGitPreload.isFile) {
+      return PluginCommandResult(false, -1,
+        "Android 插件安装缺少内置 Git 或 Git 子进程兼容层；请安装包含修复的 APK。",
+        failureKind = "git-runtime")
+    }
+    val diagnostic = File(context.filesDir, "plugin-git-probe.log")
+    return try {
+      diagnostic.writeText("")
+      val code = "const c=require('node:child_process');" +
+        "const r=c.spawnSync('git',['--version'],{encoding:'utf8',timeout:15000});" +
+        "if(r.error){console.error(r.error.message);process.exit(8)};" +
+        "if(r.status!==0){console.error(r.stderr||'git exited '+r.status);process.exit(9)};" +
+        "console.log(String(r.stdout).trim())"
+      val proc = startWithArgsToFile(
+        arrayOf(nodeBin.absolutePath, "-e", code), pluginEnv(preloadBin), diagnostic)
+      val finished = proc.waitFor(20, TimeUnit.SECONDS)
+      if (!finished) proc.destroyForcibly()
+      val output = runCatching { diagnostic.readText().takeLast(2000) }.getOrDefault("")
+      if (!finished || proc.exitValue() != 0) PluginCommandResult(false, -1,
+        "Git 子进程执行失败（Android noexec/Node spawn）：$output",
+        failureKind = "git-runtime")
+      else PluginCommandResult(true, 0, output)
+    } catch (t: Throwable) {
+      PluginCommandResult(false, -1,
+        "Git 运行时探测失败：" + (t.message ?: t.javaClass.simpleName),
+        failureKind = "git-runtime")
     }
   }
 
