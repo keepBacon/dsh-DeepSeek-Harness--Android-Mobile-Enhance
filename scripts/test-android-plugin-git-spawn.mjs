@@ -29,7 +29,7 @@ assert.equal(mod.adaptGitCommand(p+'/bin/git-extra',['status']),null)
 assert.deepEqual(mod.adaptGitCommand('git',['arg with spaces',';echo unsafe']).args.slice(2),
  ['arg with spaces',';echo unsafe'])
 // A true Node child-process call must fail trying the *system shell* on a
-// non-Android runner, not `spawn git ENOENT`.
+// non-Android runner, not a direct Git ENOENT.
 const result=cp.spawnSync('git',['--version'],{encoding:'utf8'})
 assert.equal(result.error?.path,shell)
 ;(async()=>{
