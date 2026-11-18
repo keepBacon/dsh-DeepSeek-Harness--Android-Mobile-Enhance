@@ -1418,6 +1418,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "bin/bash") to "usr/bin/bash",
       File(rootUsr, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(rootUsr, "libexec/dsh-mobile/android-exec.sh") to "usr/libexec/dsh-mobile/android-exec.sh",
+      File(rootUsr, "libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs") to "usr/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs",
       File(rootUsr, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-inspector-tools.mjs") to "usr/libexec/dsh-mobile/dsh-inspector-tools.mjs",
       File(rootUsr, "libexec/dsh-mobile/dsh-project-language.mjs") to "usr/libexec/dsh-mobile/dsh-project-language.mjs",
@@ -2687,7 +2688,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       val finished = proc.waitFor(20, TimeUnit.SECONDS)
       if (!finished) proc.destroyForcibly()
       val output = runCatching { diagnostic.readText().takeLast(2000) }.getOrDefault("")
-      if (!finished || proc.exitValue() != 0) PluginCommandResult(false, -1,
+      if (!finished || (finished && proc.exitValue() != 0)) PluginCommandResult(false, -1,
         "Git 子进程执行失败（Android noexec/Node spawn）：$output",
         failureKind = "git-runtime")
       else PluginCommandResult(true, 0, output)
@@ -3638,6 +3639,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "bin/bash") to "usr/bin/bash",
       File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(usrDir, "libexec/dsh-mobile/android-exec.sh") to "usr/libexec/dsh-mobile/android-exec.sh",
+      File(usrDir, "libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs") to "usr/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs",
       File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-inspector-tools.mjs") to "usr/libexec/dsh-mobile/dsh-inspector-tools.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-project-language.mjs") to "usr/libexec/dsh-mobile/dsh-project-language.mjs",
