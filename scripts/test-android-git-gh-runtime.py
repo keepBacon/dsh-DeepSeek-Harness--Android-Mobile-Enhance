@@ -36,6 +36,12 @@ assert '"GIT_TERMINAL_PROMPT" = "0"' not in engine_text  # do not use incorrect 
 assert 'env["GIT_TERMINAL_PROMPT"] = "0"' in engine_text
 assert '"GIT_SSL_CAINFO"' in engine_text
 assert '"GIT_EXEC_PATH"' in engine_text
+assert 'pluginGitSpawnProbe()' in engine_text
+assert '"NODE_OPTIONS"' in engine_text
+assert '"git-runtime"' in engine_text
+assert 'dsh-android-plugin-git-spawn.cjs' in engine_text
+assert 'dsh-android-plugin-git-spawn.cjs' in builder_text
+assert 'dsh-android-plugin-git-spawn.cjs' in validator_text
 assert '"GIT_CONFIG_SYSTEM"' in engine_text
 assert '"GIT_SSH_COMMAND"' in engine_text
 assert 'append("/system/bin/sh ")' in engine_text
