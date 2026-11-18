@@ -38,6 +38,8 @@ assert '"GIT_SSL_CAINFO"' in engine_text
 assert '"GIT_EXEC_PATH"' in engine_text
 assert 'pluginGitSpawnProbe()' in engine_text
 assert '"NODE_OPTIONS"' in engine_text
+assert 'val shell = "/system/bin/sh"' in engine_text, 'pnpm scripts must use Android executable shell'
+assert '"npm_config_script_shell" to shell' in engine_text
 assert '"git-runtime"' in engine_text
 assert 'dsh-android-plugin-git-spawn.cjs' in engine_text
 assert 'dsh-android-plugin-git-spawn.cjs' in builder_text
