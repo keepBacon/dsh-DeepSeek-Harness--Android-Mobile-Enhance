@@ -106,6 +106,7 @@ jobs:
           node scripts/test-android-model-bash-bridge.mjs
           node scripts/test-android-model-shell-noexec-fix.mjs
           python3 scripts/test-android-git-gh-runtime.py
+          node scripts/test-android-plugin-git-spawn.mjs
           python3 scripts/test-ci-termux-abi.py
           python3 scripts/test-android-search-tools.py
           python3 scripts/test-android-compiler-qemu-runtime.py
@@ -160,6 +161,7 @@ jobs:
           cp scripts/dsh-web-page-reader.mjs "$stage/libexec/dsh-mobile/dsh-web-page-reader.mjs"
           cp scripts/dsh-basic-toolbox-mcp.mjs "$stage/libexec/dsh-mobile/basic-toolbox-mcp.mjs"
           cp scripts/dsh-android-tool-spawn.mjs "$stage/libexec/dsh-mobile/dsh-android-tool-spawn.mjs"
+          cp scripts/dsh-android-plugin-git-spawn.cjs "$stage/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs"
           cp scripts/dsh-bounded-spawn.mjs "$stage/libexec/dsh-mobile/dsh-bounded-spawn.mjs"
           cp scripts/dsh-dev-process.mjs "$stage/libexec/dsh-mobile/dsh-dev-process.mjs"
           cp scripts/dsh-dev-tasks.mjs "$stage/libexec/dsh-mobile/dsh-dev-tasks.mjs"
