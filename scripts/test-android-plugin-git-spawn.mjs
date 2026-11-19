@@ -61,7 +61,7 @@ assert.equal(adaptedShell.options.env.BASH_ENV,p+'/libexec/dsh-mobile/android-ba
 assert.equal(adaptedShell.options.env.LD_PRELOAD,undefined)
 assert.equal(mod.adaptShellCommand('echo ok',{shell:'/custom/bash'}),null)
 assert.equal(mod.adaptShellCommand('echo ok',{shell:'/system/bin/sh'}),null)
-assert.equal(mod.adaptShellCommand('echo ok',{shell:false})?.command,shell)
+assert.equal(mod.adaptShellCommand('echo ok',{shell:false}),null)
 assert.throws(()=>cp.execSync(shellCommand,{encoding:'utf8'}), error =>
   error.code==='ENOENT' || error.errno===-2)
 let execCallback=false
