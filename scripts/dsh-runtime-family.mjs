@@ -181,6 +181,7 @@ if (mode === 'manifest') {
     version: '0.0.0',
     private: true,
     dependencies,
+    optionalDependencies: { '@koromix/koffi-android-arm64': ANDROID_KOFFI_VERSION },
     overrides,
   }, null, 2) + '\n')
 } else if (mode === 'verify-lock') {
