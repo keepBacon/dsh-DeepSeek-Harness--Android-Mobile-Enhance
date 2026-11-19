@@ -40,6 +40,16 @@ jobs:
           node "$GITHUB_WORKSPACE/scripts/dsh-runtime-family.mjs" verify-installed "$RUNNER_TEMP/dsh-family.json" node_modules 0.2.2-rc.5
           test -f node_modules/@deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js
           test -f node_modules/@deepseek-ai/dsh/lib/bin.js
+          # Exercise actual 0.2.2 compiled bundles before a costly ARM64
+          # runtime rebuild. Keep the 0.1.5-specific contract tests separate.
+          mkdir -p "$RUNNER_TEMP/dsh-android-sandbox/usr/lib"
+          ln -s "$RUNNER_TEMP/dsh-graph/node_modules" "$RUNNER_TEMP/dsh-android-sandbox/usr/lib/node_modules"
+          DSH_TARGET_VERSION=0.2.2-rc.5 \
+          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash \
+            node "$GITHUB_WORKSPACE/scripts/android-runtime-patch.mjs" "$RUNNER_TEMP/dsh-android-sandbox/usr"
+          DSH_TARGET_VERSION=0.2.2-rc.5 \
+          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash \
+            node "$GITHUB_WORKSPACE/scripts/android-runtime-patch.mjs" "$RUNNER_TEMP/dsh-android-sandbox/usr"
   static-preflight:
     runs-on: ubuntu-latest
     steps:
