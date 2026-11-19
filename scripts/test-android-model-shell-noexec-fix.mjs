@@ -24,6 +24,8 @@ assert.match(builder, /@deepseek-ai\/dsh-terminal-bash,@deepseek-ai\/dsh-sandbox
 assert.match(builder, /@deepseek-ai\/dsh-bash-local,@deepseek-ai\/dsh-subprocess-local/)
 assert.match(builder, /node-addon-require-builtin,@deepseek-ai\/node-addon-system/)
 assert.match(builder, /install_release\(stage, workspace, args\.repo\)/)
+assert.match(builder, /args\.repo \/ "runtime-release-family\.json"/)
+assert.match(builder, /args\.repo \/ "scripts\/dsh-release-family-lock\.json"/)
 assert.match(patch, /DSH_COMPAT_SEED_SUBPROCESS_ONLY === "1"/)
 assert.ok(!patch.includes('Boolean(process.env.DSH_COMPAT_ONLY_PACKAGES)'),
   'package selection must not suppress fresh-subprocess Android compatibility')
