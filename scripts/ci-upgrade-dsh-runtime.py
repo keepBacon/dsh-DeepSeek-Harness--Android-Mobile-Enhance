@@ -18,6 +18,26 @@ COMMIT = "9c2670d3bce5275e0d1610272958121af87787bb"
 REPO_URL = "https://github.com/deepseek-ai/deepseek-harness.git"
 PNPM_VERSION = "11.28.5"
 
+def is_android_seed_addon_path(relative_path):
+    """Ignore irrelevant binaries shipped with multi-platform NPM distributions.
+
+    A Windows .node in the signed seed is legitimate package data, but must
+    never be copied into an Android runtime or validated as Android ELF.
+    A Linux ARM64 prebuild is not automatically Bionic-compatible.
+    """
+    parts = tuple(part.lower() for part in Path(relative_path).parts)
+    for segment in parts:
+        if segment.startswith((
+                "win32-", "windows-", "darwin-", "linux-", "freebsd-",
+                "openbsd-", "sunos-", "aix-", "musl-")):
+            return False
+        if segment.startswith("android-") and segment != "android-arm64":
+            return False
+    if "prebuilds" in parts:
+        index = parts.index("prebuilds")
+        return index + 1 < len(parts) and parts[index + 1] == "android-arm64"
+    return True
+
 def validate_android_addons(module_tree, verified_source_paths):
     """Accept only copied Android seed bindings, never host-provided Linux ARM64 ELF.
 
@@ -160,11 +180,13 @@ def install_release(stage, work, repo):
                 for binary in src.rglob("*.node"):
                     if binary.is_symlink() or not binary.is_file():
                         continue
+                    relative=binary.relative_to(src)
+                    if not is_android_seed_addon_path(relative):
+                        continue
                     with binary.open("rb") as stream:
                         h=stream.read(20)
                     if len(h)<20 or h[:4]!=bytes.fromhex("7f454c46") or int.from_bytes(h[18:20],"little")!=183:
                         raise ValueError("signed Android seed has non-ARM64 addon "+str(binary))
-                    relative=binary.relative_to(src)
                     target=dst/relative
                     if target.is_symlink():
                         raise ValueError("symlink at new addon destination "+str(target))
