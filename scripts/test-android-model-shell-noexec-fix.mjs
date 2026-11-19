@@ -19,6 +19,18 @@ assert.match(bashEnv, /\$_dsh_cmd" = node/)
 assert.match(bashEnv, /\$_dsh_mobile_prefix\/bin\/node" "\$@"/)
 assert.match(bashEnv, /\/system\/bin\/sh "\$_dsh_mobile_prefix\/libexec\/dsh-mobile\/android-exec\.sh"/)
 assert.match(bashEnv, /embedded Node\.js executable missing/)
+// Model bash must expose builtin-like shell functions so command -v works
+// even though Android's noexec app-private usr/bin is deliberately off PATH.
+for (const command of ['node', 'npm', 'npx', 'pnpm', 'pnpx']) {
+  assert.ok(bashEnv.includes(command + '() {'), command + ' model Bash function missing')
+}
+assert.match(bashEnv, /lib\/node_modules\/npm\/bin\/npm-cli\.js/)
+assert.match(bashEnv, /lib\/node_modules\/npm\/bin\/npx-cli\.js/)
+assert.match(bashEnv, /lib\/node_modules\/pnpm\/bin\/pnpm\.cjs/)
+assert.match(bashEnv, /pnpm dlx "\$@"/)
+assert.match(builder, /"nodejs", "npm"/)
+assert.match(builder, /name == "npm"/)
+assert.match(builder, /npm-cli\.js", "npx-cli\.js"/)
 assert.ok(
   bashEnv.indexOf('$_dsh_cmd" = node') < bashEnv.indexOf('libexec/dsh/wrappers/$_dsh_cmd'),
   'Node must route directly before relying on a generic wrapper symlink'
