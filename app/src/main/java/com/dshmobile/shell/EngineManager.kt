@@ -1414,6 +1414,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun runtimeHealthFilesAt(rootUsr: File): RuntimeHealth {
     val required = listOf(
       File(rootUsr, "bin/node") to "usr/bin/node",
+      // Fail installation/repair if the embedded Node toolchain is partial:
+      // model Bash and in-Web plugin installation need all three CLIs.
+      File(rootUsr, "bin/npm") to "usr/bin/npm",
+      File(rootUsr, "bin/npx") to "usr/bin/npx",
+      File(rootUsr, "bin/pnpm") to "usr/bin/pnpm",
+      File(rootUsr, "lib/node_modules/npm/bin/npm-cli.js") to "usr/lib/node_modules/npm/bin/npm-cli.js",
+      File(rootUsr, "lib/node_modules/npm/bin/npx-cli.js") to "usr/lib/node_modules/npm/bin/npx-cli.js",
+      File(rootUsr, "lib/node_modules/pnpm/package.json") to "usr/lib/node_modules/pnpm/package.json",
       File(rootUsr, "lib/node_modules/@deepseek-ai/dsh/lib/bin.js") to "@deepseek-ai/dsh/lib/bin.js",
       File(rootUsr, "lib/libtermux-exec-ld-preload.so") to "usr/lib/libtermux-exec-ld-preload.so",
       File(rootUsr, "bin/bash") to "usr/bin/bash",
