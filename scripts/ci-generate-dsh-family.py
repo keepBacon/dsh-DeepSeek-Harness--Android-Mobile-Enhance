@@ -37,7 +37,8 @@ def generate(root):
     if top.get("packageManager") != "pnpm@11.28.5":
         raise ValueError("pinned pnpm release changed")
     manifests = sorted((root / "packages").glob("*/*/package.json"))
-    manifests.append(root / "apps/cli/package.json")
+    manifests.extend(sorted((root / "apps").glob("*/package.json")))
+    manifests.extend(sorted((root / "native/system/packages").glob("*/package.json")))
     packages = set()
     for file in manifests:
         pkg = load(file)
