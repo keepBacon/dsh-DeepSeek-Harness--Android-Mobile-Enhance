@@ -552,6 +552,12 @@ def main():
         manifest, abi_report = fetch_packages(stage, workspace)
         install_lua_language_server_launcher(stage)
         overlay_sources(stage, args.repo)
+        # Upgrade the complete JS package family; the seed is only an Android
+        # ABI/toolchain carrier, not a source of 0.1.5 DSH modules.
+        from ci_upgrade_dsh_runtime import install_release
+        family_audit=install_release(stage, workspace, args.repo)
+        shutil.copyfile(stage / "usr/lib/dsh-release-family.json",
+                        args.repo / "runtime-release-family.json")
         # The GitHub native builder reuses an already-patched DSH seed.
         # Only update its PTY and sandbox launcher entrypoints. The seed's
         # subprocess-local bundle does not contain the upstream containment
@@ -560,7 +566,7 @@ def main():
         # rely on the Termux execution bridge for nested CLI commands.
         subprocess.run(
             ["node", str(args.repo / "scripts/android-runtime-patch.mjs"), str(stage / "usr")],
-            check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.1.5-rc.2",
+            check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.2.2-rc.5",
                              "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local"})
         patch_web_fetch_limits(stage)
         stage_modsearch(stage, workspace)
@@ -576,6 +582,7 @@ def main():
             "buildSystem": "GitHub-hosted Ubuntu ARM64, not a Termux build",
             "seedSha256": hashlib.sha256(args.seed.read_bytes()).hexdigest(),
             "sourceOverlay": list(SCRIPT_MAP.values()),
+            "upgradedDshFamily": family_audit,
             "androidPackageArchives": manifest,
             "pyright": pyright_audit,
             "aptAbi": abi_report,
