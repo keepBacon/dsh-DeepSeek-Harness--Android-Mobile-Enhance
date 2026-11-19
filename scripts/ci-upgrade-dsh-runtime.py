@@ -18,6 +18,34 @@ COMMIT = "9c2670d3bce5275e0d1610272958121af87787bb"
 REPO_URL = "https://github.com/deepseek-ai/deepseek-harness.git"
 PNPM_VERSION = "11.28.5"
 
+def validate_android_addons(module_tree, verified_source_paths):
+    """Accept only copied Android seed bindings, never host-provided Linux ARM64 ELF.
+
+    e_machine == EM_AARCH64 does not distinguish Android/Bionic from Linux/glibc.
+    A host npm ci may install Linux ARM64 optional prebuilds such as sharp; even
+    their ELF headers pass a machine-only check but they cannot run on Android.
+    """
+    verified = {Path(p).resolve(strict=True) for p in verified_source_paths}
+    found = set()
+    for binary in module_tree.rglob("*.node"):
+        if binary.is_symlink() or not binary.is_file():
+            raise ValueError("unsafe packaged Node addon " + str(binary))
+        with binary.open("rb") as stream:
+            header = stream.read(20)
+        if (len(header) < 20 or header[:4] != b"\\x7fELF"
+                or header[4:6] != b"\\x02\\x01"
+                or int.from_bytes(header[18:20], "little") != 183):
+            raise ValueError("non-ARM64 ELF Node addon in Android release " + str(binary))
+        canonical = binary.resolve(strict=True)
+        if canonical not in verified:
+            raise ValueError(
+                "unverified host/native Node addon (could be glibc Linux ARM64): "
+                + str(binary) + "; Android rebuild or ABI-matched seed required")
+        found.add(canonical)
+    if found != verified:
+        raise ValueError("staged Android addon manifest does not match installed files")
+    return len(found)
+
 def cmd(args, **kwargs):
     print("[DSH upgrade] running", " ".join(map(str, args[:5])), flush=True)
     return subprocess.run(list(map(str, args)), check=True, **kwargs)
@@ -124,6 +152,7 @@ def install_release(stage, work, repo):
     old_native=index_native_packages(module_root)
     new_native=index_native_packages(new_modules)
     retained_addons=[]
+    verified_android_addon_paths=set()
     for key,destinations in new_native.items():
         matching_sources=old_native.get(key,[])
         for dst in destinations:
@@ -141,19 +170,25 @@ def install_release(stage, work, repo):
                         raise ValueError("symlink at new addon destination "+str(target))
                     target.parent.mkdir(parents=True,exist_ok=True)
                     shutil.copy2(binary,target)
+                    verified_android_addon_paths.add(target.resolve(strict=True))
                     retained_addons.append({"name":key[0],"version":key[1],"path":str(relative)})
                 if any(entry["name"]==key[0] and entry["version"]==key[1] for entry in retained_addons):
                     break
-    # Audit all .node files, including those delivered via transitive optional
-    # packages, before publishing the new module tree.
-    for binary in new_modules.rglob("*.node"):
-        if binary.is_symlink() or not binary.is_file():
-            raise ValueError("unsafe packaged Node addon "+str(binary))
-        with binary.open("rb") as stream:
-            h=stream.read(20)
-        if len(h)<20 or h[:4]!=bytes.fromhex("7f454c46") or int.from_bytes(h[18:20],"little")!=183:
-            raise ValueError("non-Android ARM64 Node addon from host npm: "+str(binary))
-    print("[DSH upgrade] retained",len(retained_addons),"version-matched Android AArch64 add-ons")
+    # node-pty/Koffi need the matching Android binding; silently omitting an
+    # extension produces a signed APK that only fails once terminal/UI loads.
+    for name, version in new_native:
+        if name in ("node-pty", "koffi") and not any(
+                item["name"] == name and item["version"] == version
+                for item in retained_addons):
+            raise ValueError(
+                "required Android native extension unavailable for "
+                + str(name) + "@" + str(version)
+                + "; rebuild it for Bionic ARM64 before signing")
+    # An Ubuntu ARM64 npm package can contain valid AArch64 .node files linked
+    # against glibc. Machine architecture alone cannot approve their inclusion.
+    copied_native_count=validate_android_addons(new_modules, verified_android_addon_paths)
+    print("[DSH upgrade] retained",copied_native_count,
+          "version-matched, seed-origin Android AArch64 add-ons")
     backup=work/"android-seed-node-modules"
     module_root.rename(backup)
     try:
@@ -189,6 +224,7 @@ def install_release(stage, work, repo):
             "nodeModules":"replaced from verified exact NPM release family",
             "nativeSeedPreserved":True,
             "retainedNativeAddons":retained_addons,
+            "verifiedAndroidAddonCount":copied_native_count,
             "nativeAddonVersionDifferences":{k:{"old":sorted(old_versions[k]),"new":sorted(v)}
                 for k,v in new_versions.items() if k in old_versions and v!=old_versions[k]},
             "limits":"Host JS graph verified; Android native runtime/sessions require device signoff"}
