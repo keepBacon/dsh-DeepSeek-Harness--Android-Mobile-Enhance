@@ -52,6 +52,8 @@ on:
       - 'gradle.properties'
       - 'scripts/ci-validate-runtime.py'
       - 'scripts/dsh-release-family-lock.json'
+      - 'scripts/ci-generate-dsh-family.py'
+      - 'scripts/ci-upgrade-dsh-runtime.py'
   workflow_dispatch:
     inputs:
       publish_release:
@@ -109,7 +111,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output runtime-audit.json
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock runtime-release-family.json --output runtime-audit.json
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-android-arm64-runtime-${{ github.run_number }}
@@ -117,6 +119,7 @@ jobs:
             app/src/main/assets/snapshot.tar.xz
             runtime-audit.json
             runtime-build-audit.json
+            runtime-release-family.json
           if-no-files-found: error
           retention-days: 7
   assemble-legacy-signed:
@@ -138,7 +141,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output runtime-audit.json
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock runtime-release-family.json --output runtime-audit.json
           python3 - <<'PY'
           import json, pathlib
           d=json.loads(pathlib.Path('runtime-audit.json').read_text())
@@ -157,7 +160,7 @@ jobs:
           set -euo pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
-          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=44
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=45
       - name: Explicitly sign APK with verified original key
         shell: bash
         run: |
@@ -178,7 +181,7 @@ jobs:
             --snapshot app/src/main/assets/snapshot.tar.xz \
             --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-            --version-code 44
+            --version-code 45
       - name: Create and verify direct APK / distribution ZIP
         shell: bash
         run: |
