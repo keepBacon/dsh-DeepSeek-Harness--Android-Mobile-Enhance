@@ -60,7 +60,10 @@ class AndroidAddonOriginTest(unittest.TestCase):
                 "prebuilds/linux-arm64/pty.node",
                 "prebuilds/darwin-arm64/pty.node",
                 "prebuilds/android-arm/pty.node",
-                "build/linux-arm64/koffi.node"):
+                "build/linux-arm64/koffi.node",
+                "sherpa-onnx-linux-arm64/sherpa-onnx.node",
+                "@img/sharp-linux-arm64/lib/sharp.node",
+                "onnxruntime-node/bin/napi-v3/linux/arm64/onnx.node"):
             with self.subTest(candidate=candidate):
                 self.assertFalse(mod.is_android_seed_addon_path(candidate))
 
@@ -71,6 +74,14 @@ class AndroidAddonOriginTest(unittest.TestCase):
                 "build/Release/koffi.node"):
             with self.subTest(candidate=candidate):
                 self.assertTrue(mod.is_android_seed_addon_path(candidate))
+
+    def test_prune_host_sherpa_onnx_binary(self):
+        foreign = self.modules / "sherpa-onnx-linux-arm64" / "sherpa-onnx.node"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_bytes(elf())
+        removed = mod.prune_foreign_prebuilds(self.modules)
+        self.assertEqual(removed, ["sherpa-onnx-linux-arm64/sherpa-onnx.node"])
+        self.assertFalse(foreign.exists())
 
     def test_prune_foreign_prebuilds_keeps_android_and_unknown(self):
         filenames = (
