@@ -163,6 +163,26 @@ def install_release(stage, work, repo):
         raise
     (stage/"usr/lib/dsh-release-family.json").write_bytes(family.read_bytes())
     (stage/"usr/lib/dsh-release-install-lock.json").write_bytes((work/"package-lock.json").read_bytes())
+    # The signed seed's runtime metadata still says 0.1.5. Update it from
+    # the exact installed graph; preserve the Android toolchain feature flags.
+    import hashlib
+    compatibility=stage/"usr/etc/dsh-android-compat.json"
+    if not compatibility.is_file():
+        raise ValueError("missing Android runtime compatibility manifest")
+    compat=json.loads(compatibility.read_text())
+    if compat.get("dsh") not in ("0.1.5-rc.2",VERSION):
+        raise ValueError("unexpected source Android DSH compatibility version")
+    compat.update({
+        "dsh":VERSION,
+        "dshSourceCommit":COMMIT,
+        "dshReleaseFamilyLocked":True,
+        "cordisVendorLocked":True,
+        "cordisSingletonValidated":True,
+        "dshNpmLockSha256":hashlib.sha256((work/"package-lock.json").read_bytes()).hexdigest(),
+        "nodeMinimumVersion":"24.9.0",
+        "upgradeSource":"full-verified-npm-release-family",
+    })
+    compatibility.write_text(json.dumps(compat,indent=2)+"\\n")
     # Native helper bundle is not executable on a GitHub runner. This action
     # validates JS coherence only; Android ELF/PTY/API needs a device check.
     return {"version":VERSION,"sourceCommit":COMMIT,
