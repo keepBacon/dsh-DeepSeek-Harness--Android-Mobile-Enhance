@@ -72,7 +72,7 @@ function adaptAndroidCommand(file, argv=[], options={}) {
 // entirely under the caller's control.
 function adaptShellCommand(command, options={}) {
   if (!active || typeof command !== 'string') return null
-  if (options?.shell && options.shell !== true) return null
+  if (options?.shell === false || (options?.shell && options.shell !== true)) return null
   const env = {...(options?.env || process.env)}
   env.BASH_ENV = root + '/libexec/dsh-mobile/android-bash-env.sh'
   // Embedded Bash receives a clean environment and routes native children
