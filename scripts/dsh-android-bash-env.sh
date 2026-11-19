@@ -18,7 +18,17 @@ if [ "${DSH_ANDROID_STANDALONE:-}" = "1" ]; then
         printf 'dsh: embedded Node.js executable missing: %s\n' "$_dsh_mobile_prefix/bin/node" >&2
         return 127
       fi
-      /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
+      # npm/pnpm (and user scripts) commonly launch Git through Node's
+      # child_process API, bypassing Bash's noexec command dispatch. Enable
+      # the existing Git-only adapter for model-initiated Node processes too.
+      # No shell interpolation or modification of the script argv is needed.
+      local _dsh_git_preload="$_dsh_mobile_prefix/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs"
+      if [ -f "$_dsh_git_preload" ]; then
+        NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require=$_dsh_git_preload" \
+          /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
+      else
+        /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
+      fi
     }
     _dsh_mobile_js_cli() {
       local _dsh_entry="$1"
