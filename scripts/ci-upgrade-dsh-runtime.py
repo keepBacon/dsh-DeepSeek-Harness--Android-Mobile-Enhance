@@ -103,6 +103,57 @@ def install_release(stage, work, repo):
             print("[DSH upgrade] native module version changed",name,
                   sorted(old_versions[name]),"=>",sorted(versions),
                   "; Android rebuild/smoke required",flush=True)
+    # npm ci on a Linux host does not create Android Node add-ons.
+    # Reuse only VERIFIED AArch64 ELF payloads from identically versioned
+    # packages in the signed Android seed. Never copy a different version's
+    # binary or a host-side Linux x86_64 .node into the application.
+    native_names={"node-pty","koffi","@deepseek-ai/node-addon-system"}
+    def index_native_packages(base):
+        found={}
+        for manifest in base.rglob("package.json"):
+            if manifest.is_symlink() or manifest.parent.is_symlink():
+                continue
+            try:
+                meta=json.loads(manifest.read_text())
+            except (ValueError,OSError,UnicodeError):
+                continue
+            name=meta.get("name")
+            if name in native_names:
+                found.setdefault((name,meta.get("version")),[]).append(manifest.parent)
+        return found
+    old_native=index_native_packages(module_root)
+    new_native=index_native_packages(new_modules)
+    retained_addons=[]
+    for key,destinations in new_native.items():
+        matching_sources=old_native.get(key,[])
+        for dst in destinations:
+            for src in matching_sources:
+                for binary in src.rglob("*.node"):
+                    if binary.is_symlink() or not binary.is_file():
+                        continue
+                    with binary.open("rb") as stream:
+                        h=stream.read(20)
+                    if len(h)<20 or h[:4]!=bytes.fromhex("7f454c46") or int.from_bytes(h[18:20],"little")!=183:
+                        raise ValueError("signed Android seed has non-ARM64 addon "+str(binary))
+                    relative=binary.relative_to(src)
+                    target=dst/relative
+                    if target.is_symlink():
+                        raise ValueError("symlink at new addon destination "+str(target))
+                    target.parent.mkdir(parents=True,exist_ok=True)
+                    shutil.copy2(binary,target)
+                    retained_addons.append({"name":key[0],"version":key[1],"path":str(relative)})
+                if any(entry["name"]==key[0] and entry["version"]==key[1] for entry in retained_addons):
+                    break
+    # Audit all .node files, including those delivered via transitive optional
+    # packages, before publishing the new module tree.
+    for binary in new_modules.rglob("*.node"):
+        if binary.is_symlink() or not binary.is_file():
+            raise ValueError("unsafe packaged Node addon "+str(binary))
+        with binary.open("rb") as stream:
+            h=stream.read(20)
+        if len(h)<20 or h[:4]!=bytes.fromhex("7f454c46") or int.from_bytes(h[18:20],"little")!=183:
+            raise ValueError("non-Android ARM64 Node addon from host npm: "+str(binary))
+    print("[DSH upgrade] retained",len(retained_addons),"version-matched Android AArch64 add-ons")
     backup=work/"android-seed-node-modules"
     module_root.rename(backup)
     try:
@@ -117,6 +168,7 @@ def install_release(stage, work, repo):
     return {"version":VERSION,"sourceCommit":COMMIT,
             "nodeModules":"replaced from verified exact NPM release family",
             "nativeSeedPreserved":True,
+            "retainedNativeAddons":retained_addons,
             "nativeAddonVersionDifferences":{k:{"old":sorted(old_versions[k]),"new":sorted(v)}
                 for k,v in new_versions.items() if k in old_versions and v!=old_versions[k]},
             "limits":"Host JS graph verified; Android native runtime/sessions require device signoff"}
