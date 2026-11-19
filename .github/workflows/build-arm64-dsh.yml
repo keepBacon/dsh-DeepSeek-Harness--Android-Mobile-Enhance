@@ -86,6 +86,9 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Verify packaged MCP ESM import closure
         run: |
           python3 scripts/validate-ci-mobile-esm-closure.py
@@ -99,7 +102,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq python3 dpkg-dev nodejs npm xz-utils
+          sudo apt-get install -y -qq python3 dpkg-dev xz-utils
+          node --version
+          npm --version
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(2)'
           mkdir -p "$RUNNER_TEMP/dsh-seed" app/src/main/assets
           gh release download "1" -R "$GITHUB_REPOSITORY" -p "Dsh.Mobile.Pro.V0.1.apk" -D "$RUNNER_TEMP/dsh-seed"
           unzip -p "$RUNNER_TEMP/dsh-seed/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > "$RUNNER_TEMP/dsh-seed/seed.tar.xz"
