@@ -24,8 +24,16 @@ if [ "${DSH_ANDROID_STANDALONE:-}" = "1" ]; then
       # No shell interpolation or modification of the script argv is needed.
       local _dsh_git_preload="$_dsh_mobile_prefix/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs"
       if [ -f "$_dsh_git_preload" ]; then
-        NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require=$_dsh_git_preload" \
-          /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
+        case " ${NODE_OPTIONS:-} " in
+          *" --require=$_dsh_git_preload "*)
+            # Shared Host environment already enabled the adapter.
+            /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
+            ;;
+          *)
+            NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require=$_dsh_git_preload" \
+              /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
+            ;;
+        esac
       else
         /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
       fi
