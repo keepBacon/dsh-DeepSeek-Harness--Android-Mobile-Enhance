@@ -15,6 +15,14 @@ assert.match(bashEnv, /command_not_found_handle\(\)/)
 assert.match(bashEnv, /PATH=\/system\/bin:\/system\/xbin/)
 assert.match(bashEnv, /DSH_WRAPPER_COMMAND="\$_dsh_cmd" DSH_TERMUX_INNER=1/)
 assert.match(bashEnv, /\/system\/bin\/sh "\$_dsh_mobile_prefix\/libexec\/dsh\/termux-wrapper"/)
+assert.match(bashEnv, /\$_dsh_cmd" = node/)
+assert.match(bashEnv, /\$_dsh_mobile_prefix\/bin\/node" "\$@"/)
+assert.match(bashEnv, /\/system\/bin\/sh "\$_dsh_mobile_prefix\/libexec\/dsh-mobile\/android-exec\.sh"/)
+assert.match(bashEnv, /embedded Node\.js executable missing/)
+assert.ok(
+  bashEnv.indexOf('$_dsh_cmd" = node') < bashEnv.indexOf('libexec/dsh/wrappers/$_dsh_cmd'),
+  'Node must route directly before relying on a generic wrapper symlink'
+)
 assert.match(embed, /DSH_WRAPPER_COMMAND:-\$\{0##\*\/\}/)
 assert.match(builder, /"dsh-android-bash-env.sh": "android-bash-env.sh"/)
 assert.match(builder, /@deepseek-ai\/dsh-terminal-bash,@deepseek-ai\/dsh-sandbox-local,@deepseek-ai\/dsh-bash-local/)
