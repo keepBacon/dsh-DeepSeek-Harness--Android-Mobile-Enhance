@@ -474,8 +474,9 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
   const marker = 'DSH Android compat: partial app-UID sandbox runner'
   const oldArgv = 'argv: [runner, policy.mode, policy.workspaceRoot, "--", ...argv]'
   const bridgedArgv = 'argv: ["/system/bin/sh", runner, policy.mode, policy.workspaceRoot, "--", ...argv]'
+  const newBridgedArgv = 'argv: ["/system/bin/sh", runner, policy.mode, canonicalPath(policy.workspaceRoot), "--", ...argv]'
   if (txt.includes(marker)) {
-    if (txt.includes(bridgedArgv)) return 'already'
+    if (txt.includes(bridgedArgv) || txt.includes(newBridgedArgv)) return 'already'
     if (!txt.includes(oldArgv)) throw new Error('sandbox-local existing Android runner entry changed: ' + file)
     txt = txt.replace(oldArgv, bridgedArgv)
     write(file, txt)
