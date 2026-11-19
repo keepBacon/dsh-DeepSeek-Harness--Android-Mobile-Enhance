@@ -84,6 +84,33 @@ class AndroidAddonOriginTest(unittest.TestCase):
         for filename in filenames[2:]:
             self.assertTrue((self.modules / filename).exists())
 
+    def test_exact_android_koffi_optional_package_is_staged(self):
+        seed = Path(self.tmp.name) / "seed"
+        package = seed / "@koromix/koffi-android-arm64"
+        package.mkdir(parents=True)
+        (package / "package.json").write_text(
+            '{"name":"@koromix/koffi-android-arm64","version":"3.3.0"}')
+        addon = package / "build" / "koffi.node"
+        addon.parent.mkdir()
+        addon.write_bytes(elf())
+        staged = mod.stage_android_koffi_optional(seed, self.modules, "3.3.0")
+        self.assertEqual(len(staged), 1)
+        self.assertEqual(mod.validate_android_addons(self.modules, staged), 1)
+
+    def test_koffi_optional_version_mismatch_rejected(self):
+        seed = Path(self.tmp.name) / "seed"
+        package = seed / "@koromix/koffi-android-arm64"
+        package.mkdir(parents=True)
+        (package / "package.json").write_text(
+            '{"name":"@koromix/koffi-android-arm64","version":"3.2.0"}')
+        with self.assertRaisesRegex(ValueError, "version differs"):
+            mod.stage_android_koffi_optional(seed, self.modules, "3.3.0")
+
+    def test_missing_android_koffi_optional_does_not_fake_binding(self):
+        seed = Path(self.tmp.name) / "missing-seed"
+        self.assertEqual(mod.stage_android_koffi_optional(
+            seed, self.modules, "3.3.0"), [])
+
     def test_symlink_rejected(self):
         source = Path(self.tmp.name) / "external.node"
         source.write_bytes(elf())
