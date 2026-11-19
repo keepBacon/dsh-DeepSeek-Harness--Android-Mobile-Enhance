@@ -22,6 +22,31 @@ for(const [name,args] of [
  assert.equal(routed.command,shell)
  assert.deepEqual(routed.args,[...expected,...args])
 }
+// Non-Git binaries and app-private workspace programs must also go through
+// the system-shell linker bridge, preserving exact arguments and child cwd.
+for(const [name,args,target] of [
+ ['node',['-e','console.log("ok")'],p+'/bin/node'],
+ ['npm',['--version'],p+'/bin/npm'],
+ ['python3',['-c','print(123)'],p+'/bin/python3'],
+ ['rg',['--version'],p+'/bin/rg'],
+ [p+'/bin/node',['--check','script.js'],p+'/bin/node'],
+ [p+'/libexec/dsh/wrappers/python3',['--version'],p+'/libexec/dsh/wrappers/python3'],
+ [p+'/../home/workspace/execute',['argument with spaces',';echo unsafe'],
+  p+'/../home/workspace/execute']
+]){
+ const result=mod.adaptAndroidCommand(name,args)
+ assert.equal(result.command,shell,name)
+ assert.deepEqual(result.args,[p+'/libexec/dsh-mobile/android-exec.sh',target,...args],name)
+}
+assert.deepEqual(
+ mod.adaptAndroidCommand('./task.js',['foo'],{cwd:p+'/../home/workspace'}).args,
+ [p+'/libexec/dsh-mobile/android-exec.sh',p+'/../home/workspace/task.js','foo'].map(
+  (value,index)=>index===1?require('node:path').normalize(value):value))
+for(const name of ['sh','echo','getprop','logcat','unknown','github',
+ '/system/bin/sh','/apex/com.android.runtime/bin/linker64','/usr/bin/false',
+ '/data/data/another.app/files/usr/bin/node']){
+ assert.equal(mod.adaptAndroidCommand(name,['argument']),null,name)
+}
 assert.equal(mod.adaptGitCommand('node',['--version']),null)
 assert.equal(mod.adaptGitCommand('github',['foo']),null)
 assert.equal(mod.adaptGitCommand('/system/bin/git',['status']),null)
@@ -32,12 +57,31 @@ assert.deepEqual(mod.adaptGitCommand('git',['arg with spaces',';echo unsafe']).a
 // non-Android runner, not a direct Git ENOENT.
 const result=cp.spawnSync('git',['--version'],{encoding:'utf8'})
 assert.equal(result.error?.path,shell)
+
+// Child process functions must route calls to the *system shell* even though
+// /system/bin/sh is absent on host Linux CI. This tests the real wrappers.
+for(const executable of ['git','node','python3']){
+ const result=cp.spawnSync(executable,['--version'],{encoding:'utf8'})
+ assert.equal(result.error?.path,shell,executable)
+}
+const workspace=cp.spawnSync(p+'/../home/workspace/mytool',['arg'],{encoding:'utf8'})
+assert.equal(workspace.error?.path,shell)
+const ignored=cp.spawnSync('node',['--version'],{shell:true,encoding:'utf8'})
+assert.equal(ignored.status,0)
+assert.match(ignored.stdout,/^v\d+/m)
+let callbackCalled=false
+cp.execFile('node',['--version'],(error)=>{
+ callbackCalled=true
+ assert.equal(error.path,shell)
+})
+
 ;(async()=>{
  const named=await import('node:child_process')
  assert.equal(named.spawn,cp.spawn)
  assert.equal(named.spawnSync,cp.spawnSync)
  assert.equal(named.execFile,cp.execFile)
  assert.equal(named.execFileSync,cp.execFileSync)
+ assert.equal(named.fork,cp.fork)
  console.log('Git bridge: spawn/sync/execFile/ESM mapping OK')
 })().catch(e=>{console.error(e);process.exitCode=1})
 `
