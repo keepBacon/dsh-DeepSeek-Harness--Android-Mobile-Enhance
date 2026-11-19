@@ -547,7 +547,12 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
     // underlying spawn.ts function is folded into a different bundle chunk.
     // Transform its API request, preserving the entire spec and exact argv.
     // This covers both ordinary and non-confined Bash/CLI child launches.
-    const anchor = /spawnSubprocess\(\s*spec\s*,\s*this\.internals\s*\)/g
+    const modern = versionAtLeast(targetVersion, '0.2.0-rc.1')
+    // 0.2.2 passes a per-call object with the spill handler merged in.
+    const internalsArg = modern ? 'internals' : 'this.internals'
+    const anchor = modern
+      ? /spawnSubprocess\(\s*spec\s*,\s*internals\s*\)/g
+      : /spawnSubprocess\(\s*spec\s*,\s*this\.internals\s*\)/g
     const matches = txt.match(anchor) ?? []
     if (matches.length !== 1) {
       const sample = [...txt.matchAll(/[^\n]{0,90}spawnSubprocess[^\n]{0,170}/g)]
@@ -564,7 +569,7 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
       '  const program = String(spec.argv[0]);',
       '  if (program.startsWith("/system/") || program.startsWith("/apex/")) return spec;',
       '  return { ...spec, argv: ["/system/bin/sh", prefix + "/libexec/dsh-mobile/android-exec.sh", ...spec.argv] };',
-      '})(), this.internals)',
+      '})(), ' + internalsArg + ')',
     ].join('\n'))
     changed = true
   }
@@ -632,7 +637,7 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
     const anchor = /((?:const|let|var)\s+DEFAULT_BASH_SHELL\s*=\s*)["']\/bin\/bash["']/
     const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
     if (matches.length !== 1) {
-      if (!process.env.DSH_COMPAT_ONLY_PACKAGES || matches.length !== 0)
+      if ((!process.env.DSH_COMPAT_ONLY_PACKAGES && !versionAtLeast(targetVersion, '0.2.0-rc.1')) || matches.length !== 0)
         throw new Error('terminal-bash DEFAULT_BASH_SHELL anchor changed: ' + file)
       // The signed seed already has its own Bash default rewrite. Do not
       // touch it; only update the PTY argv bridge below.
