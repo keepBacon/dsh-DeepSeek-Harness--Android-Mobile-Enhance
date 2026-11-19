@@ -64,6 +64,27 @@ function adaptAndroidCommand(file, argv=[], options={}) {
   return {command:'/system/bin/sh',args:[bridge,target,...argv]}
 }
 
+// exec()/execSync() normally invoke /bin/sh -c; Android's system shell is
+// /system/bin/sh, and a system-shell command cannot directly execve app-data
+// Node/Bash executables. Run the caller's UNMODIFIED shell string via the
+// known linker bridge and an embedded Bash with BASH_ENV command dispatch.
+// Only default shell selections are adapted; explicit custom shells remain
+// entirely under the caller's control.
+function adaptShellCommand(command, options={}) {
+  if (!active || typeof command !== 'string') return null
+  if (options?.shell && options.shell !== true) return null
+  const env = {...(options?.env || process.env)}
+  env.BASH_ENV = root + '/libexec/dsh-mobile/android-bash-env.sh'
+  // Embedded Bash receives a clean environment and routes native children
+  // through Android's linker rather than inheriting a stale preloaded hook.
+  delete env.LD_PRELOAD
+  return {
+    command:'/system/bin/sh',
+    args:[bridge,root+'/bin/bash','-c',command],
+    options:{...options,shell:false,env}
+  }
+}
+
 if (active) {
   const nativeSpawn = childProcess.spawn
   childProcess.spawn = function(command,args,options) {
@@ -102,6 +123,23 @@ if (active) {
     if (adapted) return nativeExecFileSync.call(this,adapted.command,adapted.args,opts)
     return nativeExecFileSync.apply(this,arguments)
   }
+  // Default Node exec() uses /bin/sh -c, which is unavailable on many
+  // Android app runtimes. Use a real bundled Bash + BASH_ENV so 'node',
+  // 'npm' and Termux tools resolve without unsafe PATH entries.
+  const nativeExec = childProcess.exec
+  childProcess.exec = function(command,options,callback) {
+    const opts = options && typeof options === 'object' ? options : {}
+    const adapted = adaptShellCommand(command,opts)
+    if (!adapted) return nativeExec.apply(this,arguments)
+    const cb = typeof options === 'function' ? options : callback
+    return nativeExecFile.call(this,adapted.command,adapted.args,adapted.options,cb)
+  }
+  const nativeExecSync = childProcess.execSync
+  childProcess.execSync = function(command,options) {
+    const adapted = adaptShellCommand(command,options)
+    if (!adapted) return nativeExecSync.apply(this,arguments)
+    return nativeExecFileSync.call(this,adapted.command,adapted.args,adapted.options)
+  }
   // Node fork() uses its own internal spawn implementation; patching the
   // exported spawn() alone cannot fix fork(process.execPath) on Android.
   // Route its execPath through the system shell, prefixing the fork's
@@ -124,4 +162,4 @@ if (active) {
   syncBuiltinESMExports()
 }
 
-module.exports = {adaptGitCommand,adaptAndroidCommand}
+module.exports = {adaptGitCommand,adaptAndroidCommand,adaptShellCommand}
