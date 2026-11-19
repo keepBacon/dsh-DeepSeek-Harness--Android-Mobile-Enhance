@@ -2,10 +2,44 @@ name: Validate build preflight
 
 on:
   push:
-    branches: ["main", "fix/**", "feature/**"]
+    branches: ["main", "fix/**", "feature/**", "feat/**"]
   pull_request:
 
 jobs:
+  # Mandatory complete upstream dependency resolution when the major DSH
+  # family is upgraded. This prevents reusing a 0.1.5 graph under a 0.2 label.
+  upstream-upgrade-family:
+    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Pin complete upstream DSH 0.2.2-rc.5 workspace family
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dsh-upstream"
+          git init "$RUNNER_TEMP/dsh-upstream"
+          git -C "$RUNNER_TEMP/dsh-upstream" remote add origin https://github.com/deepseek-ai/deepseek-harness.git
+          git -C "$RUNNER_TEMP/dsh-upstream" fetch --depth=1 origin 9c2670d3bce5275e0d1610272958121af87787bb
+          git -C "$RUNNER_TEMP/dsh-upstream" checkout --detach 9c2670d3bce5275e0d1610272958121af87787bb
+          python3 scripts/ci-generate-dsh-family.py --source "$RUNNER_TEMP/dsh-upstream" --output "$RUNNER_TEMP/dsh-family.json"
+          mkdir -p "$RUNNER_TEMP/dsh-graph"
+          node scripts/dsh-runtime-family.mjs manifest "$RUNNER_TEMP/dsh-family.json" 0.2.2-rc.5 11.28.5 > "$RUNNER_TEMP/dsh-graph/package.json"
+      - name: Resolve, install and verify exact modern DSH NPM graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/dsh-graph"
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund --include=peer --strict-peer-deps=false --fetch-retries=3
+          node "$GITHUB_WORKSPACE/scripts/dsh-runtime-family.mjs" verify-lock "$RUNNER_TEMP/dsh-family.json" package-lock.json 0.2.2-rc.5
+          npm ci --ignore-scripts --no-audit --no-fund --include=peer --strict-peer-deps=false
+          node "$GITHUB_WORKSPACE/scripts/dsh-runtime-family.mjs" verify-installed "$RUNNER_TEMP/dsh-family.json" node_modules 0.2.2-rc.5
+          test -f node_modules/@deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js
+          test -f node_modules/@deepseek-ai/dsh/lib/bin.js
   static-preflight:
     runs-on: ubuntu-latest
     steps:
