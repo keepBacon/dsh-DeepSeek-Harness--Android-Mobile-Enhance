@@ -1461,7 +1461,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh/wrappers/dpkg") to "usr/libexec/dsh/wrappers/dpkg",
       File(rootUsr, "bin/proot") to "usr/bin/proot",
     )
-    val missing = required.filterNot { it.first.isFile }.map { it.second }
+    val missing = required.filterNot { it.first.isFile }.map { it.second }.toMutableList()
+    if (listOf("pnpm.cjs", "pnpm.mjs", "pnpm.js").none { entry ->
+        File(rootUsr, "lib/node_modules/pnpm/bin/$entry").isFile
+      }) {
+      missing.add("usr/lib/node_modules/pnpm/bin/<pnpm entrypoint>")
+    }
     return RuntimeHealth(missing.isEmpty(), missing)
   }
 
@@ -3645,6 +3650,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun runtimeHealthFilesOnly(): RuntimeHealth {
     val required = listOf(
       nodeBin to "usr/bin/node",
+      File(usrDir, "bin/npm") to "usr/bin/npm",
+      File(usrDir, "bin/npx") to "usr/bin/npx",
+      File(usrDir, "bin/pnpm") to "usr/bin/pnpm",
+      File(usrDir, "lib/node_modules/npm/bin/npm-cli.js") to "usr/lib/node_modules/npm/bin/npm-cli.js",
+      File(usrDir, "lib/node_modules/npm/bin/npx-cli.js") to "usr/lib/node_modules/npm/bin/npx-cli.js",
+      File(usrDir, "lib/node_modules/pnpm/package.json") to "usr/lib/node_modules/pnpm/package.json",
       dshBin to "@deepseek-ai/dsh/lib/bin.js",
       preloadBin to "usr/lib/libtermux-exec-ld-preload.so",
       File(usrDir, "bin/bash") to "usr/bin/bash",
@@ -3683,7 +3694,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh/wrappers/dpkg") to "usr/libexec/dsh/wrappers/dpkg",
       File(usrDir, "bin/proot") to "usr/bin/proot",
     )
-    val missing = required.filterNot { it.first.isFile }.map { it.second }
+    val missing = required.filterNot { it.first.isFile }.map { it.second }.toMutableList()
+    if (listOf("pnpm.cjs", "pnpm.mjs", "pnpm.js").none { entry ->
+        File(usrDir, "lib/node_modules/pnpm/bin/$entry").isFile
+      }) {
+      missing.add("usr/lib/node_modules/pnpm/bin/<pnpm entrypoint>")
+    }
     return RuntimeHealth(missing.isEmpty(), missing)
   }
 
