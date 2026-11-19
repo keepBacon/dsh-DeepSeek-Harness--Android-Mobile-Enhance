@@ -68,7 +68,7 @@ const workspace=cp.spawnSync(p+'/../home/workspace/mytool',['arg'],{encoding:'ut
 assert.equal(workspace.error?.path,shell)
 const ignored=cp.spawnSync('node',['--version'],{shell:true,encoding:'utf8'})
 assert.equal(ignored.status,0)
-assert.match(ignored.stdout,/^v\d+/m)
+assert.match(ignored.stdout,/^v[0-9]+/m)
 let callbackCalled=false
 cp.execFile('node',['--version'],(error)=>{
  callbackCalled=true
