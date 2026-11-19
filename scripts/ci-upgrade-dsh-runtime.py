@@ -306,6 +306,22 @@ def install_release(stage, work, repo):
                 (name == "koffi" and optional_koffi_addons)
                 or any(item["name"] == name and item["version"] == version
                        for item in retained_addons)):
+            # Diagnose the SIGNED SEED's actual native package layout. This
+            # prints paths/versions only, never secrets or binary payloads.
+            if name == "koffi":
+                candidates = sorted(
+                    str(p.relative_to(module_root))
+                    for p in module_root.rglob("*.node")
+                    if "koffi" in str(p).lower())
+                print("[DSH upgrade] seed Koffi native candidate paths:",
+                      candidates[:32], flush=True)
+                manifests = sorted(
+                    str(p.relative_to(module_root))
+                    for p in module_root.rglob("package.json")
+                    if p.parent.name == "koffi"
+                    or "koffi-android" in p.parent.name)
+                print("[DSH upgrade] seed Koffi package paths:",
+                      manifests[:24], flush=True)
             raise ValueError(
                 "required Android native extension unavailable for "
                 + str(name) + "@" + str(version)
