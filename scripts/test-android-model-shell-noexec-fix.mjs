@@ -59,6 +59,9 @@ assert.match(patch, /LD_PRELOAD: undefined/)
 assert.match(patch, /BASH_ENV: \(process\.env\.TERMUX__PREFIX/)
 assert.match(patch, /const seam = \/this/)
 assert.match(engine, /"PATH" to \("\/system\/bin:" \+ usrDir\.absolutePath/)
+assert.match(engine, /env\["NODE_OPTIONS"\] = "--require=" \+ pluginGitPreload\.absolutePath/)
+assert.match(engine, /Shared engineEnv already preloads the child-process adapter/)
+assert.ok(!engine.includes('val existing = env["NODE_OPTIONS"].orEmpty().trim()'), 'duplicate plugin adapter preload detected')
 // Both fresh-install staging and post-install health need a complete Node
 // command set; partial npm/pnpm installations cannot be marked healthy.
 for (const relative of [
