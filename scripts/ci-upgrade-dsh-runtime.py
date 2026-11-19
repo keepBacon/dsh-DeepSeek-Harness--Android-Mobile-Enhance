@@ -182,7 +182,7 @@ def install_release(stage, work, repo):
         "nodeMinimumVersion":"24.9.0",
         "upgradeSource":"full-verified-npm-release-family",
     })
-    compatibility.write_text(json.dumps(compat,indent=2)+"\\n")
+    compatibility.write_text(json.dumps(compat,indent=2)+"\n")
     # Native helper bundle is not executable on a GitHub runner. This action
     # validates JS coherence only; Android ELF/PTY/API needs a device check.
     return {"version":VERSION,"sourceCommit":COMMIT,
