@@ -76,8 +76,13 @@ def install_release(stage, work, repo):
         dest=new_modules/manager
         if not old.is_dir():
             raise ValueError("missing Android package manager from seed: "+manager)
-        if dest.exists() and dest.is_dir():
-            raise ValueError("upstream graph unexpectedly replaces Android "+manager)
+        if dest.exists():
+            if manager != "pnpm":
+                raise ValueError("upstream graph unexpectedly replaces Android "+manager)
+            version=json.loads((dest/"package.json").read_text()).get("version")
+            if version != PNPM_VERSION:
+                raise ValueError("published graph resolved incompatible pnpm: "+str(version))
+            continue
         shutil.copytree(old,dest,symlinks=True)
     # The existing .node add-ons are Android ABI-specific: host npm ci must not
     # silently substitute native host ELF. A version change requires a separate
