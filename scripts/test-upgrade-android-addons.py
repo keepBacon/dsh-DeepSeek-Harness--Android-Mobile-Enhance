@@ -106,6 +106,19 @@ class AndroidAddonOriginTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "version differs"):
             mod.stage_android_koffi_optional(seed, self.modules, "3.3.0")
 
+    def test_nested_seed_koffi_optional_package_detected(self):
+        seed = Path(self.tmp.name) / "seed"
+        package = (seed / "@deepseek-ai" / "dsh" / "node_modules"
+                   / "@koromix" / "koffi-android-arm64")
+        package.mkdir(parents=True)
+        (package / "package.json").write_text(
+            '{"name":"@koromix/koffi-android-arm64","version":"3.3.0"}')
+        addon = package / "koffi.node"
+        addon.write_bytes(elf())
+        restored = mod.stage_android_koffi_optional(seed, self.modules, "3.3.0")
+        self.assertEqual(len(restored), 1)
+        self.assertTrue(restored[0].exists())
+
     def test_missing_android_koffi_optional_does_not_fake_binding(self):
         seed = Path(self.tmp.name) / "missing-seed"
         self.assertEqual(mod.stage_android_koffi_optional(
