@@ -48,6 +48,24 @@ class AndroidAddonOriginTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             mod.validate_android_addons(self.modules, {path})
 
+    def test_foreign_platform_prebuilds_excluded(self):
+        for candidate in (
+                "prebuilds/win32-x64/conpty_console_list.node",
+                "prebuilds/linux-arm64/pty.node",
+                "prebuilds/darwin-arm64/pty.node",
+                "prebuilds/android-arm/pty.node",
+                "build/linux-arm64/koffi.node"):
+            with self.subTest(candidate=candidate):
+                self.assertFalse(mod.is_android_seed_addon_path(candidate))
+
+    def test_android_prebuild_and_build_output_included(self):
+        for candidate in (
+                "prebuilds/android-arm64/pty.node",
+                "build/Release/pty.node",
+                "build/Release/koffi.node"):
+            with self.subTest(candidate=candidate):
+                self.assertTrue(mod.is_android_seed_addon_path(candidate))
+
     def test_symlink_rejected(self):
         source = Path(self.tmp.name) / "external.node"
         source.write_bytes(elf())
