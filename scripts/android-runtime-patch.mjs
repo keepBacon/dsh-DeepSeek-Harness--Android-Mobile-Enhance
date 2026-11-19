@@ -526,7 +526,7 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
   // different compiled layout. Its containment method cannot be re-patched.
   // Only the NEW model Bash environment fix is permitted on this seed;
   // fresh release-family installations still receive the original rewrites.
-  const seededCompatOnly = Boolean(process.env.DSH_COMPAT_ONLY_PACKAGES)
+  const seededCompatOnly = process.env.DSH_COMPAT_SEED_SUBPROCESS_ONLY === "1"
   let changed = false
   if (!seededCompatOnly && !txt.includes(marker)) {
     const anchor = /selectContainmentMode\s*\(\s*kind\s*\)\s*\{/
