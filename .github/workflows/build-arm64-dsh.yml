@@ -90,6 +90,7 @@ jobs:
         run: |
           python3 scripts/validate-ci-mobile-esm-closure.py
           python3 scripts/test-ci-termux-abi.py
+          python3 scripts/test-upgrade-android-addons.py
           python3 scripts/test-android-compiler-qemu-runtime.py
       - name: Build Android ARM64 runtime on GitHub runner (no Termux)
         shell: bash
