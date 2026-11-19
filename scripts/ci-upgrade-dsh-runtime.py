@@ -29,10 +29,15 @@ def is_android_seed_addon_path(relative_path):
     A Linux ARM64 prebuild is not automatically Bionic-compatible.
     """
     parts = tuple(part.lower() for part in Path(relative_path).parts)
+    foreign = ("win32", "windows", "darwin", "linux", "freebsd",
+               "openbsd", "sunos", "aix", "musl")
     for segment in parts:
-        if segment.startswith((
-                "win32-", "windows-", "darwin-", "linux-", "freebsd-",
-                "openbsd-", "sunos-", "aix-", "musl-")):
+        # Ubuntu ARM64 resolves optional packages like sherpa-onnx-linux-arm64
+        # or sharp-linux-arm64; platform tags can be INFIXES, not only prefixes.
+        if (segment in foreign
+                or any(segment.startswith(osname + "-") or
+                       ("-" + osname + "-") in segment or
+                       ("_" + osname + "_") in segment for osname in foreign)):
             return False
         if segment.startswith("android-") and segment != "android-arm64":
             return False
