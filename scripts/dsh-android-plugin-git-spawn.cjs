@@ -74,6 +74,13 @@ function adaptShellCommand(command, options={}) {
   if (!active || typeof command !== 'string') return null
   if (options?.shell === false || (options?.shell && options.shell !== true)) return null
   const env = {...(options?.env || process.env)}
+  // exec(command,{env:{...}}) may replace the entire environment. The
+  // linker bridge and Bash dispatcher still need the internal Android
+  // prefix and standalone marker; preserve all user-supplied variables.
+  env.TERMUX__PREFIX ||= root
+  env.PREFIX ||= root
+  env.DSH_ANDROID_STANDALONE = '1'
+  env.LD_LIBRARY_PATH ||= root + '/lib'
   env.BASH_ENV = root + '/libexec/dsh-mobile/android-bash-env.sh'
   // Embedded Bash receives a clean environment and routes native children
   // through Android's linker rather than inheriting a stale preloaded hook.
