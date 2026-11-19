@@ -10,6 +10,44 @@ if [ "${DSH_ANDROID_STANDALONE:-}" = "1" ]; then
     PATH=/system/bin:/system/xbin
     export PATH
 
+    # Bash's command_not_found_handle runs only after command lookup fails.
+    # Explicit functions also make "command -v node/npm/npx/pnpm" work for
+    # model-generated build scripts, without putting noexec files on PATH.
+    _dsh_mobile_node() {
+      if [ ! -f "$_dsh_mobile_prefix/bin/node" ]; then
+        printf 'dsh: embedded Node.js executable missing: %s\n' "$_dsh_mobile_prefix/bin/node" >&2
+        return 127
+      fi
+      /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
+    }
+    _dsh_mobile_js_cli() {
+      local _dsh_entry="$1"
+      shift
+      if [ ! -f "$_dsh_entry" ]; then
+        printf 'dsh: embedded JavaScript CLI missing: %s\n' "$_dsh_entry" >&2
+        return 127
+      fi
+      _dsh_mobile_node "$_dsh_entry" "$@"
+    }
+    node() { _dsh_mobile_node "$@"; }
+    npm() { _dsh_mobile_js_cli "$_dsh_mobile_prefix/lib/node_modules/npm/bin/npm-cli.js" "$@"; }
+    npx() { _dsh_mobile_js_cli "$_dsh_mobile_prefix/lib/node_modules/npm/bin/npx-cli.js" "$@"; }
+    pnpm() {
+      local _dsh_pnpm
+      for _dsh_pnpm in \
+        "$_dsh_mobile_prefix/lib/node_modules/pnpm/bin/pnpm.cjs" \
+        "$_dsh_mobile_prefix/lib/node_modules/pnpm/bin/pnpm.mjs" \
+        "$_dsh_mobile_prefix/lib/node_modules/pnpm/bin/pnpm.js"; do
+        if [ -f "$_dsh_pnpm" ]; then
+          _dsh_mobile_node "$_dsh_pnpm" "$@"
+          return $?
+        fi
+      done
+      printf 'dsh: embedded pnpm CLI missing\n' >&2
+      return 127
+    }
+    pnpx() { pnpm dlx "$@"; }
+
     command_not_found_handle() {
       local _dsh_cmd="${1:-}"
       [ "$#" -gt 0 ] && shift
