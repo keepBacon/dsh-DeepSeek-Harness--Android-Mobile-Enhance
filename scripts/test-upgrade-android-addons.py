@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Regression tests for origin-verified DSH 0.2 Android native add-ons."""
+import base64
+import hashlib
 import importlib.util
+import io
+import json
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name("ci-upgrade-dsh-runtime.py")
 spec = importlib.util.spec_from_file_location("ci_upgrade_dsh_runtime", SCRIPT)
@@ -123,6 +129,50 @@ class AndroidAddonOriginTest(unittest.TestCase):
         seed = Path(self.tmp.name) / "missing-seed"
         self.assertEqual(mod.stage_android_koffi_optional(
             seed, self.modules, "3.3.0"), [])
+
+    def _locked_koffi_tarball(self, corrupt=False):
+        work = Path(self.tmp.name) / "work"
+        work.mkdir()
+        filename = "koromix-koffi-android-arm64-3.3.0.tgz"
+        archive = work / filename
+        manifests = {
+            "package/package.json": json.dumps({
+                "name": "@koromix/koffi-android-arm64",
+                "version": "3.3.0"}).encode(),
+            "package/build/koffi.node": elf(),
+        }
+        with tarfile.open(archive, "w:gz") as package:
+            for path, content in manifests.items():
+                record = tarfile.TarInfo(path)
+                record.size = len(content)
+                package.addfile(record, io.BytesIO(content))
+        digest = base64.b64encode(hashlib.sha512(archive.read_bytes()).digest()).decode()
+        (work / "package-lock.json").write_text(json.dumps({
+            "packages": {
+                "node_modules/@koromix/koffi-android-arm64": {
+                    "version": "3.3.0",
+                    "integrity": "sha512-" + ("bad" if corrupt else digest),
+                }
+            }
+        }))
+        return work, filename
+
+    def test_locked_android_koffi_archive_verified(self):
+        work, filename = self._locked_koffi_tarball()
+        with patch.object(mod.subprocess, "run") as invoke:
+            invoke.return_value.stdout = json.dumps([{"filename": filename}])
+            addons = mod.stage_locked_koffi_android_tarball(
+                work, self.modules, "3.3.0")
+        self.assertEqual(len(addons), 1)
+        self.assertEqual(mod.validate_android_addons(self.modules, addons), 1)
+
+    def test_locked_android_koffi_archive_tampering_rejected(self):
+        work, filename = self._locked_koffi_tarball(corrupt=True)
+        with patch.object(mod.subprocess, "run") as invoke:
+            invoke.return_value.stdout = json.dumps([{"filename": filename}])
+            with self.assertRaisesRegex(ValueError, "SHA512"):
+                mod.stage_locked_koffi_android_tarball(
+                    work, self.modules, "3.3.0")
 
     def test_symlink_rejected(self):
         source = Path(self.tmp.name) / "external.node"
