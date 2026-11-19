@@ -281,6 +281,19 @@ def fetch_packages(stage, workspace):
         manifest.append({"package": name, "version": package.get("Version"), "sha256": digest})
         downloaded.unlink()
         shutil.rmtree(extracted)
+    # The published DSH CLI enforces engines.node >=24.9.0. Retaining the
+    # signed seed's Node 22 is not an upgrade even with a correct JS graph.
+    node_package = next((p for p in manifest if p["package"] == "nodejs"), None)
+    if not node_package:
+        raise ValueError("DSH 0.2.2 requires refreshed native Termux nodejs")
+    node_version = re.match(r"^(\\d+)\\.(\\d+)\\.(\\d+)", node_package["version"] or "")
+    if not node_version or tuple(map(int, node_version.groups())) < (24, 9, 0):
+        raise ValueError("Termux nodejs below required 24.9.0: " + str(node_package["version"]))
+    node_elf = stage / "usr/bin/node"
+    with node_elf.open("rb") as node_file:
+        hdr = node_file.read(20)
+    if len(hdr) < 20 or hdr[:4] != b"\\x7fELF" or int.from_bytes(hdr[18:20], "little") != 183:
+        raise ValueError("upgraded native Node executable is not Android ARM64 ELF")
     if not libcxx_sha256:
         raise ValueError("No verified libc++ package was fetched")
     abi_report = validate_apt_abi(stage, libcxx_sha256, abi_replacements)
