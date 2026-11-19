@@ -482,18 +482,23 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
     checkPatchedJavaScript(file)
     return 'patched'
   }
-  const anchor = /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
+  // 0.2.2 exposes async confine(argv, policy, signal); old releases used
+  // the two-argument sync API. Do not alter other sandbox entry points.
+  const anchor = versionAtLeast(targetVersion, '0.2.0-rc.1')
+    ? /async\s+confine\s*\(\s*argv\s*,\s*policy\s*,\s*signal\s*\)\s*\{/
+    : /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
   const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
   if (matches.length !== 1) throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}`)
   const injection = `${matches[0]}
     // ${marker}.
     if (process.env.DSH_ANDROID_STANDALONE === "1") {
+      ${versionAtLeast(targetVersion, '0.2.0-rc.1') ? 'signal?.throwIfAborted();' : ''}
       const runner = process.env.DSH_ANDROID_SANDBOX_RUNNER;
       if (!runner) {
         throw new Error("DSH Android sandbox runner path is missing");
       }
       return {
-        argv: ["/system/bin/sh", runner, policy.mode, policy.workspaceRoot, "--", ...argv],
+        argv: ["/system/bin/sh", runner, policy.mode, ${versionAtLeast(targetVersion, '0.2.0-rc.1') ? 'canonicalPath(policy.workspaceRoot)' : 'policy.workspaceRoot'}, "--", ...argv],
         enforcement: "partial",
         denialSignatures: ["permission denied", "read-only file system", "operation not permitted"],
         runnerFailureRules: [{
