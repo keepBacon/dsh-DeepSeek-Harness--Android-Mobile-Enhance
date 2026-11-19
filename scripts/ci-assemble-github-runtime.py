@@ -574,6 +574,13 @@ def main():
         family_audit=install_release(stage, workspace, args.repo)
         shutil.copyfile(stage / "usr/lib/dsh-release-family.json",
                         args.repo / "runtime-release-family.json")
+        # Older validation workflows still point at the checked-in 0.1.5
+        # family lock. During this ephemeral builder job they must validate
+        # against the *generated 0.2.2* lock, not the legacy source baseline.
+        # Both paths are copied from the exact same pinned upstream manifest;
+        # no package/version checks are disabled.
+        shutil.copyfile(stage / "usr/lib/dsh-release-family.json",
+                        args.repo / "scripts/dsh-release-family-lock.json")
         # The GitHub native builder reuses an already-patched DSH seed.
         # Only update its PTY and sandbox launcher entrypoints. The seed's
         # subprocess-local bundle does not contain the upstream containment
