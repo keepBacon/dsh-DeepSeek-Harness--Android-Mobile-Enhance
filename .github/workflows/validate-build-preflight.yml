@@ -45,10 +45,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dsh-android-sandbox/usr/lib"
           ln -s "$RUNNER_TEMP/dsh-graph/node_modules" "$RUNNER_TEMP/dsh-android-sandbox/usr/lib/node_modules"
           DSH_TARGET_VERSION=0.2.2-rc.5 \
-          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash \
+          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash,node-addon-require-builtin,@deepseek-ai/node-addon-system \
             node "$GITHUB_WORKSPACE/scripts/android-runtime-patch.mjs" "$RUNNER_TEMP/dsh-android-sandbox/usr"
           DSH_TARGET_VERSION=0.2.2-rc.5 \
-          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash \
+          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash,node-addon-require-builtin,@deepseek-ai/node-addon-system \
             node "$GITHUB_WORKSPACE/scripts/android-runtime-patch.mjs" "$RUNNER_TEMP/dsh-android-sandbox/usr"
   static-preflight:
     runs-on: ubuntu-latest
