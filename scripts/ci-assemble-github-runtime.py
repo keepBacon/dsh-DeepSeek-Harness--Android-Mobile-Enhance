@@ -50,7 +50,7 @@ TOOL_SEEDS = (
     "qemu-user-x86-64",
     "lua-language-server",
     # DSH 0.2.2 requires Node >=24.9; refresh the Android ELF, not just JS.
-    "nodejs",
+    "nodejs", "npm",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
@@ -268,7 +268,14 @@ def fetch_packages(stage, workspace):
             for file in files:
                 src = parent / file
                 dst = outdir / file
-                replace_abi = should_replace_native(name, abi_cohort, src, rel / file) or name in ("python-pip", "lua-language-server")
+                # npm is a separate Termux package. Replace its legacy JS
+                # installation and entrypoint scripts, not just the Node ELF.
+                npm_file = name == "npm" and (
+                    rel.parts[:3] == ("lib", "node_modules", "npm")
+                    or (rel.parts[:1] == ("bin",) and file in ("npm", "npx")))
+                replace_abi = (should_replace_native(name, abi_cohort, src, rel / file)
+                               or name in ("python-pip", "lua-language-server")
+                               or npm_file)
                 if overlay_one(src, dst, allow_replace=replace_abi) and replace_abi:
                     abi_replacements.append(str((rel / file).as_posix()))
             for folder in dirs[:]:
@@ -281,6 +288,19 @@ def fetch_packages(stage, workspace):
         manifest.append({"package": name, "version": package.get("Version"), "sha256": digest})
         downloaded.unlink()
         shutil.rmtree(extracted)
+    # npm is distributed separately from Node. Require its current files,
+    # otherwise plugin scripts may execute the obsolete npm from the seed.
+    npm_package = next((p for p in manifest if p["package"] == "npm"), None)
+    if not npm_package:
+        raise ValueError("Termux npm package absent from upgraded Node runtime")
+    for cli in ("npm-cli.js", "npx-cli.js"):
+        entry = stage / "usr/lib/node_modules/npm/bin" / cli
+        if not entry.is_file() or entry.is_symlink():
+            raise ValueError("Termux npm JavaScript CLI incomplete: " + cli)
+    for cli in ("npm", "npx"):
+        entry = stage / "usr/bin" / cli
+        if not (entry.is_file() or entry.is_symlink()):
+            raise ValueError("Termux package manager entrypoint missing: " + cli)
     # The published DSH CLI enforces engines.node >=24.9.0. Retaining the
     # signed seed's Node 22 is not an upgrade even with a correct JS graph.
     node_package = next((p for p in manifest if p["package"] == "nodejs"), None)
