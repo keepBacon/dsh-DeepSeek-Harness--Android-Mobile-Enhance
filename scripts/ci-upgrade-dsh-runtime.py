@@ -29,7 +29,8 @@ def is_android_seed_addon_path(relative_path):
     A Linux ARM64 prebuild is not automatically Bionic-compatible.
     """
     parts = tuple(part.lower() for part in Path(relative_path).parts)
-    foreign = ("win32", "windows", "darwin", "linux", "freebsd",
+    foreign = ("win32", "windows", "darwin", "linux", "linuxmusl",
+               "linuxgnu", "linuxglibc", "musllinux", "freebsd",
                "openbsd", "sunos", "aix", "musl")
     for segment in parts:
         # Ubuntu ARM64 resolves optional packages like sherpa-onnx-linux-arm64
