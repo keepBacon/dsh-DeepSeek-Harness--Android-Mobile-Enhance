@@ -21,6 +21,14 @@ if [ "${DSH_ANDROID_STANDALONE:-}" = "1" ]; then
       esac
       if [ "$_dsh_cmd" = termux-run ]; then
         /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh/termux-run" "$@"
+      elif [ "$_dsh_cmd" = node ]; then
+        # Model Bash cannot execve app-private ELF directly on Android.
+        # Dispatch Node explicitly even if the generic CLI wrapper is absent.
+        if [ ! -f "$_dsh_mobile_prefix/bin/node" ]; then
+          printf 'dsh: embedded Node.js executable missing: %s\n' "$_dsh_mobile_prefix/bin/node" >&2
+          return 127
+        fi
+        /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
       elif [ -L "$_dsh_mobile_prefix/libexec/dsh/wrappers/$_dsh_cmd" ]; then
         DSH_WRAPPER_COMMAND="$_dsh_cmd" DSH_TERMUX_INNER=1 \
           /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh/termux-wrapper" "$@"
