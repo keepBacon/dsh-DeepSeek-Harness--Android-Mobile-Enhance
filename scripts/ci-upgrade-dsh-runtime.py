@@ -6,12 +6,15 @@ Never retain the 0.1.5 DSH module graph. Resolve a consistent 0.2.2-rc.5
 package-lock and validate every declared DSH/Cordis component before replacing
 the staged node_modules directory. No NPM install scripts execute here.
 """
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 
 VERSION = "0.2.2-rc.5"
 COMMIT = "9c2670d3bce5275e0d1610272958121af87787bb"
@@ -123,6 +126,76 @@ def stage_android_koffi_optional(seed_modules, target_modules, version):
         if destination.is_symlink() or not destination.is_file():
             raise ValueError("unexpected Koffi staged file " + str(destination))
     return [new / rel for rel in copied]
+
+def stage_locked_koffi_android_tarball(work, target_modules, version):
+    """Fetch the Android/Bionic prebuilt via the exact NPM lock SHA512."""
+    name = "@koromix/koffi-android-arm64"
+    entry = json.loads((work / "package-lock.json").read_text()).get(
+        "packages", {}).get("node_modules/" + name, {})
+    integrity = entry.get("integrity", "")
+    if entry.get("version") != version or not integrity.startswith("sha512-"):
+        raise ValueError("Android Koffi package is not SHA512 pinned in NPM lock")
+    target = target_modules / name
+    if target.exists() or target.is_symlink():
+        raise ValueError("Android Koffi destination already exists")
+    packed = subprocess.run(
+        ["npm", "pack", name + "@" + version, "--ignore-scripts",
+         "--pack-destination", str(work), "--json"],
+        cwd=work, check=True, stdout=subprocess.PIPE, text=True)
+    info = json.loads(packed.stdout)
+    if len(info) != 1:
+        raise ValueError("unexpected Android Koffi NPM pack output")
+    filename = info[0].get("filename", "")
+    if not filename or Path(filename).name != filename:
+        raise ValueError("unsafe Android Koffi NPM filename")
+    archive = work / filename
+    if not archive.is_file() or archive.stat().st_size > 32 * 1024 * 1024:
+        raise ValueError("missing or oversized Android Koffi archive")
+    actual = base64.b64encode(hashlib.sha512(archive.read_bytes()).digest()).decode()
+    if actual != integrity.removeprefix("sha512-"):
+        raise ValueError("Android Koffi archive SHA512 differs from NPM lock")
+    target.mkdir(parents=True)
+    seen = set()
+    with tarfile.open(archive, "r:gz") as bundle:
+        members = bundle.getmembers()
+        if len(members) > 2048:
+            raise ValueError("Android Koffi archive has too many members")
+        for item in members:
+            parts = Path(item.name).parts
+            if (len(parts) < 2 or parts[0] != "package" or
+                    ".." in parts or item.name.startswith("/")):
+                raise ValueError("unsafe Android Koffi archive path")
+            rel = Path(*parts[1:])
+            if rel in seen:
+                raise ValueError("duplicate Android Koffi archive path")
+            seen.add(rel)
+            dest = target / rel
+            if item.isdir():
+                dest.mkdir(parents=True, exist_ok=True)
+            elif item.isfile():
+                if item.size > 32 * 1024 * 1024:
+                    raise ValueError("oversized Android Koffi archive file")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with bundle.extractfile(item) as source, dest.open("wb") as sink:
+                    shutil.copyfileobj(source, sink)
+            else:
+                raise ValueError("unsupported Android Koffi archive entry type")
+    pkg = json.loads((target / "package.json").read_text())
+    if pkg.get("name") != name or pkg.get("version") != version:
+        raise ValueError("Android Koffi archive identity mismatch")
+    binaries = list(target.rglob("*.node"))
+    if not binaries:
+        raise ValueError("Android Koffi archive missing native binding")
+    for binary in binaries:
+        if not is_android_seed_addon_path(binary.relative_to(target)):
+            raise ValueError("non-Android Koffi binary in locked archive")
+        with binary.open("rb") as stream:
+            h = stream.read(20)
+        if (len(h) < 20 or h[:4] != bytes((127, 69, 76, 70))
+                or h[4:6] != bytes((2, 1))
+                or int.from_bytes(h[18:20], "little") != 183):
+            raise ValueError("locked Android Koffi binary is not ARM64 ELF")
+    return binaries
 
 def validate_android_addons(module_tree, verified_source_paths):
     """Accept only copied Android seed bindings, never host-provided Linux ARM64 ELF.
@@ -252,9 +325,13 @@ def install_release(stage, work, repo):
         raise ValueError("unexpected Android Koffi pin " + str(koffi_version))
     optional_koffi_addons = stage_android_koffi_optional(
         module_root, new_modules, koffi_version)
-    if optional_koffi_addons:
-        print("[DSH upgrade] staged", len(optional_koffi_addons),
-              "matching signed Android Koffi optional bindings")
+    koffi_origin = "signed-android-seed"
+    if not optional_koffi_addons:
+        optional_koffi_addons = stage_locked_koffi_android_tarball(
+            work, new_modules, koffi_version)
+        koffi_origin = "npm-lock-sha512-verified-android-package"
+    print("[DSH upgrade] staged", len(optional_koffi_addons),
+          "Android Koffi optional bindings from", koffi_origin)
 
     def index_native_packages(base):
         found={}
@@ -370,6 +447,7 @@ def install_release(stage, work, repo):
             "nativeSeedPreserved":True,
             "retainedNativeAddons":retained_addons,
             "verifiedAndroidAddonCount":copied_native_count,
+            "koffiAndroidAddonOrigin":koffi_origin,
             "removedForeignPrebuilds":removed_foreign_addons,
             "nativeAddonVersionDifferences":{k:{"old":sorted(old_versions[k]),"new":sorted(v)}
                 for k,v in new_versions.items() if k in old_versions and v!=old_versions[k]},
