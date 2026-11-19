@@ -18,7 +18,15 @@ assert.match(bashEnv, /\/system\/bin\/sh "\$_dsh_mobile_prefix\/libexec\/dsh\/te
 assert.match(embed, /DSH_WRAPPER_COMMAND:-\$\{0##\*\/\}/)
 assert.match(builder, /"dsh-android-bash-env.sh": "android-bash-env.sh"/)
 assert.match(builder, /@deepseek-ai\/dsh-terminal-bash,@deepseek-ai\/dsh-sandbox-local,@deepseek-ai\/dsh-bash-local/)
-assert.ok(!builder.includes('@deepseek-ai/dsh-bash-local,@deepseek-ai/dsh-subprocess-local'), 'seed builder must not re-patch subprocess-local')
+// The 0.2 upgrade replaces the seed's entire DSH dependency tree with fresh
+// published modules. Skipping subprocess-local here drops Android containment
+// and executable spawning support even when all older tests pass.
+assert.match(builder, /@deepseek-ai\/dsh-bash-local,@deepseek-ai\/dsh-subprocess-local/)
+assert.match(builder, /node-addon-require-builtin,@deepseek-ai\/node-addon-system/)
+assert.match(builder, /install_release\(stage, workspace, args\.repo\)/)
+assert.match(patch, /DSH_COMPAT_SEED_SUBPROCESS_ONLY === "1"/)
+assert.ok(!patch.includes('Boolean(process.env.DSH_COMPAT_ONLY_PACKAGES)'),
+  'package selection must not suppress fresh-subprocess Android compatibility')
 assert.match(patch, /DSH Android compat: model Bash environment without preload/)
 assert.match(patch, /LD_PRELOAD: undefined/)
 assert.match(patch, /BASH_ENV: \(process\.env\.TERMUX__PREFIX/)
