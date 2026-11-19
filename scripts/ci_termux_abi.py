@@ -14,7 +14,7 @@ import shutil
 import subprocess
 
 ABI_ROOTS = ("apt", "libc++")
-NATIVE_TOOL_PACKAGES = frozenset(("clang", "lld", "llvm", "make", "cmake", "ninja", "pkg-config", "qemu-user-x86-64", "lua-language-server"))
+NATIVE_TOOL_PACKAGES = frozenset(("clang", "lld", "llvm", "make", "cmake", "ninja", "pkg-config", "qemu-user-x86-64", "lua-language-server", "nodejs"))
 ELF = b"\x7fELF"
 SYSTEM_SONAMES = {
     "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
