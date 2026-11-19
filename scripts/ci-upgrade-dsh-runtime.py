@@ -38,6 +38,22 @@ def is_android_seed_addon_path(relative_path):
         return index + 1 < len(parts) and parts[index + 1] == "android-arm64"
     return True
 
+def prune_foreign_prebuilds(module_tree):
+    """Remove only explicit non-Android prebuild directories before ABI audit.
+
+    Preserve untagged .node files so the provenance verifier can reject any
+    unexpected host artifact instead of silently dropping required binaries.
+    """
+    removed = []
+    for binary in module_tree.rglob("*.node"):
+        if not binary.is_file() or binary.is_symlink():
+            continue
+        relative = binary.relative_to(module_tree)
+        if not is_android_seed_addon_path(relative):
+            binary.unlink()
+            removed.append(relative.as_posix())
+    return removed
+
 def validate_android_addons(module_tree, verified_source_paths):
     """Accept only copied Android seed bindings, never host-provided Linux ARM64 ELF.
 
@@ -208,6 +224,9 @@ def install_release(stage, work, repo):
                 + "; rebuild it for Bionic ARM64 before signing")
     # An Ubuntu ARM64 npm package can contain valid AArch64 .node files linked
     # against glibc. Machine architecture alone cannot approve their inclusion.
+    removed_foreign_addons=prune_foreign_prebuilds(new_modules)
+    print("[DSH upgrade] excluded",len(removed_foreign_addons),
+          "foreign-platform .node prebuilds from Android bundle")
     copied_native_count=validate_android_addons(new_modules, verified_android_addon_paths)
     print("[DSH upgrade] retained",copied_native_count,
           "version-matched, seed-origin Android AArch64 add-ons")
@@ -247,6 +266,7 @@ def install_release(stage, work, repo):
             "nativeSeedPreserved":True,
             "retainedNativeAddons":retained_addons,
             "verifiedAndroidAddonCount":copied_native_count,
+            "removedForeignPrebuilds":removed_foreign_addons,
             "nativeAddonVersionDifferences":{k:{"old":sorted(old_versions[k]),"new":sorted(v)}
                 for k,v in new_versions.items() if k in old_versions and v!=old_versions[k]},
             "limits":"Host JS graph verified; Android native runtime/sessions require device signoff"}
