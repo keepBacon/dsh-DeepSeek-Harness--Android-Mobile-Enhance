@@ -554,7 +554,8 @@ def main():
         overlay_sources(stage, args.repo)
         # Upgrade the complete JS package family; the seed is only an Android
         # ABI/toolchain carrier, not a source of 0.1.5 DSH modules.
-        from ci_upgrade_dsh_runtime import install_release
+        from runpy import run_path
+        install_release=run_path(str(args.repo / 'scripts/ci-upgrade-dsh-runtime.py'))['install_release']
         family_audit=install_release(stage, workspace, args.repo)
         shutil.copyfile(stage / "usr/lib/dsh-release-family.json",
                         args.repo / "runtime-release-family.json")
