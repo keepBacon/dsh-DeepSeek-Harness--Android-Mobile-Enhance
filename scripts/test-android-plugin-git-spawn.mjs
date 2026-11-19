@@ -66,6 +66,19 @@ for(const executable of ['git','node','python3']){
 }
 const workspace=cp.spawnSync(p+'/../home/workspace/mytool',['arg'],{encoding:'utf8'})
 assert.equal(workspace.error?.path,shell)
+
+// fork() bypasses the exported spawn binding internally. Verify its real
+// execPath/execArgv mapping, not just that the ESM export was refreshed.
+const forked=cp.fork('/tmp/dsh-unreachable-fixture.js',[],{
+ execPath:p+'/bin/node',execArgv:[],silent:true
+})
+assert.equal(forked.spawnfile,shell)
+assert.deepEqual(forked.spawnargs.slice(0,3),[
+ shell,p+'/libexec/dsh-mobile/android-exec.sh',p+'/bin/node'])
+forked.on('error',(error)=>{
+ assert.equal(error.path,shell)
+})
+
 const ignored=cp.spawnSync('node',['--version'],{shell:true,encoding:'utf8'})
 assert.equal(ignored.status,0)
 assert.match(ignored.stdout,/^v[0-9]+/m)
