@@ -2,6 +2,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+// Upstream 0.2.2 pins Koffi 3.1.1, which has no Android ARM64 binding.
+// 3.3.0 is the exact prebuilt version carried by the signed Android seed.
+// This exception applies only to the Android release graph, not DSH packages.
+const ANDROID_KOFFI_VERSION = '3.3.0'
+
 const fail = (message) => {
   console.error('[DSH family lock] ' + message)
   process.exit(2)
@@ -66,6 +71,7 @@ function verifyLock(f, file) {
   if (lock?.packages === undefined) fail('unsupported npm lock: ' + file)
   const problems = []
   let dshCount = 0
+  let koffiCount = 0
   let rootSeen = false
   const vendorCounts = new Map()
   const cordisEntries = []
@@ -73,6 +79,10 @@ function verifyLock(f, file) {
     const name = lockName(key, entry)
     if (typeof name !== 'string') continue
     const type = checkPackage(name, entry?.version, f, key || '<root>', problems)
+    if (name === 'koffi') {
+      koffiCount++
+      if (entry?.version !== ANDROID_KOFFI_VERSION) problems.push(key + ': Android Koffi must be ' + ANDROID_KOFFI_VERSION)
+    }
     if (type === 'dsh') {
       dshCount++
       if (name === '@deepseek-ai/dsh') rootSeen = true
@@ -82,6 +92,7 @@ function verifyLock(f, file) {
     }
   }
   if (!rootSeen) problems.push('package-lock does not contain @deepseek-ai/dsh')
+  if (!koffiCount) problems.push('Android release-family lock does not contain pinned Koffi')
   for (const name of Object.keys(f.vendorPackages)) {
     if ((vendorCounts.get(name) ?? 0) < 1) problems.push('package-lock does not contain locked vendor package ' + name)
   }
@@ -100,6 +111,7 @@ function verifyInstalled(f, root) {
   const cordisRealpaths = new Set()
   const vendorSeen = new Map()
   let dshCount = 0
+  let koffiCount = 0
   let rootSeen = false
 
   while (stack.length) {
@@ -118,6 +130,10 @@ function verifyInstalled(f, root) {
         const pkg = readJson(manifest)
         if (typeof pkg.name === 'string') {
           const type = checkPackage(pkg.name, pkg.version, f, manifest, problems)
+          if (pkg.name === 'koffi') {
+            koffiCount++
+            if (pkg.version !== ANDROID_KOFFI_VERSION) problems.push(manifest + ': Android Koffi version skew ' + pkg.version)
+          }
           if (type === 'dsh') {
             dshCount++
             if (pkg.name === '@deepseek-ai/dsh') rootSeen = true
@@ -136,6 +152,7 @@ function verifyInstalled(f, root) {
   }
 
   if (!rootSeen) problems.push('installed tree does not contain @deepseek-ai/dsh')
+  if (!koffiCount) problems.push('installed tree does not contain pinned Android Koffi')
   for (const name of Object.keys(f.vendorPackages)) {
     if ((vendorSeen.get(name) ?? 0) < 1) problems.push('installed tree does not contain locked vendor package ' + name)
   }
@@ -154,10 +171,11 @@ if (!mode || !file) fail('usage: dsh-runtime-family.mjs <manifest|verify-lock|ve
 if (mode === 'manifest') {
   if (!a || !b) fail('manifest needs <dsh-version> <pnpm-version>')
   const f = family(file, a)
-  const dependencies = { '@deepseek-ai/dsh': f.version, pnpm: b, ...f.vendorPackages }
+  const dependencies = { '@deepseek-ai/dsh': f.version, pnpm: b, koffi: ANDROID_KOFFI_VERSION, ...f.vendorPackages }
   const overrides = {}
   for (const name of f.packages) if (name !== '@deepseek-ai/dsh') overrides[name] = f.version
   for (const [name, version] of Object.entries(f.vendorPackages)) overrides[name] = version
+  overrides.koffi = ANDROID_KOFFI_VERSION
   process.stdout.write(JSON.stringify({
     name: 'dsh-android-runtime-install',
     version: '0.0.0',
