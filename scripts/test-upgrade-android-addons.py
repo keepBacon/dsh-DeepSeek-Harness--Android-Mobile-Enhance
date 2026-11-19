@@ -66,6 +66,24 @@ class AndroidAddonOriginTest(unittest.TestCase):
             with self.subTest(candidate=candidate):
                 self.assertTrue(mod.is_android_seed_addon_path(candidate))
 
+    def test_prune_foreign_prebuilds_keeps_android_and_unknown(self):
+        filenames = (
+            "node-pty/prebuilds/win32-x64/conpty_console_list.node",
+            "node-pty/prebuilds/linux-arm64/pty.node",
+            "node-pty/prebuilds/android-arm64/pty.node",
+            "node-pty/build/Release/pty.node",
+        )
+        for filename in filenames:
+            candidate = self.modules / filename
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_bytes(elf())
+        removed = mod.prune_foreign_prebuilds(self.modules)
+        self.assertEqual(len(removed), 2)
+        for filename in filenames[:2]:
+            self.assertFalse((self.modules / filename).exists())
+        for filename in filenames[2:]:
+            self.assertTrue((self.modules / filename).exists())
+
     def test_symlink_rejected(self):
         source = Path(self.tmp.name) / "external.node"
         source.write_bytes(elf())
