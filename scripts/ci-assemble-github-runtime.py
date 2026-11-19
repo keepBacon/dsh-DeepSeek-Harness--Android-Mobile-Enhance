@@ -245,6 +245,16 @@ def fetch_packages(stage, workspace):
             prefix = extracted / "usr"
         if not prefix.is_dir():
             raise ValueError("unrecognized Android package prefix " + name)
+        # npm is a separate Termux JS package. Remove the old global npm
+        # directory before overlay, so files removed between npm releases
+        # do not survive as a mixed-version tool installation. The new .deb
+        # has already been SHA256 verified above.
+        if name == "npm":
+            legacy_npm = stage / "usr/lib/node_modules/npm"
+            if legacy_npm.is_symlink():
+                raise ValueError("unexpected symlink at legacy npm package root")
+            if legacy_npm.is_dir():
+                shutil.rmtree(legacy_npm)
         # The seed can contain a stale pip package and entrypoint. Refresh the
         # exact package-owned Python-pip payload from the verified .deb, not
         # arbitrary user-installed site-packages or HOME virtual environments.
