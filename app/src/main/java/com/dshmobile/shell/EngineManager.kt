@@ -2228,6 +2228,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // DSH peers come from the runtime fallback rather than npm prereleases.
       "npm_config_auto_install_peers" to "false",
       "npm_config_node_linker" to "hoisted",
+      // Model Bash invokes npm/pnpm as ordinary Node processes, not via
+      // pluginEnv. Lifecycle prepare/install scripts must still use a shell
+      // on Android's executable system partition, never /bin/sh or a
+      // noexec app-private Termux executable.
+      "npm_config_script_shell" to "/system/bin/sh",
+      "npm_config_cache" to File(nodeCacheDir, "npm").apply { mkdirs() }.absolutePath,
+      "PNPM_HOME" to File(homeDir, ".local/share/pnpm").apply { mkdirs() }.absolutePath,
     )
 
     // The Termux Git/OpenSSH binaries are relocatable only when their prefix-
