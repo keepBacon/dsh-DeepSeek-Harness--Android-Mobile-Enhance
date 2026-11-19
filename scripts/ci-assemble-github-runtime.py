@@ -49,6 +49,8 @@ TOOL_SEEDS = (
     # Linux x86_64 user-mode emulator, not a Windows DLL loader or KVM.
     "qemu-user-x86-64",
     "lua-language-server",
+    # DSH 0.2.2 requires Node >=24.9; refresh the Android ELF, not just JS.
+    "nodejs",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
