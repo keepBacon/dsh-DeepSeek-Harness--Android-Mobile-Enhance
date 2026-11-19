@@ -2255,6 +2255,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
       env["GIT_SSH_VARIANT"] = "ssh"
       env["GIT_SSH_COMMAND"] = sshCommand(batchMode = true)
     }
+    // Host, model tools and plugin manager all launch Node subprocesses.
+    // Install the noexec adapter in the shared Node environment, not just
+    // the plugin installer. Never mutate process-global Android settings.
+    if (pluginGitPreload.isFile) {
+      env["NODE_OPTIONS"] = "--require=" + pluginGitPreload.absolutePath
+    }
     // An installed source-form ModSearch plugin can register read_page/x_search
     // while ../dist/main.js is absent. Its upstream cliPath() supports this
     // override. Use the APK's exact published CLI only for matching versions;
@@ -2295,13 +2301,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "NO_COLOR" to "1",
     )).toMutableMap()
 
-    // pnpm and the DSH CLI spawn Git from Node using child_process. Android
-    // prohibits direct execve on app-private ELF files; a PATH entry alone
-    // cannot fix that. Preload a narrowly scoped Git-only process adapter.
-    if (gitBin.isFile && pluginGitPreload.isFile) {
-      val existing = env["NODE_OPTIONS"].orEmpty().trim()
-      val require = "--require=" + pluginGitPreload.absolutePath
-      env["NODE_OPTIONS"] = listOf(existing, require).filter { it.isNotBlank() }.joinToString(" ")
+    // Shared engineEnv already preloads the child-process adapter.
+    // Avoid duplicate --require registration for plugin installations.
+    if (gitBin.isFile) {
       env["npm_config_git"] = gitBin.absolutePath
     }
 
