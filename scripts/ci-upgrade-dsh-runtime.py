@@ -54,6 +54,49 @@ def prune_foreign_prebuilds(module_tree):
             removed.append(relative.as_posix())
     return removed
 
+def stage_android_koffi_optional(seed_modules, target_modules, version):
+    """Copy the Bionic ARM64 Koffi prebuilt from the signed seed, if exact-version.
+
+    Koffi >=3.2 places its native binding in @koromix/koffi-android-arm64,
+    not necessarily inside koffi/build. Preserve the original package-relative
+    layout so the published Koffi JS loader can resolve it by package name.
+    """
+    name = "@koromix/koffi-android-arm64"
+    old = seed_modules / name
+    new = target_modules / name
+    manifest = old / "package.json"
+    if not manifest.is_file() or manifest.is_symlink():
+        return []
+    meta = json.loads(manifest.read_text())
+    if meta.get("name") != name or meta.get("version") != version:
+        raise ValueError(
+            "Koffi Android addon version differs from pinned JavaScript: "
+            + str(meta.get("version")) + " vs " + str(version))
+    if new.exists() or new.is_symlink():
+        raise ValueError("unexpected host Android Koffi addon destination " + str(new))
+    binaries = list(old.rglob("*.node"))
+    if not binaries:
+        raise ValueError("signed Android Koffi optional package has no native binding")
+    copied = []
+    for binary in binaries:
+        if binary.is_symlink() or not binary.is_file():
+            raise ValueError("unsafe signed Android Koffi addon " + str(binary))
+        if not is_android_seed_addon_path(binary.relative_to(old)):
+            raise ValueError("non-Android Koffi addon in signed optional package " + str(binary))
+        with binary.open("rb") as stream:
+            header = stream.read(20)
+        if (len(header) < 20 or header[:4] != bytes((127, 69, 76, 70))
+                or header[4:6] != bytes((2, 1))
+                or int.from_bytes(header[18:20], "little") != 183):
+            raise ValueError("invalid Android Koffi ARM64 addon " + str(binary))
+        copied.append(binary.relative_to(old))
+    shutil.copytree(old, new, symlinks=True)
+    for rel in copied:
+        destination = new / rel
+        if destination.is_symlink() or not destination.is_file():
+            raise ValueError("unexpected Koffi staged file " + str(destination))
+    return [new / rel for rel in copied]
+
 def validate_android_addons(module_tree, verified_source_paths):
     """Accept only copied Android seed bindings, never host-provided Linux ARM64 ELF.
 
@@ -172,6 +215,20 @@ def install_release(stage, work, repo):
     # packages in the signed Android seed. Never copy a different version's
     # binary or a host-side Linux x86_64 .node into the application.
     native_names={"node-pty","koffi","@deepseek-ai/node-addon-system"}
+    # Host npm resolves Linux optional packages, never @koromix's Android
+    # binding. Restore only the audited, exact-version Android optional tree.
+    koffi_manifest = new_modules / "koffi/package.json"
+    if not koffi_manifest.is_file():
+        raise ValueError("pinned top-level Koffi package unavailable")
+    koffi_version = json.loads(koffi_manifest.read_text()).get("version")
+    if koffi_version != "3.3.0":
+        raise ValueError("unexpected Android Koffi pin " + str(koffi_version))
+    optional_koffi_addons = stage_android_koffi_optional(
+        module_root, new_modules, koffi_version)
+    if optional_koffi_addons:
+        print("[DSH upgrade] staged", len(optional_koffi_addons),
+              "matching signed Android Koffi optional bindings")
+
     def index_native_packages(base):
         found={}
         for manifest in base.rglob("package.json"):
@@ -187,8 +244,11 @@ def install_release(stage, work, repo):
         return found
     old_native=index_native_packages(module_root)
     new_native=index_native_packages(new_modules)
-    retained_addons=[]
-    verified_android_addon_paths=set()
+    retained_addons=[{
+        "name":"@koromix/koffi-android-arm64", "version":koffi_version,
+        "path":str(path.relative_to(new_modules / "@koromix/koffi-android-arm64"))
+    } for path in optional_koffi_addons]
+    verified_android_addon_paths={path.resolve(strict=True) for path in optional_koffi_addons}
     for key,destinations in new_native.items():
         matching_sources=old_native.get(key,[])
         for dst in destinations:
@@ -215,9 +275,10 @@ def install_release(stage, work, repo):
     # node-pty/Koffi need the matching Android binding; silently omitting an
     # extension produces a signed APK that only fails once terminal/UI loads.
     for name, version in new_native:
-        if name in ("node-pty", "koffi") and not any(
-                item["name"] == name and item["version"] == version
-                for item in retained_addons):
+        if name in ("node-pty", "koffi") and not (
+                (name == "koffi" and optional_koffi_addons)
+                or any(item["name"] == name and item["version"] == version
+                       for item in retained_addons)):
             raise ValueError(
                 "required Android native extension unavailable for "
                 + str(name) + "@" + str(version)
