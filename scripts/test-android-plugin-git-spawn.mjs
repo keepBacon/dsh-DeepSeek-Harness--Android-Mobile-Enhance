@@ -32,7 +32,7 @@ for(const [name,args,target] of [
  [p+'/bin/node',['--check','script.js'],p+'/bin/node'],
  [p+'/libexec/dsh/wrappers/python3',['--version'],p+'/libexec/dsh/wrappers/python3'],
  [p+'/../home/workspace/execute',['argument with spaces',';echo unsafe'],
-  p+'/../home/workspace/execute']
+  require('node:path').normalize(p+'/../home/workspace/execute')]
 ]){
  const result=mod.adaptAndroidCommand(name,args)
  assert.equal(result.command,shell,name)
