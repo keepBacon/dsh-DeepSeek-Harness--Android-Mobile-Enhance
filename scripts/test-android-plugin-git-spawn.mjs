@@ -47,6 +47,28 @@ for(const name of ['sh','echo','getprop','logcat','unknown','github',
  '/data/data/another.app/files/usr/bin/node']){
  assert.equal(mod.adaptAndroidCommand(name,['argument']),null,name)
 }
+// The high-level exec APIs default to /bin/sh, which Android does not
+// provide for the embedded app. Ensure a model's original shell command is
+// passed unchanged, with BASH_ENV dispatch and inherited caller options.
+const shellCommand='node -e "console.log(42)" && git --version'
+const adaptedShell=mod.adaptShellCommand(shellCommand,{cwd:'/tmp',encoding:'utf8'})
+assert.equal(adaptedShell.command,shell)
+assert.deepEqual(adaptedShell.args,[p+'/libexec/dsh-mobile/android-exec.sh',
+ p+'/bin/bash','-c',shellCommand])
+assert.equal(adaptedShell.options.cwd,'/tmp')
+assert.equal(adaptedShell.options.shell,false)
+assert.equal(adaptedShell.options.env.BASH_ENV,p+'/libexec/dsh-mobile/android-bash-env.sh')
+assert.equal(adaptedShell.options.env.LD_PRELOAD,undefined)
+assert.equal(mod.adaptShellCommand('echo ok',{shell:'/custom/bash'}),null)
+assert.equal(mod.adaptShellCommand('echo ok',{shell:'/system/bin/sh'}),null)
+assert.equal(mod.adaptShellCommand('echo ok',{shell:false})?.command,shell)
+assert.throws(()=>cp.execSync(shellCommand,{encoding:'utf8'}), error =>
+  error.code==='ENOENT' || error.errno===-2)
+let execCallback=false
+cp.exec(shellCommand,{cwd:'/tmp'},error=>{
+ execCallback=true
+ assert.equal(error.path,shell)
+})
 assert.equal(mod.adaptGitCommand('node',['--version']),null)
 assert.equal(mod.adaptGitCommand('github',['foo']),null)
 assert.equal(mod.adaptGitCommand('/system/bin/git',['status']),null)
@@ -94,6 +116,8 @@ cp.execFile('node',['--version'],(error)=>{
  assert.equal(named.spawnSync,cp.spawnSync)
  assert.equal(named.execFile,cp.execFile)
  assert.equal(named.execFileSync,cp.execFileSync)
+ assert.equal(named.exec,cp.exec)
+ assert.equal(named.execSync,cp.execSync)
  assert.equal(named.fork,cp.fork)
  console.log('Git bridge: spawn/sync/execFile/ESM mapping OK')
 })().catch(e=>{console.error(e);process.exitCode=1})
