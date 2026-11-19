@@ -62,12 +62,39 @@ def stage_android_koffi_optional(seed_modules, target_modules, version):
     layout so the published Koffi JS loader can resolve it by package name.
     """
     name = "@koromix/koffi-android-arm64"
-    old = seed_modules / name
     new = target_modules / name
-    manifest = old / "package.json"
-    if not manifest.is_file() or manifest.is_symlink():
+    # The signed seed may have placed the optional package under the nested
+    # @deepseek-ai/dsh/node_modules tree. Search by exact manifest identity.
+    candidates = []
+    for manifest in seed_modules.rglob("package.json"):
+        if manifest.is_symlink() or manifest.parent.is_symlink():
+            continue
+        if manifest.parent.name != "koffi-android-arm64":
+            continue
+        if manifest.parent.parent.name != "@koromix":
+            continue
+        try:
+            metadata = json.loads(manifest.read_text())
+        except (ValueError, OSError, UnicodeError):
+            continue
+        if metadata.get("name") == name:
+            candidates.append((manifest.parent, metadata))
+    if not candidates:
         return []
-    meta = json.loads(manifest.read_text())
+    exact = [(directory, metadata) for directory, metadata in candidates
+             if metadata.get("version") == version]
+    if not exact:
+        raise ValueError(
+            "Koffi Android addon version differs from pinned JavaScript: "
+            + str(sorted({str(meta.get("version")) for _, meta in candidates}))
+            + " vs " + str(version))
+    if len(exact) != 1:
+        raise ValueError("ambiguous signed Android Koffi optional packages: "
+                         + str([str(directory) for directory, _ in exact]))
+    old, meta = exact[0]
+    if any(entry.is_symlink() for entry in old.rglob("*")):
+        raise ValueError("symlink in signed Android Koffi optional package")
+
     if meta.get("name") != name or meta.get("version") != version:
         raise ValueError(
             "Koffi Android addon version differs from pinned JavaScript: "
