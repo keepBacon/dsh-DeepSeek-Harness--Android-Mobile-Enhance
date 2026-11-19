@@ -1,7 +1,7 @@
 name: Build DSH on GitHub (Android ARM64, no Termux)
 on:
   push:
-    branches: [main, "feat/upgrade-dsh-v0.2.2-rc.5-20261119"] # One-shot build trigger; restore branch filter after enqueue
+    branches: [main] # Upgrade branch builds require manual workflow_dispatch
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
