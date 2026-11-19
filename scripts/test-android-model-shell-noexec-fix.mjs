@@ -59,5 +59,15 @@ assert.match(patch, /LD_PRELOAD: undefined/)
 assert.match(patch, /BASH_ENV: \(process\.env\.TERMUX__PREFIX/)
 assert.match(patch, /const seam = \/this/)
 assert.match(engine, /"PATH" to \("\/system\/bin:" \+ usrDir\.absolutePath/)
+// Both fresh-install staging and post-install health need a complete Node
+// command set; partial npm/pnpm installations cannot be marked healthy.
+for (const relative of [
+  'bin/npm', 'bin/npx', 'bin/pnpm',
+  'lib/node_modules/npm/bin/npm-cli.js',
+  'lib/node_modules/npm/bin/npx-cli.js'
+]) {
+  assert.ok(engine.includes('"' + relative + '"'), 'runtime health entry missing: ' + relative)
+}
+assert.match(engine, /pnpm\.cjs", "pnpm\.mjs", "pnpm\.js"/)
 assert.ok(!bashEnv.includes('eval '))
 console.log('[DSH] Android Bash noexec-safe PATH, child preload isolation, staged env and dispatch: OK')
