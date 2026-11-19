@@ -32,8 +32,8 @@ def validate_android_addons(module_tree, verified_source_paths):
             raise ValueError("unsafe packaged Node addon " + str(binary))
         with binary.open("rb") as stream:
             header = stream.read(20)
-        if (len(header) < 20 or header[:4] != b"\\x7fELF"
-                or header[4:6] != b"\\x02\\x01"
+        if (len(header) < 20 or header[:4] != bytes((0x7f, 69, 76, 70))
+                or header[4:6] != bytes((2, 1))
                 or int.from_bytes(header[18:20], "little") != 183):
             raise ValueError("non-ARM64 ELF Node addon in Android release " + str(binary))
         canonical = binary.resolve(strict=True)
