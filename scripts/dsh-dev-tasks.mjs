@@ -87,7 +87,12 @@ async function smoke(a={}){
 async function start(a){
  if(typeof a.command!=='string'||!a.command.trim())throw Error('command required')
  if(a.args!==undefined&&(!Array.isArray(a.args)||a.args.length>128||a.args.some(x=>typeof x!=='string')))throw Error('invalid argv')
- if(active.size>=MAX_RUNNING)throw Error('development task concurrency limit reached')
+ // A terminal state may still be present in active while its final
+ // durable snapshot flushes. Count running processes, not records being
+ // persisted: otherwise a fast retry after cancellation spuriously hits
+ // the concurrency limit even though a worker slot has been released.
+ const running=[...active.values()].filter(record=>record.state.status==='running').length
+ if(running>=MAX_RUNNING)throw Error('development task concurrency limit reached')
  const root=prefix();await mkdir(root,{recursive:true,mode:0o700})
  const id='dt-'+randomBytes(12).toString('hex')
  const cwd=resolve(a.cwd||process.cwd())
