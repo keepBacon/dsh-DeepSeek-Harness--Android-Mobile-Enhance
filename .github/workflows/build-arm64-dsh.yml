@@ -1,7 +1,7 @@
 name: Build DSH on GitHub (Android ARM64, no Termux)
 on:
   push:
-    branches: [main] # Upgrade branch builds require manual workflow_dispatch
+    branches: [main, "feat/upgrade-dsh-v0.2.2-rc.5-20261119"] # One-shot rebuild with direct APK release
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
@@ -217,13 +217,13 @@ jobs:
           retention-days: 30
           if-no-files-found: error
       - name: Publish direct-download APK, ZIP and checksums as release
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+        if: (github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/upgrade-dsh-v0.2.2-rc.5-20261119')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="dsh-android-build-${{ github.run_number }}"
+          tag="dsh-android-0.2.2-rc.5-build-${{ github.run_number }}"
           gh release create "$tag" dist/*.apk dist/*.zip dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
