@@ -216,17 +216,52 @@ jobs:
           compression-level: 0
           retention-days: 30
           if-no-files-found: error
-      - name: Publish direct-download APK, ZIP and checksums as release
-        if: (github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/upgrade-dsh-v0.2.2-rc.5-20261119')
+  # Publish separately: an interrupted 680MB upload must not require a
+  # complete recompile. Rerun only this job to retry the direct APK release.
+  publish-direct-release:
+    needs: assemble-legacy-signed
+    if: (github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/upgrade-dsh-v0.2.2-rc.5-20261119')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DSH-ARM64-APK-${{ github.run_number }}
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: DSH-ARM64-ZIP-${{ github.run_number }}
+          path: dist
+      - name: Verify retrieved signed APK, ZIP and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(dist/*.apk)
+          zips=(dist/*.zip)
+          test "${#apks[@]}" -eq 1 && test "${#zips[@]}" -eq 1
+          test -s dist/SHA256SUMS.txt
+          ( cd dist && sha256sum -c SHA256SUMS.txt )
+      - name: Publish verified direct-download files with retries
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="dsh-android-0.2.2-rc.5-build-${{ github.run_number }}"
-          gh release create "$tag" dist/*.apk dist/*.zip dist/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "DSH Android signed upgrade #${{ github.run_number }}" \
-            --notes "APK and ZIP verified with CRC and SHA256. Use direct APK download on Android; install over existing application. Keep backup." \
-            --latest=false
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --latest=false --title "DSH Android signed upgrade #${{ github.run_number }}" --notes "Verified ARM64 APK, ZIP and SHA256. Back up user data before installing."
+          fi
+          for attempt in 1 2 3 4; do
+            if gh release upload "$tag" dist/*.apk dist/*.zip dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"; then
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+              gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url --jq .url
+              exit 0
+            fi
+            echo "Release upload failed (${attempt}/4); retrying..." >&2
+            sleep $((attempt * 12))
+          done
+          echo "APK artifacts remain available. Rerun only publish-direct-release." >&2
+          exit 1
