@@ -142,6 +142,7 @@ jobs:
           node scripts/test-android-preboot-crash-recovery.mjs
           node scripts/test-android-stale-host-mode-recovery.mjs
           node scripts/test-android-engine-stop-contract.mjs
+          node scripts/test-android-engine-service-threading.mjs
           node scripts/test-dsh-web-page-reader.mjs
           node scripts/test-basic-toolbox-operations.mjs
           node scripts/test-dsh-inspector-tools.mjs
