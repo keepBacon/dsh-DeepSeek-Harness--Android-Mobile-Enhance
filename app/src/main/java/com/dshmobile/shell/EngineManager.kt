@@ -2908,6 +2908,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
    */
   private fun communityPluginClientWarnings(profile: String = "web"): List<String> {
     val warnings = mutableListOf<String>()
+    // Resolve the release-family tree once for all plugin dependencies.
+    // Repeated walkTopDown() scans would delay Android Web Host startup.
+    val runtimeClientPresence = mutableMapOf<String, Boolean>()
     for (name in listOf("dsh-zcode-startplan", "dsh-providers-hub")) {
       val packageFile = installedPackageManifest(name, profile)
       if (!packageFile.isFile) continue
@@ -2958,7 +2961,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
           for (index in 0 until requiredClients.length()) {
             val dependency = requiredClients.optString(index)
             if (!dependency.startsWith("@deepseek-ai/")) continue
-            if (findRuntimePackageDir(dependency) == null) {
+            val available = runtimeClientPresence.getOrPut(dependency) {
+              findRuntimePackageDir(dependency) != null
+            }
+            if (!available) {
               warnings += "$name: 运行时缺少客户端依赖 $dependency；请检查 DSH release-family 完整性"
             }
           }
