@@ -2921,9 +2921,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
         }
         val exports = root.optJSONObject("exports")
         val clientExport = exports?.opt("./client")
+        // Published ESM plugins may use either a direct export or a
+        // conditional import/default export. The DSH browser client resolves
+        // the import condition; validating default alone rejects valid builds.
         val clientEntry = when (clientExport) {
           is String -> clientExport
-          is JSONObject -> clientExport.optString("default", "")
+          is JSONObject -> clientExport.optString("import", "")
+            .ifBlank { clientExport.optString("default", "") }
           else -> ""
         }
         if (clientEntry.isBlank()) {
@@ -2931,16 +2935,33 @@ class EngineManager(private val context: Context, private val pickToken: String?
           continue
         }
         val rootPath = parent.canonicalPath + File.separator
-        val entry = File(parent, clientEntry).canonicalFile
-        if (!entry.path.startsWith(rootPath) || !entry.isFile) {
+        fun packagedFile(path: String): File? {
+          if (!path.startsWith("./") || path.contains('\\')) return null
+          val file = File(parent, path).canonicalFile
+          return file.takeIf { it.path.startsWith(rootPath) && it.isFile }
+        }
+        if (packagedFile(clientEntry) == null) {
           warnings += "$name: Web 客户端文件缺失 ($clientEntry)；请安装完整发布包" +
             if (name == "dsh-providers-hub") "，Git 安装须完成 prepare 构建" else ""
         }
+        val bundlePatch = root.optJSONObject("dsh")?.optJSONObject("bundle")
+          ?.optString("patch", "").orEmpty()
+        if (bundlePatch.isBlank() || packagedFile(bundlePatch) == null) {
+          warnings += "$name: Cordis bundle 补丁缺失 ($bundlePatch)，Host 无法注册插件"
+        }
         val main = root.optString("main", "").trim()
-        if (main.isNotBlank()) {
-          val module = File(parent, main).canonicalFile
-          if (!module.path.startsWith(rootPath) || !module.isFile)
-            warnings += "$name: Host 入口缺失 ($main)，请安装完整发布包"
+        if (main.isNotBlank() && packagedFile(main) == null) {
+          warnings += "$name: Host 入口缺失 ($main)，请安装完整发布包"
+        }
+        val requiredClients = client.optJSONArray("inject")
+        if (requiredClients != null) {
+          for (index in 0 until requiredClients.length()) {
+            val dependency = requiredClients.optString(index)
+            if (!dependency.startsWith("@deepseek-ai/")) continue
+            if (findRuntimePackageDir(dependency) == null) {
+              warnings += "$name: 运行时缺少客户端依赖 $dependency；请检查 DSH release-family 完整性"
+            }
+          }
         }
       } catch (t: Throwable) {
         warnings += "$name: 无法读取已安装插件清单 (" + t.javaClass.simpleName + ")"
