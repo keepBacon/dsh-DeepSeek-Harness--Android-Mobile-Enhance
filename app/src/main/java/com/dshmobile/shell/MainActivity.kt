@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
   private val databaseWriter get() = databaseWriterDelegate.value
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+  private val pageLoadRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val recoveryControls = mutableListOf<View>()
   private var pendingPickCallback: String? = null
@@ -441,8 +442,28 @@ class MainActivity : ComponentActivity() {
       // image or chunk must not restart the Host or discard the current session.
       override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
         if (!request.isForMainFrame || !isEngineSource(request.url.toString())) return
-        showStartingState("正在重新连接 DSH…", error.description?.toString().orEmpty())
-        startEngineFlow()
+        if (!pageLoadRecoveryRunning.compareAndSet(false, true)) return
+        // A transient main-frame network failure is not proof that the Host
+        // needs restarting. startEngineFlow() on a healthy Host would call
+        // showWeb() and discard pending React form/composer state.
+        Thread({
+          val alive = EngineProbe.check(700).optBoolean("running", false) ||
+            engineManager.isEngineProcessAlive()
+          runOnUiThread {
+            try {
+              if (isFinishing || isDestroyed) return@runOnUiThread
+              if (alive) {
+                showSimpleMessage("DSH 页面加载失败",
+                  "本机 Host 仍在运行，未自动刷新页面以避免清除未保存内容。请检查连接状态，必要时手动重试。")
+              } else {
+                showStartingState("正在重新连接 DSH…", "检测到 Host 已退出，正在恢复。")
+                startEngineFlow()
+              }
+            } finally {
+              pageLoadRecoveryRunning.set(false)
+            }
+          }
+        }, "dsh-mainframe-error-check").start()
       }
 
       override fun onReceivedHttpError(
@@ -453,8 +474,10 @@ class MainActivity : ComponentActivity() {
         when (errorResponse.statusCode) {
           401, 403 -> recoverWebAuthentication()
           in 500..599 -> {
-            showStartingState("DSH 页面暂时不可用，正在恢复…", "HTTP ${errorResponse.statusCode}")
-            startEngineFlow()
+            // HTTP 5xx is a live server response, not an exited engine.
+            // Do not unconditionally reload the WebView and lose drafts.
+            showSimpleMessage("DSH 页面暂时不可用",
+              "Host 返回 HTTP ${errorResponse.statusCode}。未自动重启或刷新；请检查运行时日志后手动重试。")
           }
         }
       }
