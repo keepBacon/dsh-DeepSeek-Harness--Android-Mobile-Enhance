@@ -4645,7 +4645,13 @@ class MainActivity : ComponentActivity() {
     webView.evaluateJavascript(
       "(function(){return typeof window.__dshOpenOfficialPlugins==='function' && window.__dshOpenOfficialPlugins();})()",
     ) { result ->
-      if (result != "true") Log.w("dsh-plugin", "Official DSH Plugins navigation is not ready")
+      if (result != "true") {
+        Log.w("dsh-plugin", "Official DSH Plugins navigation is not ready")
+        if (!isFinishing && !isDestroyed) {
+          showSimpleMessage("DSH 插件页面暂不可用",
+            "官方 Plugins 导航尚未加载。请确认 DSH Web 运行时启动完成，并检查 Host 的插件客户端日志。")
+        }
+      }
     }
   }
 
