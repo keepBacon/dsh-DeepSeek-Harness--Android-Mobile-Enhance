@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val recoveryControls = mutableListOf<View>()
   private var pendingPickCallback: String? = null
+  private var workspaceChoicePending = false
   private var filePathCallback: ValueCallback<Array<Uri>>? = null
   private var pendingWorkspaceImportPath: String? = null
   private var legacyDirectoryPermissionPending = false
@@ -5397,15 +5398,59 @@ class MainActivity : ComponentActivity() {
    * SAF 目录选择（带 All Files Access 引导）：外部工作区要求 bash 进程能
    * 直接访问所选真实路径；无权限时先跳系统授权页并提示页面侧重试。
    */
+  /** DSH Host's workspace picker now offers both filesystem sources. */
   private fun pickDirectoryWithPermissionCheck(callbackId: String) {
-    // 并发保护：已有在途选择时拒绝新请求（单槽 pendingPickCallback 会被
-    // 覆盖导致前一个引擎 pick 永不结算——P2-8）。
-    if (pendingPickCallback != null) {
+    // A browser picker has one callback slot. Reject overlapping chooser calls
+    // rather than replacing an unresolved callback from the prior request.
+    if (workspaceChoicePending || pendingPickCallback != null) {
       webView.evaluateJavascript(
         "window.__dshBridge?.onDirectoryPicked?.(" + jsString(callbackId) + ", null)", null,
       )
       return
     }
+    workspaceChoicePending = true
+    android.app.AlertDialog.Builder(this)
+      .setTitle("选择工作区")
+      .setItems(arrayOf("用户外部存储", "应用私有存储（DSH HOME）")) { _, index ->
+        workspaceChoicePending = false
+        if (index == 0) {
+          pickExternalWorkspaceDirectory(callbackId)
+        } else {
+          val privateRoot = java.io.File(filesDir, "home")
+          if (!privateRoot.isDirectory && !privateRoot.mkdirs()) {
+            webView.evaluateJavascript(
+              "window.__dshBridge?.onDirectoryPicked?.(" + jsString(callbackId) + ", null)", null,
+            )
+            showSimpleMessage("私有工作区不可用", "无法打开应用私有存储目录。")
+          } else {
+            val resolved = privateRoot.canonicalPath
+            ShellState.rememberWorkspacePath(this, resolved)
+            webView.evaluateJavascript(
+              "window.__dshBridge?.onDirectoryPicked?.(" + jsString(callbackId) + ", " +
+                jsString(resolved) + ")", null,
+            )
+          }
+        }
+      }
+      .setNegativeButton("取消") { _, _ ->
+        workspaceChoicePending = false
+        webView.evaluateJavascript(
+          "window.__dshBridge?.onDirectoryPicked?.(" + jsString(callbackId) + ", null)", null,
+        )
+      }
+      .setOnCancelListener {
+        if (workspaceChoicePending) {
+          workspaceChoicePending = false
+          webView.evaluateJavascript(
+            "window.__dshBridge?.onDirectoryPicked?.(" + jsString(callbackId) + ", null)", null,
+          )
+        }
+      }
+      .show()
+  }
+
+  /** Android SAF grants a real user-selected external cwd for the Host. */
+  private fun pickExternalWorkspaceDirectory(callbackId: String) {
     if (android.os.Build.VERSION.SDK_INT < 30) {
       pendingPickCallback = callbackId
       if (hasLegacyStoragePermission()) {
