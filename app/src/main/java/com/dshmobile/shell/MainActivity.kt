@@ -3305,12 +3305,14 @@ class MainActivity : ComponentActivity() {
             && !item.closest('#dsh-android-skill-settings-panel')
           );
           const target = candidates.find((item) => {
-            const label = (
-              (item.getAttribute('aria-label') || '') + ' ' +
-              (item.getAttribute('title') || '') + ' ' +
-              (item.textContent || '')
-            ).trim().replace(/\\s+/g, ' ').toLowerCase();
-            return label === '插件' || label === 'plugins';
+            // aria-label + title + visible text frequently repeat the same
+            // name; comparing their concatenation hides the real nav item.
+            const labels = [
+              item.getAttribute('aria-label'),
+              item.getAttribute('title'),
+              item.textContent
+            ].map(value => (value || '').trim().replace(/\s+/g, ' ').toLowerCase());
+            return labels.some(label => label === '插件' || label === 'plugins');
           });
           if (!target) {
             // The default mobile sidebar can hide the Plugins navigation.
