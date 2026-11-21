@@ -10,7 +10,7 @@ assert.ok(service.includes('if (stopRequested.get() || EngineManager.isMaintenan
 assert.ok(service.includes('if (engineManager.isEngineProcessAlive()) {\n            markUnresponsiveHost()'))
 assert.ok(!service.includes('if (engineManager.isEngineProcessAlive()) {\n            engineManager.stopEngine()'))
 assert.ok(service.includes('ACTION_RESTART'))
-assert.ok(service.includes('restartOnUserRequest()'))
+assert.ok(service.includes('restartOnUserRequest(generation)'))
 assert.ok(service.includes('restartInFlight.compareAndSet(false, true)'))
 assert.ok(service.includes('EngineManager.beginMaintenance()'))
 assert.ok(service.includes('val stopped = try {'))
