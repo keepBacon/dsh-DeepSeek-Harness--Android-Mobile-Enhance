@@ -66,7 +66,7 @@ assert.equal(found.navTitle,title)
 assert.equal(found.nav,nav)
 assert.equal(found.header,header)
 assert.equal(found.content,options)
-assert.equal(found.navButtons.length,4)
+assert.equal(found.navButtons.length,labels.length)
 // Exercise the actual click route: Settings > Built-in plugins has a
 // dedicated control that closes the modal and selects the *separate* Plugins
 // page, not the settings inventory, and never duplicates the control.
