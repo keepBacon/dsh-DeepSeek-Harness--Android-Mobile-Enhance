@@ -106,7 +106,11 @@
       const screen=T.project(a.position,s.camera,s.viewport);
       const relative=S.relative(player,a.position);
       const inView=!!screen?.inViewport;
-      const los=inView?traceAgent(s,a):{visibility:screen?'outside_view':'behind_camera',occludedBy:null};
+      // Projection is undefined when the camera and agent share a centre;
+      // classify the physical overlap before falling back to screen bounds.
+      const overlapping=length(sub(a.position,s.camera.position))<1e-8;
+      const los=(overlapping||inView)?traceAgent(s,a):
+        {visibility:screen?'outside_view':'behind_camera',occludedBy:null};
       const delta=sub(a.position,player.position);
       return {id:a.id,role:a.role,position:vec(a.position),
         velocity:vec(a.velocity),speed:round(length(a.velocity)),yaw:a.yaw,radius:a.radius,
