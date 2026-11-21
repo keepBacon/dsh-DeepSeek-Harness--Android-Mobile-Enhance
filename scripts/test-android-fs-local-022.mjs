@@ -23,12 +23,12 @@ async function throwGuardedCreateFailure(error, absolutePath, displayPath, inspe
  throw error;
 }
 export async function createIfAbsentFile(tempPath,absolutePath,deny='EACCES') {
- const createIfAbsent={displayPath:absolutePath};
+ const displayPath=absolutePath;
  const inspectPublicationTarget=path=>lstat(path);
  try {
   throw Object.assign(new Error('hardlink rejected'),{code:deny});
  } catch(error) {
-  await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);
+  await throwGuardedCreateFailure(error, absolutePath, displayPath, inspectPublicationTarget);
  }
 }`
  await writeFile(join(pkg,'lib/index.js'),fixture)
