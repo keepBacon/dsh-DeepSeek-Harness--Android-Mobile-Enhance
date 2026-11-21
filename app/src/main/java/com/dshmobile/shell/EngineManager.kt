@@ -2008,6 +2008,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // plugin tree and delay startup even though those plugins are disabled.
       if (!safeMode && !officialProbe && !skipPrebootCompat) {
         ensurePluginWorkspaceCompat("web")
+        communityPluginClientWarnings("web").forEach { Log.w(TAG, "[plugin client compat] $it") }
         applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
         applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
         applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
@@ -2898,6 +2899,54 @@ class EngineManager(private val context: Context, private val pickToken: String?
     } catch (_: Throwable) {
       value
     }
+  }
+
+  /**
+   * DSH's plugin configuration comes from each bundle's Web client half.
+   * Inspect installed files without running community code. Preserve all
+   * user data and upstream engine/version constraints.
+   */
+  private fun communityPluginClientWarnings(profile: String = "web"): List<String> {
+    val warnings = mutableListOf<String>()
+    for (name in listOf("dsh-zcode-startplan", "dsh-providers-hub")) {
+      val packageFile = installedPackageManifest(name, profile)
+      if (!packageFile.isFile) continue
+      try {
+        val root = JSONObject(packageFile.readText())
+        val parent = packageFile.parentFile ?: continue
+        val client = root.optJSONObject("dsh")?.optJSONObject("client")
+        if (client == null || client.optString("platform") != "web") {
+          warnings += "$name: 未声明 DSH Web client，插件配置页面无法注册"
+          continue
+        }
+        val exports = root.optJSONObject("exports")
+        val clientExport = exports?.opt("./client")
+        val clientEntry = when (clientExport) {
+          is String -> clientExport
+          is JSONObject -> clientExport.optString("default", "")
+          else -> ""
+        }
+        if (clientEntry.isBlank()) {
+          warnings += "$name: 缺少 ./client 导出，DSH 官方插件页面无法加载配置"
+          continue
+        }
+        val rootPath = parent.canonicalPath + File.separator
+        val entry = File(parent, clientEntry).canonicalFile
+        if (!entry.path.startsWith(rootPath) || !entry.isFile) {
+          warnings += "$name: Web 客户端文件缺失 ($clientEntry)；请安装完整发布包" +
+            if (name == "dsh-providers-hub") "，Git 安装须完成 prepare 构建" else ""
+        }
+        val main = root.optString("main", "").trim()
+        if (main.isNotBlank()) {
+          val module = File(parent, main).canonicalFile
+          if (!module.path.startsWith(rootPath) || !module.isFile)
+            warnings += "$name: Host 入口缺失 ($main)，请安装完整发布包"
+        }
+      } catch (t: Throwable) {
+        warnings += "$name: 无法读取已安装插件清单 (" + t.javaClass.simpleName + ")"
+      }
+    }
+    return warnings
   }
 
   /** Installed package metadata is inspected without loading third-party JavaScript. */
