@@ -958,7 +958,8 @@ eachPackage('@deepseek-ai/dsh-session-persistence-jsonl', 'lib/index.js', (file)
 // The 0.2.2 background generation migrator uses a second hard-link entry
 // point. A failed link can be recovered without weakening competing-writer
 // detection, again using exclusive copy and syncing the resulting inode.
-eachPackage('@deepseek-ai/dsh-session-persistence-jsonl', 'lib/generation.js', (file) => {
+// Published npm 0.2.2 bundles generation.ts into lib/index.js.
+eachPackage('@deepseek-ai/dsh-session-persistence-jsonl', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: exclusive migration copy fallback'
   if (txt.includes(marker)) return 'already'
