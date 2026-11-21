@@ -6,13 +6,28 @@ import {join} from 'node:path'
 import {createHash} from 'node:crypto'
 const home=await mkdtemp(join(tmpdir(),'dsh-p2-files-'))
 process.env.DSH_WORKSPACE_JOURNAL_DIR=join(home,'journals')
-const {projectFileCall,projectFileTools}=await import('./dsh-workspace-files.mjs')
+const {projectFileCall,projectFileTools,publishWorkspaceCreateExclusive}=await import('./dsh-workspace-files.mjs')
 const root=join(home,'repo')
 const hash=s=>createHash('sha256').update(s).digest('hex')
 try{
  await mkdir(join(root,'src'),{recursive:true})
  const original=join(root,'src','original.ts')
  await writeFile(original,'export const p2 = 1\n')
+ // Android's shared-storage FUSE denies hard links while allowing exclusive
+ // file creation; test success, competing writer and non-permission errors.
+ const linkDenied = async () => {const e=new Error('hard link unavailable');e.code='EACCES';throw e}
+ const staged=join(root,'src','android-stage.tmp')
+ const published=join(root,'src','android-published.ts')
+ await writeFile(staged,'safe created data')
+ assert.equal(await publishWorkspaceCreateExclusive(staged,published,linkDenied),'exclusive-copy')
+ assert.equal(await readFile(published,'utf8'),'safe created data')
+ const conflict=join(root,'src','android-conflict.ts')
+ await writeFile(conflict,'existing other writer')
+ await assert.rejects(publishWorkspaceCreateExclusive(staged,conflict,linkDenied),{code:'EEXIST'})
+ assert.equal(await readFile(conflict,'utf8'),'existing other writer')
+ const invalidLink=async () => {const e=new Error('IO fault');e.code='EIO';throw e}
+ await assert.rejects(publishWorkspaceCreateExclusive(staged,join(root,'src','error.ts'),invalidLink),{code:'EIO'})
+ await assert.rejects(lstat(join(root,'src','error.ts')),{code:'ENOENT'})
  assert.equal(projectFileTools.length,2)
  const dry=await projectFileCall('workspace_refactor',{root,dryRun:true,operations:[{type:'create',path:'src/new.ts',content:'export const created = true\n'}]})
  assert.equal(dry.ok,true)
