@@ -67,7 +67,9 @@ class MainActivity : ComponentActivity() {
   private val databaseWriter get() = databaseWriterDelegate.value
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
-  private val pageLoadRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+  // A recovery belongs to one main-frame navigation, not to the Activity forever.
+  private val mainFrameNavigationGeneration = java.util.concurrent.atomic.AtomicLong(0L)
+  private val pageLoadRecoveryGeneration = java.util.concurrent.atomic.AtomicLong(-1L)
   private val profileMutationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val recoveryControls = mutableListOf<View>()
   private var pendingPickCallback: String? = null
@@ -417,6 +419,12 @@ class MainActivity : ComponentActivity() {
       if (Build.VERSION.SDK_INT >= 21) setAcceptThirdPartyCookies(webView, true)
     }
     webView.webViewClient = object : WebViewClient() {
+      override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+        super.onPageStarted(view, url, favicon)
+        // Invalidate any outstanding Host probe from the previously loading page.
+        mainFrameNavigationGeneration.incrementAndGet()
+      }
+
       override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url.toString()
         // 会话日志导出（issue apk#6 + 403 修复）：浏览器导航带 Origin:null /
@@ -442,26 +450,37 @@ class MainActivity : ComponentActivity() {
       // image or chunk must not restart the Host or discard the current session.
       override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
         if (!request.isForMainFrame || !isEngineSource(request.url.toString())) return
-        if (!pageLoadRecoveryRunning.compareAndSet(false, true)) return
-        // A transient main-frame network failure is not proof that the Host
-        // needs restarting. startEngineFlow() on a healthy Host would call
-        // showWeb() and discard pending React form/composer state.
+        val generation = mainFrameNavigationGeneration.get()
+        // Distinct navigations may fail while an earlier Host probe is pending.
+        // Only deduplicate errors from the SAME navigation.
+        if (pageLoadRecoveryGeneration.getAndSet(generation) == generation) return
+        // A transient network failure is not proof that the Host needs restarting.
+        // Never reload a live Host and discard pending React form/composer state.
         Thread({
-          val alive = EngineProbe.check(700).optBoolean("running", false) ||
-            engineManager.isEngineProcessAlive()
-          runOnUiThread {
-            try {
-              if (isFinishing || isDestroyed) return@runOnUiThread
-              if (alive) {
-                showSimpleMessage("DSH 页面加载失败",
-                  "本机 Host 仍在运行，未自动刷新页面以避免清除未保存内容。请检查连接状态，必要时手动重试。")
-              } else {
-                showStartingState("正在重新连接 DSH…", "检测到 Host 已退出，正在恢复。")
-                startEngineFlow()
+          try {
+            val alive = EngineProbe.check(700).optBoolean("running", false) ||
+              engineManager.isEngineProcessAlive()
+            runOnUiThread {
+              try {
+                // A later navigation supersedes this error. In particular, an
+                // old failed load must not replace a newly loaded DSH page.
+                if (isFinishing || isDestroyed ||
+                    mainFrameNavigationGeneration.get() != generation) return@runOnUiThread
+                if (alive) {
+                  showSimpleMessage("DSH 页面加载失败",
+                    "本机 Host 仍在运行，未自动刷新页面以避免清除未保存内容。请检查连接状态，必要时手动重试。")
+                } else {
+                  showStartingState("正在重新连接 DSH…", "检测到 Host 已退出，正在恢复。")
+                  startEngineFlow()
+                }
+              } finally {
+                // An older probe must never clear a newer navigation's guard.
+                pageLoadRecoveryGeneration.compareAndSet(generation, -1L)
               }
-            } finally {
-              pageLoadRecoveryRunning.set(false)
             }
+          } catch (t: Throwable) {
+            Log.w("DSH-WebView", "Main-frame Host recovery probe failed", t)
+            pageLoadRecoveryGeneration.compareAndSet(generation, -1L)
           }
         }, "dsh-mainframe-error-check").start()
       }
