@@ -10,7 +10,7 @@ const pluginSection=engine.slice(engine.indexOf('private fun communityPluginClie
 assert.ok(pluginSection.includes('fun packagedFile(path: String): File?'), 'plugin package file validation missing')
 assert.ok(pluginSection.includes('path.isBlank() || path.startsWith("/") || path.contains'),
  'reject absolute and malformed paths')
-assert.ok(pluginSection.includes('file.path.startsWith(rootPath) && it.isFile'),
+assert.ok(pluginSection.includes('it.path.startsWith(rootPath) && it.isFile'),
  'plugin path must be canonical and confined to installed package')
 assert.ok(!pluginSection.includes('if (!path.startsWith("./")'),
  'npm main and Cordis patch accept legitimate package-local paths without ./')
