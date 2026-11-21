@@ -1026,7 +1026,9 @@ eachPackage('@deepseek-ai/dsh-fs-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: /storage hard-link fallback'
   if (txt.includes(marker)) return 'already'
-  const re = /([ \t]+)await throwGuardedCreateFailure\(error, absolutePath, createIfAbsent\.displayPath, inspectPublicationTarget\);/
+  // The 0.2.2 npm bundle uses displayPath (not createIfAbsent.displayPath)
+  // when reporting writeFileAtomic failures; accept either known shape.
+  const re = /([ \t]+)await throwGuardedCreateFailure\(error, absolutePath, (?:createIfAbsent\.displayPath|displayPath), inspectPublicationTarget\);/
   const m = re.exec(txt)
   if (!m) {
     if (androidStableStorageMandatory) throw new Error(`fs-local no-replace publication anchor changed: ${file}`)
@@ -1038,7 +1040,7 @@ eachPackage('@deepseek-ai/dsh-fs-local', 'lib/index.js', (file) => {
   // failure, permission failure on the target or concurrent EEXIST must still
   // pass through the upstream guarded error classifier. Crucially rename()
   // is NOT an exclusive create primitive; it can overwrite a concurrent file.
-  const block = `${i}if (!["EACCES", "EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(error?.code)) {\n${i}  await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n${i}}\n${i}let existing;\n${i}try {\n${i}  existing = await inspectPublicationTarget(absolutePath);\n${i}} catch (metadataError) {\n${i}  if (!isENOENT(metadataError) && !isENOTDIR(metadataError)) throw metadataError;\n${i}}\n${i}if (existing !== void 0) {\n${i}  await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n${i}}\n${i}// ${marker}: COPYFILE_EXCL is no-replace even across races.\n${i}try {\n${i}  await copyFile(tempPath, absolutePath, 1);\n${i}} catch (copyError) {\n${i}  await throwGuardedCreateFailure(copyError, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n${i}}\n${i}const androidPublishedHandle = await open(absolutePath, "r");\n${i}try { await androidPublishedHandle.sync(); }\n${i}finally { await androidPublishedHandle.close(); }`
+  const block = `${i}if (!["EACCES", "EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(error?.code)) {\n${i}  await throwGuardedCreateFailure(error, absolutePath, displayPath, inspectPublicationTarget);\n${i}}\n${i}let existing;\n${i}try {\n${i}  existing = await inspectPublicationTarget(absolutePath);\n${i}} catch (metadataError) {\n${i}  if (!isENOENT(metadataError) && !isENOTDIR(metadataError)) throw metadataError;\n${i}}\n${i}if (existing !== void 0) {\n${i}  await throwGuardedCreateFailure(error, absolutePath, displayPath, inspectPublicationTarget);\n${i}}\n${i}// ${marker}: COPYFILE_EXCL is no-replace even across races.\n${i}try {\n${i}  await copyFile(tempPath, absolutePath, 1);\n${i}} catch (copyError) {\n${i}  await throwGuardedCreateFailure(copyError, absolutePath, displayPath, inspectPublicationTarget);\n${i}}\n${i}const androidPublishedHandle = await open(absolutePath, "r");\n${i}try { await androidPublishedHandle.sync(); }\n${i}finally { await androidPublishedHandle.close(); }`
   txt = txt.replace(re, block)
   txt = ensureFsPromisesImport(txt, ['copyFile', 'open'])
   const importMatch = txt.match(/import\s*\{([^}]*)\}\s*from\s*["']node:fs\/promises["']/)
