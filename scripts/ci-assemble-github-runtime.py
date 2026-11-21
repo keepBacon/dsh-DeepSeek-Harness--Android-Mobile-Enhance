@@ -620,7 +620,7 @@ def main():
         subprocess.run(
             ["node", str(args.repo / "scripts/android-runtime-patch.mjs"), str(stage / "usr")],
             check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.2.2-rc.5",
-                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local,@deepseek-ai/dsh-subprocess-local,node-addon-require-builtin,@deepseek-ai/node-addon-system,@deepseek-ai/dsh-session-persistence-jsonl,@deepseek-ai/dsh-fs-local"})
+                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local,@deepseek-ai/dsh-subprocess-local,node-addon-require-builtin,@deepseek-ai/node-addon-system,@deepseek-ai/dsh-session-persistence-jsonl,@deepseek-ai/dsh-fs-local,@deepseek-ai/dsh-attachment-local"})
         patch_web_fetch_limits(stage)
         stage_modsearch(stage, workspace)
         install_typescript(stage, workspace)
