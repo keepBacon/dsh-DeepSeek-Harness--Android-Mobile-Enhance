@@ -22,7 +22,7 @@ for(const token of [
  "const syncOfficialPluginConfigLink = (parts) => {",
  "syncOfficialPluginConfigLink(parts)",
  "const current = findSettingsParts()",
- "queueMicrotask(() => target.click())",
+ "queueMicrotask(() => openDshSurface(",
  "queueMicrotask(() => openDshSurface(",
  "parts.header.querySelector(':scope > button:last-of-type')",
  "content.scrollTop = 0",
@@ -48,10 +48,12 @@ assert.ok(source.includes("['plugins', '插件'].includes("),
  'native Plugins navigation must never substring-match Built-in plugins')
 assert.ok(source.includes("target = Array.from(globalNav.querySelectorAll("),
  'official Plugins control must be scoped to the Global panels nav')
-assert.ok(source.includes("const target = globalNav && candidates.find(item =>"),
- 'settings-to-Plugins navigation must stay within Global panels')
-assert.ok(!source.includes("!!item.closest('nav, [role=\"navigation\"]') && isPlugins(item)"),
- 'navigation must not fall back to unrelated Plugins or inventory tabs')
+assert.ok(source.includes("const openOfficialPluginConfig = (parts) => {"),
+ 'both plugin entry points must use the shared DSH navigation helper')
+assert.ok(!source.includes("const target = globalNav && candidates.find(item =>"),
+ 'the Settings route must not implement a second Plugins target selector')
+assert.ok(source.includes("closeSidebar();\n              return true;"),
+ 'opening upstream DSH Plugins must dismiss the mobile sidebar')
 const engineSource=readFileSync('app/src/main/java/com/dshmobile/shell/EngineManager.kt','utf8')
 for(const token of [
  'dsh-zcode-startplan', 'dsh-providers-hub',
@@ -142,7 +144,8 @@ const config=new Function('document','TOOLS_PANEL_ID','openToolsPanel',
 let sidebarCloses=0
 const handlers=config(dom,'dsh-tools',()=>{toolsOpens++},()=>{sidebarCloses++},
  callback=>callback(),()=>pluginParts,{language:'zh-CN'},
- surface=>{assert.equal(surface.id,'plugins');routeFallbacks++},[{id:'plugins'}],{alert:()=>{throw new Error('missing native plugin page')}})
+ surface=>{assert.equal(surface.id,'plugins');routeFallbacks++;navClicks++;sidebarCloses++},
+ [{id:'plugins'}],{alert:()=>{throw new Error('missing native plugin page')}})
 handlers.syncOfficialPluginConfigLink(pluginParts)
 handlers.syncOfficialPluginConfigLink(pluginParts)
 assert.equal(created,1,'one navigation control per dialog')
@@ -153,8 +156,61 @@ assert.equal(navClicks,1)
 assert.equal(sidebarCloses,1)
 availableControls=[]
 handlers.openOfficialPluginConfig(pluginParts)
-assert.equal(routeFallbacks,1,'missing sidebar must route through official Plugins surface')
+assert.equal(routeFallbacks,2,'both routes must use the one official Plugins surface')
 assert.equal(toolsOpens,0,'plugin route must never open Android Tools panel')
 assert.equal(closeClicks,2,'settings modal must close before both plugin navigation paths')
+
+
+const enginePackageResolution=engineSource.slice(
+ engineSource.indexOf('  private fun findRuntimePackageDir('),
+ engineSource.indexOf('  private fun setWorkspaceMappingValue(')
+)
+assert.ok(enginePackageResolution.includes('File(root, "$packageName/package.json")'),
+ 'use direct release-family lookup instead of full package traversal for Web clients')
+assert.ok(enginePackageResolution.includes('if (packageName != "node-pty") return null'),
+ 'only the legacy native PTY is allowed a recursive package lookup')
+
+// Execute the actual Global panels navigator with false positives present.
+const surfaceStart=source.indexOf('        const openDshSurface = (surface, onFailure) => {')
+const surfaceEnd=source.indexOf('        const installToolsPanel = () => {',surfaceStart)
+assert.ok(surfaceStart>=0 && surfaceEnd>surfaceStart,'DSH surface navigator not found')
+const surfaceSource=source.slice(surfaceStart,surfaceEnd)
+let upstreamClicks=0,inventoryClicks=0,panelCloses=0,sidebarOpens=0,sidebarCloses=0
+const upstreamItem={
+ textContent:'插件',
+ getAttribute(key){return key==='aria-label'?'Plugins':null},
+ scrollIntoView(){},click(){upstreamClicks++}
+}
+const inventoryItem={
+ textContent:'内置插件',
+ getAttribute(key){return key==='aria-label'?'Built-in plugins':null},
+ scrollIntoView(){},click(){inventoryClicks++}
+}
+const settingNav={
+ getAttribute(key){return key==='aria-label'?'Settings':null},
+ querySelectorAll(){return [inventoryItem]}
+}
+const upstreamNav={
+ getAttribute(key){return key==='aria-label'?'Global panels':null},
+ querySelectorAll(){return [inventoryItem,upstreamItem]}
+}
+const buildSurface=(navs)=>new Function('document','closeToolsPanel','closeSidebar',
+ 'openSidebar','requestAnimationFrame','setTimeout','findDshSurfaceControl',
+ surfaceSource+'return openDshSurface')(
+ {querySelectorAll(sel){assert.equal(sel,'nav, [role="navigation"]');return navs}},
+ ()=>{panelCloses++},()=>{sidebarCloses++},()=>{sidebarOpens++},
+ fn=>fn(),fn=>fn(),()=>{throw new Error('must not use generic surface selector for plugins')}
+)
+const official=buildSurface([settingNav,upstreamNav])
+official({id:'plugins',tests:['plugins','插件']},()=>{throw new Error('official control should be found')})
+assert.equal(upstreamClicks,1,'exact Plugins global navigation must be activated')
+assert.equal(inventoryClicks,0,'the Built-in plugins inventory must never be selected')
+assert.equal(sidebarCloses,1,'mobile drawer must close after native Plugins navigation')
+let missingPanelFailures=0
+const unavailable=buildSurface([settingNav])
+unavailable({id:'plugins',tests:['plugins','插件']},()=>{missingPanelFailures++})
+assert.equal(missingPanelFailures,1,'missing upstream Plugins panel should produce one error')
+assert.equal(inventoryClicks,0,'never open Settings inventory as fallback')
+assert.equal(sidebarOpens,1,'bounded retries should open the DSH sidebar once')
 
 console.log('[DSH] DSH 0.2.2 mobile settings: four-seat layout and Plugins configuration navigation OK')

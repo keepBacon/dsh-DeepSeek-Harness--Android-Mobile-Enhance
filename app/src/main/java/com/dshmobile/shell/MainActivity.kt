@@ -2629,20 +2629,27 @@ class MainActivity : ComponentActivity() {
             try {
               target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
               target.click();
+              closeSidebar();
               return true;
             } catch (_) {
               return false;
             }
           };
 
-          if (tryOpen()) return;
+          if (tryOpen()) return true;
           openSidebar();
-          requestAnimationFrame(() => {
+          // React may mount the Global panels nav after the sidebar opens.
+          // Retry for at most 600 ms, never poll continuously or alter the
+          // upstream page. Failure is surfaced after the bounded attempts.
+          let retryCount = 0;
+          const retry = () => {
             if (tryOpen()) return;
-            setTimeout(() => {
-              if (!tryOpen() && typeof onFailure === 'function') onFailure();
-            }, 80);
-          });
+            retryCount += 1;
+            if (retryCount < 4) setTimeout(retry, retryCount * 100);
+            else if (typeof onFailure === 'function') onFailure();
+          };
+          requestAnimationFrame(retry);
+          return true;
         };
 
         const installToolsPanel = () => {
@@ -3283,45 +3290,15 @@ class MainActivity : ComponentActivity() {
         // Offer a real navigation to the upstream page, NOT a fake form or
         // the Android package installer, and preserve upstream save actions.
         const openOfficialPluginConfig = (parts) => {
-          const candidates = Array.from(document.querySelectorAll(
-            'button, [role="tab"], [role="treeitem"], a[href]'
-          )).filter((item) =>
-            !item.closest('[role="dialog"], [aria-modal="true"], #' + TOOLS_PANEL_ID)
-            && !item.closest('#dsh-android-mobile-bar')
-            && !item.closest('#dsh-android-skill-settings-panel')
-          );
-          // DSH 0.2.2 Web's Plugins page belongs to the "Global panels"
-          // navigation. Avoid matching an unrelated "插件" button elsewhere.
-          const isPlugins = (item) => [
-            item.getAttribute('aria-label'), item.getAttribute('title'), item.textContent
-          ].some(value => (value || '').trim().replace(/\s+/g, ' ').toLowerCase() === '插件' ||
-            (value || '').trim().toLowerCase() === 'plugins');
-          const globalNav = Array.from(document.querySelectorAll('nav, [role="navigation"]'))
-            .find(nav => {
-              const label = (nav.getAttribute('aria-label') || '').trim().toLowerCase();
-              return label === '全局面板' || label === 'global panels' || label === 'global panel';
-            });
-          const target = globalNav && candidates.find(item =>
-            globalNav.contains(item) && isPlugins(item));
-          // Always dismiss Settings first: its modal overlay intercepts
-          // pointer events intended for the DSH Plugins page.
+          // The Android app gear and Settings > Built-in plugins both use
+          // the same DSH Global panels navigation. Never duplicate a plugin
+          // installer or special-case the settings inventory as a manager.
           const close = parts && parts.header.querySelector(':scope > button:last-of-type');
           if (close) close.click();
-          if (!target) {
-            // Older/customized sidebars may not mount the Global panels nav
-            // until expanded. The fallback still selects DSH's own Plugins
-            // surface; Android must never substitute a second installer UI.
-            queueMicrotask(() => openDshSurface(
-              DSH_SURFACE_DEFS.find((surface) => surface.id === 'plugins'),
-              () => window.alert('DSH 插件页面尚未就绪，请确认运行时已升级且插件管理组件已加载。')
-            ));
-            // Navigation has been scheduled through the official DSH
-            // surface picker. Only a missing picker should report failure.
-            return true;
-          }
-          closeSidebar();
-          // Keep upstream React navigation and the plugin's staged form state.
-          queueMicrotask(() => target.click());
+          queueMicrotask(() => openDshSurface(
+            DSH_SURFACE_DEFS.find((surface) => surface.id === 'plugins'),
+            () => window.alert('DSH 插件页面尚未就绪，请确认运行时已升级且插件管理组件已加载。')
+          ));
           return true;
         };
 

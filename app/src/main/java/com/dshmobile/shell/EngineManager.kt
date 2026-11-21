@@ -2418,20 +2418,33 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * though the plugin should consume the runtime's shared DSH modules.
    */
   private fun findRuntimePackageDir(packageName: String): File? {
+    // The 0.2.2 release family is hoisted; client injection packages have
+    // deterministic direct paths. Avoid recursively reading every package
+    // manifest for each community plugin on every Web Host boot.
+    if (!Regex("""^(?:@deepseek-ai/[A-Za-z0-9][A-Za-z0-9._-]*|node-pty)$""").matches(packageName))
+      return null
     val root = File(usrDir, "lib/node_modules")
     if (!root.isDirectory) return null
+    val direct = File(root, "$packageName/package.json")
+    if (direct.isFile) {
+      try {
+        if (JSONObject(direct.readText()).optString("name") == packageName)
+          return direct.parentFile?.canonicalFile
+      } catch (_: Throwable) { /* A corrupt manifest must not be reported as installed. */ }
+    }
+    // Only the embedded native PTY can require a nested dependency path in
+    // older signed runtime seeds. Do not walk the graph for client packages:
+    // missing hoisted Web clients need an actionable release-family error.
+    if (packageName != "node-pty") return null
     return root.walkTopDown()
       .maxDepth(8)
       .filter { it.isFile && it.name == "package.json" }
       .mapNotNull { manifest ->
         try {
-          val json = JSONObject(manifest.readText())
-          if (json.optString("name") == packageName) manifest.parentFile else null
-        } catch (_: Throwable) {
-          null
-        }
-      }
-      .firstOrNull()
+          if (JSONObject(manifest.readText()).optString("name") == packageName)
+            manifest.parentFile?.canonicalFile else null
+        } catch (_: Throwable) { null }
+      }.firstOrNull()
   }
 
   private fun setWorkspaceMappingValue(
