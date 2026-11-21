@@ -2,7 +2,8 @@
 // Only regular files inside the explicit project root are eligible. Existing
 // source-text edits continue to use code_edit_verify and its journal.
 import {createHash,randomBytes} from 'node:crypto'
-import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,link,open} from 'node:fs/promises'
+import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,link,open,copyFile} from 'node:fs/promises'
+import {constants as fsConstants} from 'node:fs'
 import {resolve,join,dirname,basename,sep,isAbsolute,relative} from 'node:path'
 import {homedir} from 'node:os'
 import {acquirePathLocks} from './dsh-code-engine-journal.mjs'
@@ -19,6 +20,24 @@ async function syncDir(dir){
   // Some Android filesystems do not allow opening directories as FDs.
   if(!['EINVAL','EISDIR','EPERM','EACCES','EOPNOTSUPP'].includes(e.code))throw e
  }finally{await fd?.close()}
+}
+// Android FUSE and several shared-storage mounts reject hard links (EACCES).
+// The original hard-link publication remains the fast/atomic path; only a
+// verified unsupported-link errno permits an EXCLUSIVE copy fallback.
+// Unlike rename(), COPYFILE_EXCL refuses a destination created by another
+// app/process since the last transaction check and never overwrites its data.
+const deniedHardLink=new Set(['EACCES','EPERM','ENOTSUP','EOPNOTSUPP','EXDEV','ENOSYS'])
+export async function publishWorkspaceCreateExclusive(staged,destination,linkFile=link){
+ try{
+  await linkFile(staged,destination)
+  return 'link'
+ }catch(e){
+  if(!deniedHardLink.has(e?.code))throw e
+ }
+ await copyFile(staged,destination,fsConstants.COPYFILE_EXCL)
+ const handle=await open(destination,'r')
+ try{await handle.sync()}finally{await handle.close()}
+ return 'exclusive-copy'
 }
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
@@ -55,7 +74,7 @@ async function existing(path){
   if(st.isSymbolicLink()||!st.isFile())throw Error('only regular, non-symlink project files are supported: '+path)
   if(st.size>8*1024*1024)throw Error('source exceeds 8 MiB transaction limit')
   const bytes=await readFile(path)
-  return {hash:sha(bytes),bytes,mode:st.mode&0o7777}
+  return {hash:sha(bytes),bytes,mode:st.mode&0o7777,dev:String(st.dev),ino:String(st.ino)}
  }catch(e){if(e.code==='ENOENT')return null;throw e}
 }
 async function validated(root,ops){
@@ -132,10 +151,12 @@ async function apply(row){
   try{
    await durableWrite(tmp,row.content,0o600)
    if(await existing(row.from))throw Error('concurrent create target: '+row.from)
-   // link() is exclusive: unlike rename(), it cannot overwrite a
-   // concurrently-created target between the last check and commit.
-   await link(tmp,row.from)
+   // Android shared storage may deny link(). The fallback is COPYFILE_EXCL,
+   // never an unchecked rename that could replace another writer's file.
+   await publishWorkspaceCreateExclusive(tmp,row.from)
    await syncDir(dirname(row.from))
+   const published=await lstat(row.from)
+   return {dev:String(published.dev),ino:String(published.ino)}
   }finally{await rm(tmp,{force:true}).catch(()=>{})}
  }
 }
@@ -146,8 +167,18 @@ async function restore(dir,manifest,{dryRun=false}={}){
   const at=await existing(action.from),dest=action.to?await existing(action.to):null
   let status='unchanged',conflict=null
   if(action.type==='create'){
-   if(at?.hash===action.afterHash){status='remove-created';if(!dryRun)await rm(action.from)}
-   else if(at)conflict='created file was changed externally'
+   // A crash can occur after journal intent is written but before CREATE.
+   // A concurrent process may then create identical bytes. Content hash
+   // alone does NOT prove ownership and must never authorize deletion.
+   const owned=action.published &&
+     at?.dev===action.published.dev && at?.ino===action.published.ino
+   if(at?.hash===action.afterHash && owned){
+    status='remove-created'
+    if(!dryRun)await rm(action.from)
+   }else if(at){
+    conflict=action.published?'created file changed or was replaced externally':
+      'created file ownership was not journaled; refusing unsafe deletion'
+   }
   }else if(action.type==='replace'){
    if(!at)conflict='replaced file is missing'
    else if(at.hash===action.oldHash)status='unchanged'
@@ -228,7 +259,17 @@ async function refactor(args){
   let verification=null
   try{
    t.manifest.phase='applying';await atomicJson(join(t.dir,'manifest.json'),t.manifest)
-   for(const row of current)await apply(row)
+   for(let i=0;i<current.length;i++){
+    const row=current[i]
+    const published=await apply(row)
+    if(row.type==='create' && published){
+     // Persist inode ownership evidence before any later operation/verify can
+     // fail. If power fails before this write, recovery deliberately leaves
+     // the candidate file intact rather than risking someone else's data.
+     t.manifest.actions[i].published=published
+     await atomicJson(join(t.dir,'manifest.json'),t.manifest)
+    }
+   }
    if(args.verify===true){
     verification=await projectBuildCall('workspace_verify',{root,system:args.system,
      runTests:args.runTests!==false,timeoutMs:args.timeoutMs||600000})

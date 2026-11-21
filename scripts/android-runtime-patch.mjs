@@ -982,19 +982,75 @@ eachPackage('@deepseek-ai/dsh-session-persistence-jsonl', 'lib/index.js', (file)
   return 'patched'
 }, { mandatory: versionAtLeast(targetVersion, '0.2.0-rc.1') })
 
+// Immutable attachments have TWO hard-link sites: content publication and
+// alias creation. Keep upstream EEXIST/digest verification intact: only
+// translate a denied hard link into a no-replace, fsynced copy. This means a
+// successful Android fallback can use more space than a POSIX hard-link alias.
+eachPackage('@deepseek-ai/dsh-attachment-local', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: immutable attachment exclusive copy'
+  if (txt.includes(marker)) return 'already'
+  const anchors = ['await link(source, target)', 'await link(staged.path, target)']
+  for (const anchor of anchors) {
+    const count = txt.split(anchor).length - 1
+    if (count !== 1) {
+      throw new Error('attachment hard-link anchor missing or ambiguous (' + count + '): ' + anchor + ' at ' + file)
+    }
+    txt = txt.replace(anchor,
+      anchor.replace('await link(', 'await dshAndroidAttachmentLinkOrCopy('))
+  }
+  // A function declaration is hoisted, so both original publication call
+  // sites retain their surrounding EEXIST -> SHA256 integrity checks.
+  txt += `\n// ${marker}
+async function dshAndroidAttachmentLinkOrCopy(source, target) {
+  try {
+    await link(source, target);
+  } catch (linkError) {
+    if (!(linkError && ["EACCES", "EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(linkError.code))) throw linkError;
+    // COPYFILE_EXCL preserves no-replace semantics for competing writers.
+    await copyFile(source, target, 1);
+    const publishedHandle = await open(target, "r");
+    try { await publishedHandle.sync(); }
+    finally { await publishedHandle.close(); }
+  }
+}
+`
+  txt = ensureFsPromisesImport(txt, ['copyFile', 'open'])
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: versionAtLeast(targetVersion, '0.2.0-rc.1') })
+
 // Workspace create-if-absent publication has the same hard-link limitation.
 eachPackage('@deepseek-ai/dsh-fs-local', 'lib/index.js', (file) => {
   let txt = read(file)
   const marker = 'DSH Android compat: /storage hard-link fallback'
   if (txt.includes(marker)) return 'already'
-  const re = /([ \t]+)await throwGuardedCreateFailure\(error, absolutePath, createIfAbsent\.displayPath, inspectPublicationTarget\);/
+  // The 0.2.2 npm bundle uses displayPath (not createIfAbsent.displayPath)
+  // when reporting writeFileAtomic failures; accept either known shape.
+  const re = /([ \t]+)await throwGuardedCreateFailure\(error, absolutePath, (createIfAbsent\.displayPath|displayPath), inspectPublicationTarget\);/
   const m = re.exec(txt)
-  if (!m) { warn(`fs-local create anchor changed: ${file}`); return 'anchor-missing' }
+  if (!m) {
+    if (androidStableStorageMandatory) throw new Error(`fs-local no-replace publication anchor changed: ${file}`)
+    warn(`fs-local create anchor changed: ${file}`)
+    return 'anchor-missing'
+  }
   const i = m[1]
-  const block = `${i}let existing;\n${i}try {\n${i}\texisting = await inspectPublicationTarget(absolutePath);\n${i}} catch (metadataError) {\n${i}\tif (!isENOENT(metadataError) && !isENOTDIR(metadataError)) throw metadataError;\n${i}}\n${i}if (existing !== void 0) {\n${i}\tawait throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n${i}}\n${i}// ${marker}.\n${i}await rename(tempPath, absolutePath);`
+  const displayArg = m[2]
+  // Only unsupported hard-link errno values permit the fallback. An I/O
+  // failure, permission failure on the target or concurrent EEXIST must still
+  // pass through the upstream guarded error classifier. Crucially rename()
+  // is NOT an exclusive create primitive; it can overwrite a concurrent file.
+  const block = `${i}if (!["EACCES", "EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(error?.code)) {\n${i}  await throwGuardedCreateFailure(error, absolutePath, ${displayArg}, inspectPublicationTarget);\n${i}}\n${i}let existing;\n${i}try {\n${i}  existing = await inspectPublicationTarget(absolutePath);\n${i}} catch (metadataError) {\n${i}  if (!isENOENT(metadataError) && !isENOTDIR(metadataError)) throw metadataError;\n${i}}\n${i}if (existing !== void 0) {\n${i}  await throwGuardedCreateFailure(error, absolutePath, ${displayArg}, inspectPublicationTarget);\n${i}}\n${i}// ${marker}: COPYFILE_EXCL is no-replace even across races.\n${i}try {\n${i}  await copyFile(tempPath, absolutePath, 1);\n${i}} catch (copyError) {\n${i}  await throwGuardedCreateFailure(copyError, absolutePath, ${displayArg}, inspectPublicationTarget);\n${i}}\n${i}const androidPublishedHandle = await open(absolutePath, "r");\n${i}try { await androidPublishedHandle.sync(); }\n${i}finally { await androidPublishedHandle.close(); }`
   txt = txt.replace(re, block)
-  txt = ensureFsPromisesImport(txt, ['rename'])
+  txt = ensureFsPromisesImport(txt, ['copyFile', 'open'])
+  const importMatch = txt.match(/import\s*\{([^}]*)\}\s*from\s*["']node:fs\/promises["']/)
+  const importedNames = (importMatch?.[1] || '').split(',').map(part => part.trim())
+  if (!importedNames.includes('copyFile') || !importedNames.includes('open')) {
+    throw new Error('fs-local copyFile/open named imports missing after patch: ' + file)
+  }
   write(file, txt)
+  checkPatchedJavaScript(file)
   return 'patched'
 }, { mandatory: androidStableStorageMandatory })
 
@@ -1149,7 +1205,8 @@ eachPackage('@deepseek-ai/dsh-attachment-local', 'lib/index.js', (file) => {
   }
   // If current upstream still publishes the staged object via hard link, make
   // EPERM/EACCES recoverable without weakening EEXIST integrity checks.
-  if (!txt.includes('DSH Android compat: attachment staged rename')) {
+  if (!versionAtLeast(targetVersion, '0.2.0-rc.1') &&
+      !txt.includes('DSH Android compat: attachment staged rename')) {
     const re = /await link\(staged\.path, target\);/
     if (re.test(txt)) {
       txt = txt.replace(re, `try {\n\t\t\tawait link(staged.path, target);\n\t\t} catch (androidLinkError) {\n\t\t\tif (!(androidLinkError instanceof Error && 'code' in androidLinkError && (androidLinkError.code === 'EPERM' || androidLinkError.code === 'EACCES'))) throw androidLinkError;\n\t\t\t// DSH Android compat: attachment staged rename.\n\t\t\tawait rename(staged.path, target);\n\t\t}`)
@@ -1162,7 +1219,9 @@ eachPackage('@deepseek-ai/dsh-attachment-local', 'lib/index.js', (file) => {
   }
   // Immutable aliases cannot rename the content-addressed source.  On Android
   // copy it exclusively instead, preserving the original object.
-  if (txt.includes('async function publishImmutableAlias(') && !txt.includes('DSH Android compat: publishImmutableAlias')) {
+  if (!versionAtLeast(targetVersion, '0.2.0-rc.1') &&
+      txt.includes('async function publishImmutableAlias(') &&
+      !txt.includes('DSH Android compat: publishImmutableAlias')) {
     const anchor = `\t\t\t/* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */\n\t\t\tif (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;\n\t\t\tif (await digestFile(target) !== sha256) throw new AttachmentError("Stored attachment failed integrity verification.", "ATTACHMENT_CORRUPT");`
     if (txt.includes(anchor)) {
       const repl = `\t\t\t// DSH Android compat: publishImmutableAlias; hard links may be forbidden.\n\t\t\tif (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {\n\t\t\t\ttry { await copyFile(source, target, constants.COPYFILE_EXCL); } catch (copyError) {\n\t\t\t\t\tif (!(copyError instanceof Error && "code" in copyError && copyError.code === "EEXIST")) throw copyError;\n\t\t\t\t}\n\t\t\t} else if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;\n\t\t\tif (await digestFile(target) !== sha256) throw new AttachmentError("Stored attachment failed integrity verification.", "ATTACHMENT_CORRUPT");`

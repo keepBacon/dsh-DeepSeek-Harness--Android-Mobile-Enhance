@@ -4421,20 +4421,41 @@ class MainActivity : ComponentActivity() {
         return candidate
       } catch (_: java.nio.file.FileAlreadyExistsException) {
         continue
-      } catch (_: Throwable) {
-        // Emulated/shared storage commonly rejects hard links. Reserve the name
-        // atomically, then fill only the file we just created.
-        if (!candidate.createNewFile()) continue
+      } catch (linkError: Throwable) {
+        // Do not interpret an arbitrary I/O error as unsupported hard links.
+        // Android emulated-storage FUSE commonly reports EACCES/EPERM/ENOTSUP,
+        // but real disk failures must remain visible to the user.
+        val reason = (linkError as? java.nio.file.FileSystemException)?.reason?.lowercase().orEmpty()
+        val unsupportedLink = linkError is java.nio.file.AccessDeniedException ||
+          listOf("operation not permitted", "permission denied", "not supported",
+            "function not implemented", "cross-device link").any { reason.contains(it) }
+        if (!unsupportedLink) throw linkError
+
+        var created = false
         try {
-          temp.inputStream().buffered(128 * 1024).use { input ->
-            candidate.outputStream().buffered(128 * 1024).use { output -> input.copyTo(output, 128 * 1024) }
+          // CREATE_NEW is the exclusive reserve-and-open operation. The old
+          // createNewFile() + outputStream() sequence reopened a pathname that
+          // could be replaced between those calls.
+          java.nio.channels.FileChannel.open(candidate.toPath(),
+            java.nio.file.StandardOpenOption.CREATE_NEW,
+            java.nio.file.StandardOpenOption.WRITE).use { channel ->
+            created = true
+            temp.inputStream().buffered(128 * 1024).use { input ->
+              val output = java.nio.channels.Channels.newOutputStream(channel).buffered(128 * 1024)
+              input.copyTo(output, 128 * 1024)
+              output.flush()
+            }
+            channel.force(true)
           }
           if (!temp.delete()) {
             try { java.nio.file.Files.deleteIfExists(temp.toPath()) } catch (_: Throwable) {}
           }
           return candidate
+        } catch (_: java.nio.file.FileAlreadyExistsException) {
+          // A competing writer won this filename. Try the next unique name.
+          continue
         } catch (copyError: Throwable) {
-          candidate.delete()
+          if (created) candidate.delete()
           throw copyError
         }
       }

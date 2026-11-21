@@ -144,6 +144,9 @@ jobs:
           node scripts/test-android-engine-stop-contract.mjs
           node scripts/test-android-engine-service-threading.mjs
           node scripts/test-android-session-hardlink-022.mjs
+          node scripts/test-android-fs-local-022.mjs
+          node scripts/test-android-attachment-hardlink-022.mjs
+          node scripts/test-android-import-exclusive.mjs
           node scripts/test-dsh-web-page-reader.mjs
           node scripts/test-basic-toolbox-operations.mjs
           node scripts/test-dsh-inspector-tools.mjs
