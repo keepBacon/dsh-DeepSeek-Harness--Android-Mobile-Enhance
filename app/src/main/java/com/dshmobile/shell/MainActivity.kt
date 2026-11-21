@@ -5536,7 +5536,7 @@ class MainActivity : ComponentActivity() {
    */
   private fun showWorkspaceFileChooser(accepts: Array<String>, allowMultiple: Boolean) {
     if (filePathCallback == null) return
-    val privateRoot = java.io.File(filesDir, "workspaces")
+    val privateRoot = java.io.File(filesDir, "home")
     val preferredExternal = externalFileWorkspaceRoot()
     val options = mutableListOf("应用私有存储")
     if (preferredExternal != null) options.add("用户外部存储 · ${preferredExternal.absolutePath}")
