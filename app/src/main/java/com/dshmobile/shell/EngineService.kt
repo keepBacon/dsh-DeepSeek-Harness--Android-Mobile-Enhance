@@ -22,6 +22,7 @@ class EngineService : Service() {
   private lateinit var engineManager: EngineManager
   private var watchdog: ScheduledExecutorService? = null
   private val restartInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+  private val ensureInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
   private val stopRequested = java.util.concurrent.atomic.AtomicBoolean(false)
   private var failedAliveProbes = 0
   private var degradedNotificationVisible = false
@@ -89,12 +90,34 @@ class EngineService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
+      // stopEngine can wait for graceful/forced Node shutdown for several
+      // seconds. Never block the Android service main thread or the notification
+      // action while waiting for a potentially unresponsive Host.
       stopRequested.set(true)
       watchdog?.shutdownNow()
       watchdog = null
-      engineManager.stopEngine()
-      stopForeground(STOP_FOREGROUND_REMOVE)
-      stopSelf()
+      Thread({
+        try {
+          EngineManager.beginMaintenance()
+          try {
+            if (!engineManager.stopEngine()) {
+              Log.w("DSH-Watchdog", "Explicit stop did not terminate every Host process")
+            }
+          } finally {
+            EngineManager.endMaintenance()
+          }
+        } catch (t: Throwable) {
+          Log.e("DSH-Watchdog", "Explicit Host stop failed", t)
+        } finally {
+          android.os.Handler(android.os.Looper.getMainLooper()).post {
+            // A later START may have requested continued service ownership.
+            if (stopRequested.get()) {
+              stopForeground(STOP_FOREGROUND_REMOVE)
+              stopSelf(startId)
+            }
+          }
+        }
+      }, "dsh-user-host-stop").start()
       return START_NOT_STICKY
     }
     if (intent?.action == ACTION_RESTART) {
@@ -120,10 +143,25 @@ class EngineService : Service() {
 
   /** Start the engine if it is not listening yet. */
   private fun ensureEngine() {
-    if (EngineManager.isMaintenanceMode()) return
-    if (EngineProbe.check(350).optBoolean("running", false)) return
-    if (engineManager.isEngineProcessAlive()) return
-    if (engineManager.engineReady) engineManager.startEngine(runtimeAlreadyChecked = true)
+    if (stopRequested.get() || !ensureInFlight.compareAndSet(false, true)) return
+    // Both the localhost probe and a cold Node startup can block. Lifecycle
+    // callbacks run on Android's main thread, so perform this work off-thread.
+    Thread({
+      try {
+        if (stopRequested.get() || EngineManager.isMaintenanceMode()) return@Thread
+        if (EngineProbe.check(350).optBoolean("running", false)) return@Thread
+        if (stopRequested.get() || EngineManager.isMaintenanceMode()) return@Thread
+        if (engineManager.isEngineProcessAlive()) return@Thread
+        if (engineManager.engineReady && !stopRequested.get() &&
+            !EngineManager.isMaintenanceMode()) {
+          engineManager.startEngine(runtimeAlreadyChecked = true)
+        }
+      } catch (t: Throwable) {
+        Log.e("DSH-Watchdog", "Foreground Host ensure failed", t)
+      } finally {
+        ensureInFlight.set(false)
+      }
+    }, "dsh-service-host-ensure").start()
   }
 
   /**
@@ -136,11 +174,12 @@ class EngineService : Service() {
     watchdog = Executors.newSingleThreadScheduledExecutor().also { exec ->
       exec.scheduleWithFixedDelay({
         try {
-          if (EngineManager.isMaintenanceMode() || restartInFlight.get()) {
+          if (stopRequested.get() || EngineManager.isMaintenanceMode() || restartInFlight.get()) {
             clearProbeFailures()
             return@scheduleWithFixedDelay
           }
           val probe = EngineProbe.check(650)
+          if (stopRequested.get()) return@scheduleWithFixedDelay
           if (probe.optBoolean("running", false)) {
             clearProbeFailures()
             return@scheduleWithFixedDelay
@@ -158,7 +197,9 @@ class EngineService : Service() {
             return@scheduleWithFixedDelay
           }
           clearProbeFailures()
-          engineManager.startEngine(runtimeAlreadyChecked = true)
+          if (!stopRequested.get() && !EngineManager.isMaintenanceMode()) {
+            engineManager.startEngine(runtimeAlreadyChecked = true)
+          }
         } catch (_: Throwable) {
         }
       }, 5, 5, TimeUnit.SECONDS)
