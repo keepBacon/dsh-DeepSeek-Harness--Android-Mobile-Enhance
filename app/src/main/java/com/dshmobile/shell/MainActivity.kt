@@ -3289,6 +3289,20 @@ class MainActivity : ComponentActivity() {
           header.setAttribute('data-dsh-mobile-settings-header', '');
           content.setAttribute('data-dsh-mobile-settings-content', '');
           content.setAttribute('data-dsh-mobile-settings-options', '');
+
+          // Upstream leaves the settings options scroller mounted when a
+          // section changes. A long inventory can otherwise open the next
+          // section halfway down, looking like another giant blank area.
+          // Reset only on real section switches, never on every DOM mutation.
+          const selected = parts.navButtons.find(button =>
+            button.hasAttribute('aria-current') ||
+            button.getAttribute('aria-selected') === 'true' ||
+            button.getAttribute('data-state') === 'active');
+          const section = selected && selected.textContent.trim();
+          if (section && modal.dataset.dshMobileSection !== section) {
+            modal.dataset.dshMobileSection = section;
+            content.scrollTop = 0;
+          }
           return parts;
         };
 
