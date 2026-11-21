@@ -982,6 +982,45 @@ eachPackage('@deepseek-ai/dsh-session-persistence-jsonl', 'lib/index.js', (file)
   return 'patched'
 }, { mandatory: versionAtLeast(targetVersion, '0.2.0-rc.1') })
 
+// Immutable attachments have TWO hard-link sites: content publication and
+// alias creation. Keep upstream EEXIST/digest verification intact: only
+// translate a denied hard link into a no-replace, fsynced copy. This means a
+// successful Android fallback can use more space than a POSIX hard-link alias.
+eachPackage('@deepseek-ai/dsh-attachment-local', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: immutable attachment exclusive copy'
+  if (txt.includes(marker)) return 'already'
+  const anchors = ['await link(source, target)', 'await link(staged.path, target)']
+  for (const anchor of anchors) {
+    const count = txt.split(anchor).length - 1
+    if (count !== 1) {
+      throw new Error('attachment hard-link anchor missing or ambiguous (' + count + '): ' + anchor + ' at ' + file)
+    }
+    txt = txt.replace(anchor,
+      anchor.replace('await link(', 'await dshAndroidAttachmentLinkOrCopy('))
+  }
+  // A function declaration is hoisted, so both original publication call
+  // sites retain their surrounding EEXIST -> SHA256 integrity checks.
+  txt += `\n// ${marker}
+async function dshAndroidAttachmentLinkOrCopy(source, target) {
+  try {
+    await link(source, target);
+  } catch (linkError) {
+    if (!(linkError && ["EACCES", "EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(linkError.code))) throw linkError;
+    // COPYFILE_EXCL preserves no-replace semantics for competing writers.
+    await copyFile(source, target, 1);
+    const publishedHandle = await open(target, "r");
+    try { await publishedHandle.sync(); }
+    finally { await publishedHandle.close(); }
+  }
+}
+`
+  txt = ensureFsPromisesImport(txt, ['copyFile', 'open'])
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: versionAtLeast(targetVersion, '0.2.0-rc.1') })
+
 // Workspace create-if-absent publication has the same hard-link limitation.
 eachPackage('@deepseek-ai/dsh-fs-local', 'lib/index.js', (file) => {
   let txt = read(file)
