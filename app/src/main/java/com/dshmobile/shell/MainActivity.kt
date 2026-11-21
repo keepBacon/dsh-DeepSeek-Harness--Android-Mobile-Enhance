@@ -3315,7 +3315,9 @@ class MainActivity : ComponentActivity() {
               DSH_SURFACE_DEFS.find((surface) => surface.id === 'plugins'),
               () => window.alert('DSH 插件页面尚未就绪，请确认运行时已升级且插件管理组件已加载。')
             ));
-            return false;
+            // Navigation has been scheduled through the official DSH
+            // surface picker. Only a missing picker should report failure.
+            return true;
           }
           closeSidebar();
           // Keep upstream React navigation and the plugin's staged form state.
