@@ -58,7 +58,14 @@ internal class WebViewInspector(
   private fun handle(file: File, name: String) {
     val id = requestName.matchEntire(name)?.groupValues?.get(1) ?: return
     try {
-      if (!file.isFile || file.length() > 1024L) return
+      if (!file.isFile) {
+        reply(id, JSONObject().put("ok", false).put("error", "Inspector request file unavailable"))
+        return
+      }
+      if (file.length() > 1024L) {
+        reply(id, JSONObject().put("ok", false).put("error", "Inspector request exceeds 1024 bytes"))
+        return
+      }
       val request = JSONObject(file.readText(StandardCharsets.UTF_8))
       if (request.optString("id") != id || request.optString("operation") != "snapshot") {
         reply(id, JSONObject().put("ok", false).put("error", "Unsupported request"))

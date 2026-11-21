@@ -221,7 +221,9 @@ jobs:
   # ZIP is still retained independently as an Actions artifact.
   publish-direct-release:
     needs: assemble-legacy-signed
-    if: (github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/upgrade-dsh-v0.2.2-rc.5-20261119')
+    # Publish verified signed APKs on the branch that actually triggers
+    # automatic builds; manual dispatch can opt out of Release publishing.
+    if: (github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:

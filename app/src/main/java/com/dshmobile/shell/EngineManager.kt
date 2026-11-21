@@ -2973,7 +2973,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
         }
         val rootPath = parent.canonicalPath + File.separator
         fun packagedFile(path: String): File? {
-          if (!path.startsWith("./") || path.contains('\\')) return null
+          // npm "main" and Cordis patch paths commonly omit "./", while
+          // package exports often include it. Both forms are package-local.
+          // Canonical containment prevents absolute or ../ escapes.
+          if (path.isBlank() || path.startsWith("/") || path.contains('\\')) return null
           val file = File(parent, path).canonicalFile
           return file.takeIf { it.path.startsWith(rootPath) && it.isFile }
         }
