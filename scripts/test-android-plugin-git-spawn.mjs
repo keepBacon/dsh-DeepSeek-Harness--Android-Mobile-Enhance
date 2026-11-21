@@ -22,6 +22,59 @@ for(const [name,args] of [
  assert.equal(routed.command,shell)
  assert.deepEqual(routed.args,[...expected,...args])
 }
+// Non-Git binaries and app-private workspace programs must also go through
+// the system-shell linker bridge, preserving exact arguments and child cwd.
+for(const [name,args,target] of [
+ ['node',['-e','console.log("ok")'],p+'/bin/node'],
+ ['npm',['--version'],p+'/bin/npm'],
+ ['python3',['-c','print(123)'],p+'/bin/python3'],
+ ['rg',['--version'],p+'/bin/rg'],
+ [p+'/bin/node',['--check','script.js'],p+'/bin/node'],
+ [p+'/libexec/dsh/wrappers/python3',['--version'],p+'/libexec/dsh/wrappers/python3'],
+ [p+'/../home/workspace/execute',['argument with spaces',';echo unsafe'],
+  require('node:path').normalize(p+'/../home/workspace/execute')]
+]){
+ const result=mod.adaptAndroidCommand(name,args)
+ assert.equal(result.command,shell,name)
+ assert.deepEqual(result.args,[p+'/libexec/dsh-mobile/android-exec.sh',target,...args],name)
+}
+assert.deepEqual(
+ mod.adaptAndroidCommand('./task.js',['foo'],{cwd:p+'/../home/workspace'}).args,
+ [p+'/libexec/dsh-mobile/android-exec.sh',p+'/../home/workspace/task.js','foo'].map(
+  (value,index)=>index===1?require('node:path').normalize(value):value))
+for(const name of ['sh','echo','getprop','logcat','unknown','github',
+ '/system/bin/sh','/apex/com.android.runtime/bin/linker64','/usr/bin/false',
+ '/data/data/another.app/files/usr/bin/node']){
+ assert.equal(mod.adaptAndroidCommand(name,['argument']),null,name)
+}
+// The high-level exec APIs default to /bin/sh, which Android does not
+// provide for the embedded app. Ensure a model's original shell command is
+// passed unchanged, with BASH_ENV dispatch and inherited caller options.
+const shellCommand='node -e "console.log(42)" && git --version'
+const adaptedShell=mod.adaptShellCommand(shellCommand,{cwd:'/tmp',encoding:'utf8'})
+assert.equal(adaptedShell.command,shell)
+assert.deepEqual(adaptedShell.args,[p+'/libexec/dsh-mobile/android-exec.sh',
+ p+'/bin/bash','-c',shellCommand])
+assert.equal(adaptedShell.options.cwd,'/tmp')
+assert.equal(adaptedShell.options.shell,false)
+assert.equal(adaptedShell.options.env.BASH_ENV,p+'/libexec/dsh-mobile/android-bash-env.sh')
+assert.equal(adaptedShell.options.env.LD_PRELOAD,undefined)
+const minimalShell=mod.adaptShellCommand('node --version',{env:{CUSTOM:'kept'}})
+assert.equal(minimalShell.options.env.CUSTOM,'kept')
+assert.equal(minimalShell.options.env.TERMUX__PREFIX,p)
+assert.equal(minimalShell.options.env.PREFIX,p)
+assert.equal(minimalShell.options.env.DSH_ANDROID_STANDALONE,'1')
+assert.equal(minimalShell.options.env.LD_LIBRARY_PATH,p+'/lib')
+assert.equal(mod.adaptShellCommand('echo ok',{shell:'/custom/bash'}),null)
+assert.equal(mod.adaptShellCommand('echo ok',{shell:'/system/bin/sh'}),null)
+assert.equal(mod.adaptShellCommand('echo ok',{shell:false}),null)
+assert.throws(()=>cp.execSync(shellCommand,{encoding:'utf8'}), error =>
+  error.code==='ENOENT' || error.errno===-2)
+let execCallback=false
+cp.exec(shellCommand,{cwd:'/tmp'},error=>{
+ execCallback=true
+ assert.equal(error.path,shell)
+})
 assert.equal(mod.adaptGitCommand('node',['--version']),null)
 assert.equal(mod.adaptGitCommand('github',['foo']),null)
 assert.equal(mod.adaptGitCommand('/system/bin/git',['status']),null)
@@ -32,12 +85,46 @@ assert.deepEqual(mod.adaptGitCommand('git',['arg with spaces',';echo unsafe']).a
 // non-Android runner, not a direct Git ENOENT.
 const result=cp.spawnSync('git',['--version'],{encoding:'utf8'})
 assert.equal(result.error?.path,shell)
+
+// Child process functions must route calls to the *system shell* even though
+// /system/bin/sh is absent on host Linux CI. This tests the real wrappers.
+for(const executable of ['git','node','python3']){
+ const result=cp.spawnSync(executable,['--version'],{encoding:'utf8'})
+ assert.equal(result.error?.path,shell,executable)
+}
+const workspace=cp.spawnSync(p+'/../home/workspace/mytool',['arg'],{encoding:'utf8'})
+assert.equal(workspace.error?.path,shell)
+
+// fork() bypasses the exported spawn binding internally. Verify its real
+// execPath/execArgv mapping, not just that the ESM export was refreshed.
+const forked=cp.fork('/tmp/dsh-unreachable-fixture.js',[],{
+ execPath:p+'/bin/node',execArgv:[],silent:true
+})
+assert.equal(forked.spawnfile,shell)
+assert.deepEqual(forked.spawnargs.slice(0,3),[
+ shell,p+'/libexec/dsh-mobile/android-exec.sh',p+'/bin/node'])
+forked.on('error',(error)=>{
+ assert.equal(error.path,shell)
+})
+
+const ignored=cp.spawnSync('node',['--version'],{shell:true,encoding:'utf8'})
+assert.equal(ignored.status,0)
+assert.match(ignored.stdout,/^v[0-9]+/m)
+let callbackCalled=false
+cp.execFile('node',['--version'],(error)=>{
+ callbackCalled=true
+ assert.equal(error.path,shell)
+})
+
 ;(async()=>{
  const named=await import('node:child_process')
  assert.equal(named.spawn,cp.spawn)
  assert.equal(named.spawnSync,cp.spawnSync)
  assert.equal(named.execFile,cp.execFile)
  assert.equal(named.execFileSync,cp.execFileSync)
+ assert.equal(named.exec,cp.exec)
+ assert.equal(named.execSync,cp.execSync)
+ assert.equal(named.fork,cp.fork)
  console.log('Git bridge: spawn/sync/execFile/ESM mapping OK')
 })().catch(e=>{console.error(e);process.exitCode=1})
 `

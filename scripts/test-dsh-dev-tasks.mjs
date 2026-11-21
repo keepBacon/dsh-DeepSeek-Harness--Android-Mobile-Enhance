@@ -29,6 +29,26 @@ try{
  const cancelled=await devTaskCall('dev_task_cancel',{id:sleep.id})
  assert.equal(cancelled.cancelled,true)
  assert.equal((await finished(sleep.id)).status,'cancelled')
+ // Concurrency slots are reserved only while a process is actually
+ // running. A just-finished/cancelled task may remain in the active map
+ // awaiting its final JSON write; it must not block a replacement launch.
+ const occupied=[]
+ for(let i=0;i<2;i++){
+  occupied.push(await devTaskCall('dev_task_start',{command:process.execPath,
+   args:['-e','setInterval(()=>{},1000)']}))
+ }
+ await assert.rejects(
+  devTaskCall('dev_task_start',{command:process.execPath,args:['--version']}),
+  /development task concurrency limit reached/
+ )
+ const release=await devTaskCall('dev_task_cancel',{id:occupied[0].id})
+ assert.equal(release.cancelled,true)
+ assert.equal((await finished(occupied[0].id)).status,'cancelled')
+ const replacement=await devTaskCall('dev_task_start',{command:process.execPath,
+  args:['-e','console.log("SLOT_REUSED")']})
+ assert.equal((await finished(replacement.id)).status,'passed')
+ await devTaskCall('dev_task_cancel',{id:occupied[1].id})
+ assert.equal((await finished(occupied[1].id)).status,'cancelled')
  // Build logs must be queryable while a long process is still running.
  const streaming=await devTaskCall('dev_task_start',{command:process.execPath,
    args:['-e','process.stdout.write("LIVE_START");setTimeout(()=>{console.log("LIVE_END")},700)']})

@@ -1414,6 +1414,14 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun runtimeHealthFilesAt(rootUsr: File): RuntimeHealth {
     val required = listOf(
       File(rootUsr, "bin/node") to "usr/bin/node",
+      // Fail installation/repair if the embedded Node toolchain is partial:
+      // model Bash and in-Web plugin installation need all three CLIs.
+      File(rootUsr, "bin/npm") to "usr/bin/npm",
+      File(rootUsr, "bin/npx") to "usr/bin/npx",
+      File(rootUsr, "bin/pnpm") to "usr/bin/pnpm",
+      File(rootUsr, "lib/node_modules/npm/bin/npm-cli.js") to "usr/lib/node_modules/npm/bin/npm-cli.js",
+      File(rootUsr, "lib/node_modules/npm/bin/npx-cli.js") to "usr/lib/node_modules/npm/bin/npx-cli.js",
+      File(rootUsr, "lib/node_modules/pnpm/package.json") to "usr/lib/node_modules/pnpm/package.json",
       File(rootUsr, "lib/node_modules/@deepseek-ai/dsh/lib/bin.js") to "@deepseek-ai/dsh/lib/bin.js",
       File(rootUsr, "lib/libtermux-exec-ld-preload.so") to "usr/lib/libtermux-exec-ld-preload.so",
       File(rootUsr, "bin/bash") to "usr/bin/bash",
@@ -1453,7 +1461,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(rootUsr, "libexec/dsh/wrappers/dpkg") to "usr/libexec/dsh/wrappers/dpkg",
       File(rootUsr, "bin/proot") to "usr/bin/proot",
     )
-    val missing = required.filterNot { it.first.isFile }.map { it.second }
+    val missing = required.filterNot { it.first.isFile }.map { it.second }.toMutableList()
+    if (listOf("pnpm.cjs", "pnpm.mjs", "pnpm.js").none { entry ->
+        File(rootUsr, "lib/node_modules/pnpm/bin/$entry").isFile
+      }) {
+      missing.add("usr/lib/node_modules/pnpm/bin/<pnpm entrypoint>")
+    }
     return RuntimeHealth(missing.isEmpty(), missing)
   }
 
@@ -1995,6 +2008,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // plugin tree and delay startup even though those plugins are disabled.
       if (!safeMode && !officialProbe && !skipPrebootCompat) {
         ensurePluginWorkspaceCompat("web")
+        communityPluginClientWarnings("web").forEach { Log.w(TAG, "[plugin client compat] $it") }
         applyAndroidCodexModelPickerCompat("web").forEach { Log.i(TAG, "[plugin compat] $it") }
         applyAndroidCodexRelayTdzCompat().forEach { Log.i(TAG, "[codex relay compat] $it") }
         applyAndroidCodexSubagentCompat().forEach { Log.i(TAG, "[codex subagent compat] $it") }
@@ -2215,6 +2229,13 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // DSH peers come from the runtime fallback rather than npm prereleases.
       "npm_config_auto_install_peers" to "false",
       "npm_config_node_linker" to "hoisted",
+      // Model Bash invokes npm/pnpm as ordinary Node processes, not via
+      // pluginEnv. Lifecycle prepare/install scripts must still use a shell
+      // on Android's executable system partition, never /bin/sh or a
+      // noexec app-private Termux executable.
+      "npm_config_script_shell" to "/system/bin/sh",
+      "npm_config_cache" to File(nodeCacheDir, "npm").apply { mkdirs() }.absolutePath,
+      "PNPM_HOME" to File(homeDir, ".local/share/pnpm").apply { mkdirs() }.absolutePath,
     )
 
     // The Termux Git/OpenSSH binaries are relocatable only when their prefix-
@@ -2241,6 +2262,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
     if (sshBin.isFile) {
       env["GIT_SSH_VARIANT"] = "ssh"
       env["GIT_SSH_COMMAND"] = sshCommand(batchMode = true)
+    }
+    // Host, model tools and plugin manager all launch Node subprocesses.
+    // Install the noexec adapter in the shared Node environment, not just
+    // the plugin installer. Never mutate process-global Android settings.
+    if (pluginGitPreload.isFile) {
+      env["NODE_OPTIONS"] = "--require=" + pluginGitPreload.absolutePath
     }
     // An installed source-form ModSearch plugin can register read_page/x_search
     // while ../dist/main.js is absent. Its upstream cliPath() supports this
@@ -2282,13 +2309,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
       "NO_COLOR" to "1",
     )).toMutableMap()
 
-    // pnpm and the DSH CLI spawn Git from Node using child_process. Android
-    // prohibits direct execve on app-private ELF files; a PATH entry alone
-    // cannot fix that. Preload a narrowly scoped Git-only process adapter.
-    if (gitBin.isFile && pluginGitPreload.isFile) {
-      val existing = env["NODE_OPTIONS"].orEmpty().trim()
-      val require = "--require=" + pluginGitPreload.absolutePath
-      env["NODE_OPTIONS"] = listOf(existing, require).filter { it.isNotBlank() }.joinToString(" ")
+    // Shared engineEnv already preloads the child-process adapter.
+    // Avoid duplicate --require registration for plugin installations.
+    if (gitBin.isFile) {
       env["npm_config_git"] = gitBin.absolutePath
     }
 
@@ -2395,20 +2418,33 @@ class EngineManager(private val context: Context, private val pickToken: String?
    * though the plugin should consume the runtime's shared DSH modules.
    */
   private fun findRuntimePackageDir(packageName: String): File? {
+    // The 0.2.2 release family is hoisted; client injection packages have
+    // deterministic direct paths. Avoid recursively reading every package
+    // manifest for each community plugin on every Web Host boot.
+    if (!Regex("""^(?:@deepseek-ai/[A-Za-z0-9][A-Za-z0-9._-]*|node-pty)$""").matches(packageName))
+      return null
     val root = File(usrDir, "lib/node_modules")
     if (!root.isDirectory) return null
+    val direct = File(root, "$packageName/package.json")
+    if (direct.isFile) {
+      try {
+        if (JSONObject(direct.readText()).optString("name") == packageName)
+          return direct.parentFile?.canonicalFile
+      } catch (_: Throwable) { /* A corrupt manifest must not be reported as installed. */ }
+    }
+    // Only the embedded native PTY can require a nested dependency path in
+    // older signed runtime seeds. Do not walk the graph for client packages:
+    // missing hoisted Web clients need an actionable release-family error.
+    if (packageName != "node-pty") return null
     return root.walkTopDown()
       .maxDepth(8)
       .filter { it.isFile && it.name == "package.json" }
       .mapNotNull { manifest ->
         try {
-          val json = JSONObject(manifest.readText())
-          if (json.optString("name") == packageName) manifest.parentFile else null
-        } catch (_: Throwable) {
-          null
-        }
-      }
-      .firstOrNull()
+          if (JSONObject(manifest.readText()).optString("name") == packageName)
+            manifest.parentFile?.canonicalFile else null
+        } catch (_: Throwable) { null }
+      }.firstOrNull()
   }
 
   private fun setWorkspaceMappingValue(
@@ -2876,6 +2912,102 @@ class EngineManager(private val context: Context, private val pickToken: String?
     } catch (_: Throwable) {
       value
     }
+  }
+
+  /**
+   * DSH's plugin configuration comes from each bundle's Web client half.
+   * Inspect installed files without running community code. Preserve all
+   * user data and upstream engine/version constraints.
+   */
+  private fun communityPluginClientWarnings(profile: String = "web"): List<String> {
+    val warnings = mutableListOf<String>()
+    // Resolve the release-family tree once for all plugin dependencies.
+    // Repeated walkTopDown() scans would delay Android Web Host startup.
+    val runtimeClientPresence = mutableMapOf<String, Boolean>()
+    val priorityPlugins = listOf("dsh-zcode-startplan", "dsh-providers-hub")
+    // Inspect installed Web-profile dependencies, not just two known plugin
+    // names. Backend-only libraries do not need a Web client and are skipped.
+    // Bound the metadata scan so an oversized manifest cannot stall boot.
+    val otherPlugins = try {
+      val manifest = profileManifest(profile)
+      val dependencies = JSONObject(manifest.readText()).optJSONObject("dependencies")
+      val npmPackageName = Regex("""^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$""")
+      dependencies?.keys()?.asSequence()
+        ?.filter { it !in priorityPlugins && !it.startsWith("@deepseek-ai/") &&
+          npmPackageName.matches(it) }
+        ?.take(96)?.toList().orEmpty()
+    } catch (_: Throwable) { emptyList() }
+    for (name in (priorityPlugins + otherPlugins).distinct()) {
+      val packageFile = installedPackageManifest(name, profile)
+      if (!packageFile.isFile) continue
+      try {
+        val root = JSONObject(packageFile.readText())
+        val parent = packageFile.parentFile ?: continue
+        val client = root.optJSONObject("dsh")?.optJSONObject("client")
+        if (client == null) {
+          // Most libraries and headless bundles intentionally do not ship a
+          // browser half. ZCode/Providers Hub are explicitly expected to
+          // expose account configuration in the official Plugins panel.
+          if (name in priorityPlugins)
+            warnings += "$name: 未声明 DSH Web client，插件配置页面无法注册"
+          continue
+        }
+        if (client.optString("platform") != "web") {
+          warnings += "$name: DSH client 不是 Web 平台，Android Plugins 页面无法加载"
+          continue
+        }
+        val exports = root.optJSONObject("exports")
+        val clientExport = exports?.opt("./client")
+        // Published ESM plugins may use either a direct export or a
+        // conditional import/default export. The DSH browser client resolves
+        // the import condition; validating default alone rejects valid builds.
+        val clientEntry = when (clientExport) {
+          is String -> clientExport
+          is JSONObject -> clientExport.optString("import", "")
+            .ifBlank { clientExport.optString("default", "") }
+          else -> ""
+        }
+        if (clientEntry.isBlank()) {
+          warnings += "$name: 缺少 ./client 导出，DSH 官方插件页面无法加载配置"
+          continue
+        }
+        val rootPath = parent.canonicalPath + File.separator
+        fun packagedFile(path: String): File? {
+          if (!path.startsWith("./") || path.contains('\\')) return null
+          val file = File(parent, path).canonicalFile
+          return file.takeIf { it.path.startsWith(rootPath) && it.isFile }
+        }
+        if (packagedFile(clientEntry) == null) {
+          warnings += "$name: Web 客户端文件缺失 ($clientEntry)；请安装完整发布包" +
+            if (name == "dsh-providers-hub") "，Git 安装须完成 prepare 构建" else ""
+        }
+        val bundlePatch = root.optJSONObject("dsh")?.optJSONObject("bundle")
+          ?.optString("patch", "").orEmpty()
+        if (bundlePatch.isBlank() || packagedFile(bundlePatch) == null) {
+          warnings += "$name: Cordis bundle 补丁缺失 ($bundlePatch)，Host 无法注册插件"
+        }
+        val main = root.optString("main", "").trim()
+        if (main.isNotBlank() && packagedFile(main) == null) {
+          warnings += "$name: Host 入口缺失 ($main)，请安装完整发布包"
+        }
+        val requiredClients = client.optJSONArray("inject")
+        if (requiredClients != null) {
+          for (index in 0 until requiredClients.length()) {
+            val dependency = requiredClients.optString(index)
+            if (!dependency.startsWith("@deepseek-ai/")) continue
+            val available = runtimeClientPresence.getOrPut(dependency) {
+              findRuntimePackageDir(dependency) != null
+            }
+            if (!available) {
+              warnings += "$name: 运行时缺少客户端依赖 $dependency；请检查 DSH release-family 完整性"
+            }
+          }
+        }
+      } catch (t: Throwable) {
+        warnings += "$name: 无法读取已安装插件清单 (" + t.javaClass.simpleName + ")"
+      }
+    }
+    return warnings
   }
 
   /** Installed package metadata is inspected without loading third-party JavaScript. */
@@ -3637,6 +3769,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
   private fun runtimeHealthFilesOnly(): RuntimeHealth {
     val required = listOf(
       nodeBin to "usr/bin/node",
+      File(usrDir, "bin/npm") to "usr/bin/npm",
+      File(usrDir, "bin/npx") to "usr/bin/npx",
+      File(usrDir, "bin/pnpm") to "usr/bin/pnpm",
+      File(usrDir, "lib/node_modules/npm/bin/npm-cli.js") to "usr/lib/node_modules/npm/bin/npm-cli.js",
+      File(usrDir, "lib/node_modules/npm/bin/npx-cli.js") to "usr/lib/node_modules/npm/bin/npx-cli.js",
+      File(usrDir, "lib/node_modules/pnpm/package.json") to "usr/lib/node_modules/pnpm/package.json",
       dshBin to "@deepseek-ai/dsh/lib/bin.js",
       preloadBin to "usr/lib/libtermux-exec-ld-preload.so",
       File(usrDir, "bin/bash") to "usr/bin/bash",
@@ -3675,7 +3813,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh/wrappers/dpkg") to "usr/libexec/dsh/wrappers/dpkg",
       File(usrDir, "bin/proot") to "usr/bin/proot",
     )
-    val missing = required.filterNot { it.first.isFile }.map { it.second }
+    val missing = required.filterNot { it.first.isFile }.map { it.second }.toMutableList()
+    if (listOf("pnpm.cjs", "pnpm.mjs", "pnpm.js").none { entry ->
+        File(usrDir, "lib/node_modules/pnpm/bin/$entry").isFile
+      }) {
+      missing.add("usr/lib/node_modules/pnpm/bin/<pnpm entrypoint>")
+    }
     return RuntimeHealth(missing.isEmpty(), missing)
   }
 

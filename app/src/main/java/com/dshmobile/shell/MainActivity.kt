@@ -131,14 +131,6 @@ class MainActivity : ComponentActivity() {
     const val MAX_WORKSPACE_IMPORT_ENTRIES = 100_000
     const val MAX_WORKSPACE_IMPORT_DEPTH = 64
 
-    /** Imported plugin archive size before extraction. */
-    const val MAX_PLUGIN_PACKAGE_BYTES = 512L * 1024 * 1024
-
-    /** 解压本地插件 ZIP 的总大小上限。 */
-    const val MAX_PLUGIN_ZIP_BYTES = 512L * 1024 * 1024
-    const val MAX_PLUGIN_ZIP_ENTRY_BYTES = 256L * 1024 * 1024
-    const val MAX_PLUGIN_ZIP_ENTRIES = 20_000
-    const val MAX_PLUGIN_ZIP_DEPTH = 32
   }
 
   // WebView file input is intentionally NOT backed by Android OpenDocument.
@@ -171,34 +163,6 @@ class MainActivity : ComponentActivity() {
         return@registerForActivityResult
       }
       importFilesIntoWorkspace(workspace, readable)
-    }
-
-  /** Android SAF import for local plugin tarballs (content:// -> private real path). */
-  private val pluginPackagePicker =
-    registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-      if (uri == null) return@registerForActivityResult
-      Thread {
-        try {
-          val name = queryDisplayName(uri) ?: "plugin-${System.currentTimeMillis()}.tgz"
-          queryContentSize(uri)?.let { size ->
-            if (size > MAX_PLUGIN_PACKAGE_BYTES) throw java.io.IOException("插件包超过 512 MB 导入上限")
-          }
-          val dir = java.io.File(filesDir, "plugin-import").apply { mkdirs() }
-          val target = java.io.File(dir, sanitizeFilename(name))
-          try {
-            contentResolver.openInputStream(uri)?.use { input ->
-              target.outputStream().use { output -> copyWithLimit(input, output, MAX_PLUGIN_PACKAGE_BYTES, "插件包超过 512 MB 导入上限") }
-            } ?: throw java.io.IOException("无法读取所选插件包")
-          } catch (t: Throwable) {
-            target.delete()
-            throw t
-          }
-          val installSpec = prepareImportedPluginPackage(target)
-          runOnUiThread { installPluginInBackground(installSpec) }
-        } catch (t: Throwable) {
-          runOnUiThread { showSimpleMessage("导入失败", t.message ?: t.javaClass.simpleName) }
-        }
-      }.start()
     }
 
   /** Import a local DSH Skill bundle (.zip) or flat Skill Markdown file. */
@@ -617,8 +581,6 @@ class MainActivity : ComponentActivity() {
           if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else hasLegacyStoragePermission()
         },
         onAllFilesAccessRequest = { runOnUiThread { requestWorkspaceStorageAccess() } },
-        onOpenPluginInstaller = { runOnUiThread { showPluginInstaller() } },
-        onOpenPluginManager = { runOnUiThread { showPluginManager() } },
         onOpenConfigEditor = { runOnUiThread { showConfigEditor() } },
         onOpenAppSettings = { runOnUiThread { showAppSettings() } },
         onImportWorkspaceFiles = { runOnUiThread { showWorkspaceImportDialog() } },
@@ -766,6 +728,7 @@ class MainActivity : ComponentActivity() {
   /** App-only settings opened from the gear icon in the top navigation bar. */
   private fun showAppSettings() {
     val density = resources.displayMetrics.density
+    var settingsDialog: android.app.AlertDialog? = null
     val wrap = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
       setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), 0)
@@ -820,8 +783,13 @@ class MainActivity : ComponentActivity() {
       setPadding(0, (4 * density).toInt(), 0, (8 * density).toInt())
     })
     wrap.addView(Button(this).apply {
-      text = "管理插件（安装 / 更新 / 卸载）"
-      setOnClickListener { showPluginManager() }
+      text = "插件（DSH 官方页面）"
+      setOnClickListener {
+        // An Android AlertDialog otherwise covers the WebView after the
+        // React Plugins panel has opened. Leave Settings before navigating.
+        settingsDialog?.dismiss()
+        openOfficialPluginsPage()
+      }
     })
     wrap.addView(Button(this).apply {
       text = "导入 Skill（ZIP / SKILL.md）"
@@ -1077,7 +1045,7 @@ class MainActivity : ComponentActivity() {
       addView(wrap)
     }
 
-    android.app.AlertDialog.Builder(this)
+    settingsDialog = android.app.AlertDialog.Builder(this)
       .setTitle("应用设置")
       .setIcon(android.R.drawable.ic_menu_preferences)
       .setView(scroll)
@@ -1179,7 +1147,6 @@ class MainActivity : ComponentActivity() {
         const ROOT = document.documentElement;
         const UI_MODE = ${jsString(uiMode)};
         const BRIDGE_CAP = ${jsString(capability)};
-        const MANAGER_ID = 'dsh-android-plugin-manager';
         const COMPOSER_IMPORT_CLASS = 'dsh-android-composer-import';
         const STYLE_ID = 'dsh-android-mobile-style';
         const BAR_ID = 'dsh-android-mobile-bar';
@@ -1944,8 +1911,11 @@ class MainActivity : ComponentActivity() {
               position: relative !important;
               inset: auto !important;
               transform: none !important;
-              display: flex !important;
-              flex-direction: column !important;
+              display: grid !important;
+              grid-template-columns: minmax(0, 1fr) !important;
+              grid-template-rows: auto auto auto minmax(0, 1fr) !important;
+              grid-template-areas: "title" "nav" "header" "options" !important;
+              align-content: stretch !important;
               width: min(980px, calc(100dvw - 20px)) !important;
               height: min(920px, calc(100dvh - 20px)) !important;
               max-width: calc(100dvw - 20px) !important;
@@ -1960,6 +1930,7 @@ class MainActivity : ComponentActivity() {
             }
 
             [data-dsh-mobile-settings-nav] {
+              grid-area: nav !important;
               flex: 0 0 auto !important;
               display: block !important;
               width: 100% !important;
@@ -1971,7 +1942,10 @@ class MainActivity : ComponentActivity() {
             }
 
             [data-dsh-mobile-settings-nav-title] {
+              grid-area: title !important;
               display: block !important;
+              min-height: 0 !important;
+              margin: 0 !important;
               padding: 0 4px 8px !important;
               font-size: 16px !important;
               line-height: 24px !important;
@@ -2009,17 +1983,20 @@ class MainActivity : ComponentActivity() {
             }
 
             [data-dsh-mobile-settings-content] {
-              flex: 1 1 auto !important;
+              grid-area: options !important;
               width: 100% !important;
               min-width: 0 !important;
               min-height: 0 !important;
               max-width: 100% !important;
-              display: flex !important;
-              flex-direction: column !important;
-              overflow: hidden !important;
+              display: block !important;
+              overflow-y: auto !important;
+              overflow-x: hidden !important;
+              overscroll-behavior-y: contain;
+              -webkit-overflow-scrolling: touch;
             }
 
             [data-dsh-mobile-settings-header] {
+              grid-area: header !important;
               flex: 0 0 auto !important;
               width: 100% !important;
               min-width: 0 !important;
@@ -2035,7 +2012,20 @@ class MainActivity : ComponentActivity() {
               min-width: 0 !important;
             }
 
+            [data-dsh-mobile-plugin-config-link] {
+              border: 1px solid var(--dsw-alias-border-l3, rgba(127,127,127,.20)) !important;
+              border-radius: 9px !important;
+              color: var(--dsw-alias-label-primary, currentColor) !important;
+              background: var(--dsw-alias-bg-layer-1, transparent) !important;
+              padding: 7px 10px !important;
+              min-height: 34px !important;
+              font-size: 13px !important;
+              white-space: nowrap !important;
+              cursor: pointer !important;
+            }
+
             [data-dsh-mobile-settings-options] {
+              grid-area: options !important;
               flex: 1 1 auto !important;
               width: 100% !important;
               min-width: 0 !important;
@@ -2618,26 +2608,48 @@ class MainActivity : ComponentActivity() {
         const openDshSurface = (surface, onFailure) => {
           if (!surface) return;
           const tryOpen = () => {
-            const target = findDshSurfaceControl(surface.tests || []);
+            let target = null;
+            if (surface.id === 'plugins') {
+              // "Built-in plugins" in Settings is only an inventory. Never
+              // select it, or a Tools-panel shortcut, as the Plugins page.
+              const globalNav = Array.from(document.querySelectorAll('nav, [role="navigation"]'))
+                .find(nav => ['global panels', 'global panel', '全局面板']
+                  .includes((nav.getAttribute('aria-label') || '').trim().toLowerCase()));
+              if (globalNav) {
+                target = Array.from(globalNav.querySelectorAll(
+                  'button, [role="tab"], [role="treeitem"], a[href]'
+                )).find(item => [item.getAttribute('aria-label'), item.getAttribute('title'), item.textContent]
+                  .some(label => ['plugins', '插件'].includes((label || '').trim().toLowerCase()))) || null;
+              }
+            } else {
+              target = findDshSurfaceControl(surface.tests || []);
+            }
             if (!target) return false;
             closeToolsPanel();
             try {
               target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
               target.click();
+              closeSidebar();
               return true;
             } catch (_) {
               return false;
             }
           };
 
-          if (tryOpen()) return;
+          if (tryOpen()) return true;
           openSidebar();
-          requestAnimationFrame(() => {
+          // React may mount the Global panels nav after the sidebar opens.
+          // Retry for at most 600 ms, never poll continuously or alter the
+          // upstream page. Failure is surfaced after the bounded attempts.
+          let retryCount = 0;
+          const retry = () => {
             if (tryOpen()) return;
-            setTimeout(() => {
-              if (!tryOpen() && typeof onFailure === 'function') onFailure();
-            }, 80);
-          });
+            retryCount += 1;
+            if (retryCount < 4) setTimeout(retry, retryCount * 100);
+            else if (typeof onFailure === 'function') onFailure();
+          };
+          requestAnimationFrame(retry);
+          return true;
         };
 
         const installToolsPanel = () => {
@@ -3146,16 +3158,6 @@ class MainActivity : ComponentActivity() {
           return null;
         };
 
-        const pluginSurfaceVisible = (anchor) => {
-          if (!anchor) return false;
-          const scope = anchor.closest('[role="dialog"], [aria-modal="true"]') || anchor.parentElement;
-          if (!scope) return false;
-          const active = Array.from(scope.querySelectorAll('button[aria-current], button[aria-selected="true"], button[data-state="active"]'))
-            .some((el) => /^(插件|plugins?)\b/i.test((el.textContent || '').trim()));
-          if (active) return true;
-          return !!scope.querySelector('input[type="search"], input[placeholder*="搜索"], input[placeholder*="Search" i]');
-        };
-
         const wireConfig = () => {
           const original = findConfigButton();
           if (!original || original.dataset.dshAndroidNative === '1') return original;
@@ -3219,16 +3221,25 @@ class MainActivity : ComponentActivity() {
             const navButtons = Array.from(nav.querySelectorAll('button')).filter((button) => {
               if (button.id === SKILL_NAV_ID) return false;
               const value = ((button.textContent || '') + ' ' + (button.getAttribute('aria-label') || '')).trim();
-              return ['通用设置', '模型', '插件', 'Agent 预设', '已归档会话',
-                'General', 'Models', 'Plugins', 'Agent presets', 'Archived sessions'].some((name) =>
+              return ['通用设置', '模型', '内置插件', '插件', 'Agent 预设', '规则设定', '规则设置', '已归档会话',
+                'General', 'Models', 'Built-in plugins', 'Plugins', 'Agent presets', 'Rules', 'Rule settings', 'Archived sessions'].some((name) =>
                   value === name || value.startsWith(name + ' '));
             });
             if (navButtons.length < 2) continue;
             const navList = commonAncestor(navButtons, nav);
-            const content = Array.from(modal.children).find((child) =>
-              child !== nav && child.id !== SKILL_PANEL_ID);
-            if (!navList || !content) continue;
-            return { modal, nav, navButtons, navList, content };
+            // DSH 0.2.2 SettingsRoot has exactly FOUR sibling grid seats:
+            // navTitle, nav, header, options. The old adapter selected the
+            // first non-nav child (navTitle) as "content", stretching the title
+            // into the entire viewport and losing the actual plugin options.
+            const children = Array.from(modal.children);
+            const navIndex = children.indexOf(nav);
+            if (navIndex < 1 || !navList) continue;
+            const navTitle = children[navIndex - 1];
+            const header = children[navIndex + 1];
+            const content = children[navIndex + 2];
+            if (!navTitle || !header || !content) continue;
+            if (content.id === SKILL_PANEL_ID || header === content) continue;
+            return { modal, nav, navTitle, navButtons, navList, header, content };
           }
           return null;
         };
@@ -3239,7 +3250,7 @@ class MainActivity : ComponentActivity() {
           });
           const parts = findSettingsParts();
           if (!parts) return null;
-          const { modal, nav, navButtons, navList, content } = parts;
+          const { modal, nav, navTitle, navList, header, content } = parts;
           modal.setAttribute('data-dsh-mobile-settings-dialog', '');
           const overlay = modal.parentElement;
           if (overlay) {
@@ -3252,16 +3263,76 @@ class MainActivity : ComponentActivity() {
           }
           nav.setAttribute('data-dsh-mobile-settings-nav', '');
 
-          const navTitle = nav.firstElementChild;
-          if (navTitle) navTitle.setAttribute('data-dsh-mobile-settings-nav-title', '');
+          navTitle.setAttribute('data-dsh-mobile-settings-nav-title', '');
           navList.setAttribute('data-dsh-mobile-settings-nav-list', '');
+          header.setAttribute('data-dsh-mobile-settings-header', '');
           content.setAttribute('data-dsh-mobile-settings-content', '');
+          content.setAttribute('data-dsh-mobile-settings-options', '');
 
-          const header = content.firstElementChild;
-          const options = content.lastElementChild;
-          if (header) header.setAttribute('data-dsh-mobile-settings-header', '');
-          if (options && options !== header) options.setAttribute('data-dsh-mobile-settings-options', '');
+          // Upstream leaves the settings options scroller mounted when a
+          // section changes. A long inventory can otherwise open the next
+          // section halfway down, looking like another giant blank area.
+          // Reset only on real section switches, never on every DOM mutation.
+          const selected = parts.navButtons.find(button =>
+            button.hasAttribute('aria-current') ||
+            button.getAttribute('aria-selected') === 'true' ||
+            button.getAttribute('data-state') === 'active');
+          const section = selected && selected.textContent.trim();
+          if (section && modal.dataset.dshMobileSection !== section) {
+            modal.dataset.dshMobileSection = section;
+            content.scrollTop = 0;
+          }
           return parts;
+        };
+
+        // DSH >=0.2.2 moved configurable plugin forms to the standalone
+        // Plugins page. "Settings > Built-in plugins" is inventory-only.
+        // Offer a real navigation to the upstream page, NOT a fake form or
+        // the Android package installer, and preserve upstream save actions.
+        const openOfficialPluginConfig = (parts) => {
+          // The Android app gear and Settings > Built-in plugins both use
+          // the same DSH Global panels navigation. Never duplicate a plugin
+          // installer or special-case the settings inventory as a manager.
+          const close = parts && parts.header.querySelector(':scope > button:last-of-type');
+          if (close) close.click();
+          queueMicrotask(() => openDshSurface(
+            DSH_SURFACE_DEFS.find((surface) => surface.id === 'plugins'),
+            () => window.alert('DSH 插件页面尚未就绪，请确认运行时已升级且插件管理组件已加载。')
+          ));
+          return true;
+        };
+
+        window.__dshOpenOfficialPlugins = () => openOfficialPluginConfig(findSettingsParts());
+
+        const syncOfficialPluginConfigLink = (parts) => {
+          if (!parts) return;
+          const selected = parts.navButtons.some((button) => {
+            const label = ((button.textContent || '') + ' ' +
+              (button.getAttribute('aria-label') || '')).toLowerCase();
+            return (label.includes('插件') || label.includes('plugins')) &&
+              (button.hasAttribute('aria-current') ||
+                button.getAttribute('aria-selected') === 'true' ||
+                button.getAttribute('data-state') === 'active');
+          });
+          let button = parts.header.querySelector('[data-dsh-mobile-plugin-config-link]');
+          if (!selected) { if (button) button.remove(); return; }
+          if (!button) {
+            button = document.createElement('button');
+            button.type = 'button';
+            button.setAttribute('data-dsh-mobile-plugin-config-link', '');
+            button.addEventListener('click', () => {
+              const current = findSettingsParts();
+              if (current) openOfficialPluginConfig(current);
+            });
+            // Before the upstream close button, after its action controls.
+            const close = parts && parts.header.querySelector(':scope > button:last-of-type');
+            if (close) close.before(button);
+            else parts.header.appendChild(button);
+          }
+          const zh = (document.documentElement.lang || navigator.language || '')
+            .toLowerCase().startsWith('zh');
+          button.textContent = zh ? '插件配置' : 'Configure plugins';
+          button.setAttribute('aria-label', button.textContent);
         };
 
         let skillSettingsActive = false;
@@ -3588,32 +3659,16 @@ class MainActivity : ComponentActivity() {
           installMobileChrome();
           if (UI_MODE === 'mobile') {
             resolveFrame();
-            tagSettings();
+            const parts = tagSettings();
+            syncOfficialPluginConfigLink(parts);
           } else {
             ROOT.removeAttribute('data-dsh-mobile-sidebar-open');
           }
           installSkillSettings();
           wireComposerImport();
           void syncActiveWorkspace();
-          const anchor = wireConfig();
-          let manager = document.getElementById(MANAGER_ID);
-          if (!pluginSurfaceVisible(anchor)) {
-            if (manager) manager.remove();
-            return;
-          }
-          if (manager || !anchor || !anchor.parentElement) return;
-          manager = anchor.cloneNode(false);
-          manager.id = MANAGER_ID;
-          manager.type = 'button';
-          const zh = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh');
-          manager.textContent = zh ? '管理插件' : 'Manage plugins';
-          manager.setAttribute('aria-label', manager.textContent);
-          manager.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            try { window.androidBridge && window.androidBridge.openPluginManager(BRIDGE_CAP); } catch (_) {}
-          }, true);
-          anchor.parentElement.insertBefore(manager, anchor);
+          // Do not duplicate upstream plugin management with Android UI.
+          wireConfig();
         };
 
         let pending = false;
@@ -4279,114 +4334,6 @@ class MainActivity : ComponentActivity() {
     } catch (_: Throwable) {}
   }
 
-  /**
-   * DSH/pnpm accepts tarballs and directories but does not treat a generic ZIP
-   * as a package tarball. Extract phone-picked ZIP plugins into app-private
-   * storage and install the shallowest directory that owns package.json.
-   */
-  private fun prepareImportedPluginPackage(file: java.io.File): String {
-    if (!file.name.endsWith(".zip", ignoreCase = true)) return file.absolutePath
-    val base = file.name.substringBeforeLast('.', file.name)
-    val outDir = java.io.File(file.parentFile, "$base-unpacked-${System.currentTimeMillis()}")
-    if (outDir.exists()) outDir.deleteRecursively()
-    outDir.mkdirs()
-    val rootPath = outDir.canonicalPath
-    val rootPrefix = rootPath + java.io.File.separator
-    var extractedBytes = 0L
-    var entries = 0
-    val buffer = ByteArray(64 * 1024)
-    try {
-      java.util.zip.ZipInputStream(file.inputStream().buffered()).use { zip ->
-        var entry = zip.nextEntry
-        while (entry != null) {
-          entries++
-          if (entries > MAX_PLUGIN_ZIP_ENTRIES) throw java.io.IOException("插件 ZIP 文件项超过 $MAX_PLUGIN_ZIP_ENTRIES 个")
-          val normalized = entry.name.replace('\\', '/').trimStart('/')
-          val segments = normalized.split('/').filter { it.isNotEmpty() }
-          if (normalized.isBlank() || segments.any { it == ".." || it == "." } || segments.size > MAX_PLUGIN_ZIP_DEPTH) {
-            throw java.io.IOException("ZIP 包含不安全或过深路径：${entry.name}")
-          }
-          val output = java.io.File(outDir, normalized)
-          val canonical = output.canonicalPath
-          if (canonical != rootPath && !canonical.startsWith(rootPrefix)) {
-            throw java.io.IOException("ZIP 路径越界：${entry.name}")
-          }
-          if (entry.isDirectory) {
-            if (!output.exists() && !output.mkdirs()) throw java.io.IOException("无法创建 ZIP 目录：${entry.name}")
-          } else {
-            output.parentFile?.let { parent ->
-              if (!parent.exists() && !parent.mkdirs()) throw java.io.IOException("无法创建 ZIP 父目录：${entry.name}")
-            }
-            var entryBytes = 0L
-            output.outputStream().use { sink ->
-              while (true) {
-                val count = zip.read(buffer)
-                if (count <= 0) break
-                entryBytes += count
-                extractedBytes += count
-                if (entryBytes > MAX_PLUGIN_ZIP_ENTRY_BYTES) throw java.io.IOException("ZIP 单文件超过 256 MB：${entry.name}")
-                if (extractedBytes > MAX_PLUGIN_ZIP_BYTES) throw java.io.IOException("插件 ZIP 解压后超过 512 MB")
-                sink.write(buffer, 0, count)
-              }
-            }
-          }
-          zip.closeEntry()
-          entry = zip.nextEntry
-        }
-      }
-    } catch (t: Throwable) {
-      outDir.deleteRecursively()
-      throw t
-    }
-    val manifests = outDir.walkTopDown()
-      .filter { it.isFile && it.name == "package.json" }
-      .toList()
-    if (manifests.isEmpty()) throw java.io.IOException("ZIP 中未找到 package.json，无法作为 DSH 插件安装")
-
-    // GitHub ZIPs can be monorepos. Prefer the shallowest package that actually
-    // declares a DSH bundle instead of blindly choosing the repository root.
-    val bundleManifests = manifests.filter { candidate ->
-      try {
-        val json = org.json.JSONObject(candidate.readText())
-        json.optJSONObject("dsh")?.optJSONObject("bundle")?.optString("patch", "")?.isNotBlank() == true
-      } catch (_: Throwable) { false }
-    }
-    val candidates = if (bundleManifests.isNotEmpty()) bundleManifests else manifests
-    val manifest = candidates.minByOrNull {
-      it.relativeTo(outDir).invariantSeparatorsPath.count { ch -> ch == '/' }
-    } ?: throw java.io.IOException("无法确定插件 package.json")
-    val packageRoot = manifest.parentFile ?: throw java.io.IOException("无法确定插件根目录")
-
-    // ZIP does not reliably preserve Unix executable bits. Restore every path
-    // declared by package.json#bin so npm/pnpm lifecycle scripts can invoke
-    // CLI helpers exactly as they would from a tarball or git checkout.
-    try {
-      val json = org.json.JSONObject(manifest.readText())
-      val bins = mutableListOf<String>()
-      when (val bin = json.opt("bin")) {
-        is String -> bins += bin
-        is org.json.JSONObject -> {
-          val keys = bin.keys()
-          while (keys.hasNext()) {
-            val value = bin.optString(keys.next(), "").trim()
-            if (value.isNotBlank()) bins += value
-          }
-        }
-      }
-      val packageCanonical = packageRoot.canonicalPath
-      val packagePrefix = packageCanonical + java.io.File.separator
-      for (relative in bins.distinct()) {
-        val target = java.io.File(packageRoot, relative).canonicalFile
-        if ((target.path == packageCanonical || target.path.startsWith(packagePrefix)) && target.isFile) {
-          target.setExecutable(true, false)
-        }
-      }
-    } catch (_: Throwable) {
-      // package metadata diagnostics are handled by DSH/pnpm after selection.
-    }
-    return packageRoot.absolutePath
-  }
-
   /** Unified Android tool inventory: MCP declarations plus installed CLI tools. */
   private fun showExtendedToolManager() {
     Thread {
@@ -4693,228 +4640,19 @@ class MainActivity : ComponentActivity() {
     }.start()
   }
 
-  /** Native package-spec prompt; installation itself runs in the embedded runtime. */
-  private fun showPluginInstaller() {
-    val density = resources.displayMetrics.density
-    val pad = (20 * density).toInt()
-    val container = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(pad, (8 * density).toInt(), pad, 0)
-    }
-    val note = TextView(this).apply {
-      text = "输入 npm 包名、GitHub 仓库地址、git+https/SSH spec、tarball URL 或本地路径。GitHub 网页地址会自动转换为 Git spec；本地 ZIP 会安全解压并优先识别其中真正声明 dsh.bundle 的包。\n\nGit 源插件如需 prepare/install，pnpm 11 会要求显式构建授权；授权脚本以 DSH Host 权限运行，只对你信任的来源授权。"
-      textSize = 14f
-      setPadding(0, 0, 0, (12 * density).toInt())
-    }
-    val input = android.widget.EditText(this).apply {
-      hint = "例如：@linxin666/dsh-web-all"
-      setSingleLine(true)
-      textSize = 15f
-      setSelectAllOnFocus(false)
-    }
-    container.addView(note)
-    container.addView(input, LinearLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-    ))
-
-    val dialog = android.app.AlertDialog.Builder(this)
-      .setTitle("安装 DSH 插件")
-      .setView(container)
-      .setNegativeButton("取消", null)
-      .setPositiveButton("安装", null)
-      .create()
-
-    dialog.setOnShowListener {
-      dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-        val spec = input.text?.toString()?.trim().orEmpty()
-        if (spec.isEmpty()) {
-          input.error = "请输入插件地址"
-          return@setOnClickListener
+  /** Opens upstream DSH 0.2.2 plugin management and configuration. */
+  private fun openOfficialPluginsPage() {
+    webView.evaluateJavascript(
+      "(function(){return typeof window.__dshOpenOfficialPlugins==='function' && window.__dshOpenOfficialPlugins();})()",
+    ) { result ->
+      if (result != "true") {
+        Log.w("dsh-plugin", "Official DSH Plugins navigation is not ready")
+        if (!isFinishing && !isDestroyed) {
+          showSimpleMessage("DSH 插件页面暂不可用",
+            "官方 Plugins 导航尚未加载。请确认 DSH Web 运行时启动完成，并检查 Host 的插件客户端日志。")
         }
-        dialog.dismiss()
-        installPluginInBackground(spec)
       }
     }
-    dialog.show()
-    input.requestFocus()
-  }
-
-  /** Full Android-side plugin manager for snapshots that do not yet expose the new Web manager. */
-  private fun showPluginManager() {
-    val density = resources.displayMetrics.density
-    val pad = (16 * density).toInt()
-    val root = LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      setPadding(pad, (8 * density).toInt(), pad, 0)
-    }
-    val intro = TextView(this).apply {
-      text = "与电脑端使用同一个 web profile。支持安装、更新、启用/停用和卸载；操作完成后自动重启本机 DSH。\n" + engineManager.pluginRuntimeSummary()
-      textSize = 13f
-      setPadding(0, 0, 0, (10 * density).toInt())
-    }
-    val installActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-    val install = Button(this).apply { text = "安装" }
-    val importLocal = Button(this).apply { text = "本地包" }
-    val updateAll = Button(this).apply { text = "全部更新" }
-    val sshKey = Button(this).apply { text = "导入/替换 SSH 私钥" }
-    val sshPassphrase = Button(this).apply {
-      text = if (SecureCredentialStore.sshPassphrase(this@MainActivity) == null) "SSH 私钥口令" else "SSH 私钥口令（已配置）"
-    }
-    val httpsCredential = Button(this).apply {
-      text = if (SecureCredentialStore.gitCredential(this@MainActivity) == null) "私有 Git HTTPS 凭据" else "私有 Git HTTPS 凭据（已配置）"
-    }
-    val pendingBuilds = engineManager.pendingPluginBuilds()
-    val buildApproval = Button(this).apply {
-      text = if (pendingBuilds.isEmpty()) "构建授权（无待处理）" else "构建授权（${pendingBuilds.size}）"
-      isEnabled = pendingBuilds.isNotEmpty()
-    }
-    installActions.addView(install, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    installActions.addView(importLocal, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    installActions.addView(updateAll, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    val scroll = android.widget.ScrollView(this).apply {
-      addView(list, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    }
-    root.addView(intro)
-    root.addView(installActions)
-    root.addView(sshKey, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    root.addView(sshPassphrase, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    root.addView(httpsCredential, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    root.addView(buildApproval, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-    root.addView(scroll, LinearLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT, (420 * density).toInt(),
-    ))
-    lateinit var dialog: android.app.AlertDialog
-
-    fun refresh() {
-      list.removeAllViews()
-      val plugins = engineManager.listPluginBundles()
-      if (plugins.isEmpty()) {
-        list.addView(TextView(this).apply {
-          text = "当前 profile 没有额外依赖。"
-          textSize = 14f
-          setPadding(0, pad, 0, pad)
-        })
-        return
-      }
-      plugins.forEach { info ->
-        val card = LinearLayout(this).apply {
-          orientation = LinearLayout.VERTICAL
-          setPadding(0, (12 * density).toInt(), 0, (12 * density).toInt())
-        }
-        card.addView(TextView(this).apply {
-          text = buildString {
-            append(info.name)
-            if (info.version.isNotBlank()) append("  ").append(info.version)
-            if (info.firstParty) append("  · 官方")
-          }
-          textSize = 15f
-          setTextIsSelectable(true)
-        })
-        card.addView(TextView(this).apply {
-          text = when {
-            !info.bundle -> "普通依赖 · 不作为 DSH profile 层启用"
-            info.enabled -> "已启用"
-            else -> "已安装 · 未启用"
-          }
-          textSize = 12f
-        })
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun actionParams() = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        actions.addView(Button(this).apply {
-          text = if (!info.bundle) "普通依赖" else if (info.enabled) "停用" else "启用"
-          textSize = 12f
-          isEnabled = info.bundle
-          setOnClickListener {
-            dialog.dismiss()
-            runProfileMutation(if (info.enabled) "正在停用插件…" else "正在启用插件…") {
-              engineManager.setBundleEnabled(info.name, !info.enabled)
-            }
-          }
-        }, actionParams())
-        actions.addView(Button(this).apply {
-          text = "更新"
-          textSize = 12f
-          isEnabled = !info.firstParty
-          setOnClickListener {
-            dialog.dismiss()
-            runProfileMutation("正在更新插件…") { engineManager.updatePlugin(info.name) }
-          }
-        }, actionParams())
-        actions.addView(Button(this).apply {
-          text = "卸载"
-          textSize = 12f
-          isEnabled = !info.firstParty
-          setOnClickListener {
-            android.app.AlertDialog.Builder(this@MainActivity)
-              .setTitle("卸载插件")
-              .setMessage("确定卸载 ${info.name}？")
-              .setNegativeButton("取消", null)
-              .setPositiveButton("卸载") { _, _ ->
-                dialog.dismiss()
-                runProfileMutation("正在卸载插件…") { engineManager.removePlugin(info.name) }
-              }
-              .show()
-          }
-        }, actionParams())
-        card.addView(actions)
-        list.addView(card)
-        list.addView(View(this).apply {
-          setBackgroundColor(0x14000000)
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
-      }
-    }
-
-    dialog = android.app.AlertDialog.Builder(this)
-      .setTitle("DSH 插件管理")
-      .setView(root)
-      .setNegativeButton("关闭", null)
-      .create()
-    install.setOnClickListener {
-      dialog.dismiss()
-      showPluginInstaller()
-    }
-    importLocal.setOnClickListener {
-      dialog.dismiss()
-      pluginPackagePicker.launch(arrayOf(
-        "application/gzip", "application/x-gzip", "application/x-tar",
-        "application/octet-stream", "application/zip",
-      ))
-    }
-    updateAll.setOnClickListener {
-      dialog.dismiss()
-      runProfileMutation("正在更新全部第三方插件…") { engineManager.updateAllPlugins() }
-    }
-    sshKey.setOnClickListener {
-      dialog.dismiss()
-      sshKeyPicker.launch(arrayOf("application/octet-stream", "text/plain", "*/*"))
-    }
-    sshPassphrase.setOnClickListener {
-      dialog.dismiss()
-      showSshPassphraseDialog(afterImport = false)
-    }
-    httpsCredential.setOnClickListener {
-      dialog.dismiss()
-      showGitHttpsCredentialDialog()
-    }
-    buildApproval.setOnClickListener {
-      if (pendingBuilds.isEmpty()) return@setOnClickListener
-      android.app.AlertDialog.Builder(this)
-        .setTitle("授权安装期构建")
-        .setMessage(
-          "以下依赖被 pnpm 11 阻止执行 prepare/install 脚本：\n\n• " +
-            pendingBuilds.joinToString("\n• ") +
-            "\n\n授权后这些脚本会以 DSH Host 权限运行。只对你信任的源码授权。",
-        )
-        .setNegativeButton("取消", null)
-        .setPositiveButton("授权") { _, _ ->
-          dialog.dismiss()
-          runProfileMutation("正在写入构建授权…") { engineManager.approvePluginBuilds(pendingBuilds) }
-        }
-        .show()
-    }
-    refresh()
-    dialog.show()
   }
 
   /** Configure an optional passphrase for the imported SSH private key. */
@@ -5046,47 +4784,6 @@ class MainActivity : ComponentActivity() {
       }
     }
     dialog.show()
-  }
-
-  private fun installPluginInBackground(spec: String) {
-    runProfileMutation(
-      "正在安装插件…",
-      detail = spec,
-      operation = { engineManager.installPlugin(spec) },
-      onResult = { result, running -> showPluginInstallResult(spec, result, running) },
-    )
-  }
-
-  /** pnpm 11 deliberately requires a separate trust decision before running git/plugin build scripts. */
-  private fun showPluginInstallResult(spec: String, result: PluginCommandResult, engineRunning: Boolean) {
-    if (!result.ok && result.pendingBuilds.isNotEmpty()) {
-      val names = result.pendingBuilds.joinToString("\n• ", prefix = "• ")
-      val advice = engineManager.pluginCompatibilityAdvice(result).orEmpty()
-      val body = buildString {
-        if (result.output.isNotBlank()) append(result.output.trim()).append("\n\n")
-        if (advice.isNotBlank()) append(advice).append("\n\n")
-        append("以下包请求在安装阶段执行代码：\n").append(names)
-        append("\n\n这些 prepare/install 脚本以 DSH Host 权限运行，不受 Agent 沙箱保护。只对你信任的插件源码授权。")
-      }
-      android.app.AlertDialog.Builder(this)
-        .setTitle("需要构建授权")
-        .setMessage(body)
-        .setNegativeButton("暂不授权") { _, _ -> showProfileMutationResult(result, engineRunning) }
-        .setPositiveButton("授权并重试") { _, _ ->
-          runProfileMutation("正在授权并重试插件…", detail = spec, operation = {
-            val approved = engineManager.approvePluginBuilds(result.pendingBuilds)
-            if (!approved.ok) approved else {
-              val retried = engineManager.installPlugin(spec)
-              if (retried.output.isBlank()) retried else retried.copy(
-                output = approved.output + "\n\n" + retried.output,
-              )
-            }
-          })
-        }
-        .show()
-      return
-    }
-    showProfileMutationResult(result, engineRunning)
   }
 
   /**

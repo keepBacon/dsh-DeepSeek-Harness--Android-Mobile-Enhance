@@ -1,7 +1,7 @@
 name: Build DSH on GitHub (Android ARM64, no Termux)
 on:
   push:
-    branches: [main]
+    branches: [main] # Upgrade branch builds require workflow_dispatch
     paths:
       - '.github/workflows/build-arm64-dsh.yml'
       - 'scripts/ci-assemble-github-runtime.py'
@@ -52,12 +52,14 @@ on:
       - 'gradle.properties'
       - 'scripts/ci-validate-runtime.py'
       - 'scripts/dsh-release-family-lock.json'
+      - 'scripts/ci-generate-dsh-family.py'
+      - 'scripts/ci-upgrade-dsh-runtime.py'
   workflow_dispatch:
     inputs:
       publish_release:
         description: Publish a GitHub Release after building
         type: boolean
-        default: false
+        default: true
 permissions:
   contents: write
 jobs:
@@ -84,10 +86,14 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Verify packaged MCP ESM import closure
         run: |
           python3 scripts/validate-ci-mobile-esm-closure.py
           python3 scripts/test-ci-termux-abi.py
+          python3 scripts/test-upgrade-android-addons.py
           python3 scripts/test-android-compiler-qemu-runtime.py
       - name: Build Android ARM64 runtime on GitHub runner (no Termux)
         shell: bash
@@ -96,7 +102,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq python3 dpkg-dev nodejs npm xz-utils
+          sudo apt-get install -y -qq python3 dpkg-dev xz-utils
+          node --version
+          npm --version
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(2)'
           mkdir -p "$RUNNER_TEMP/dsh-seed" app/src/main/assets
           gh release download "1" -R "$GITHUB_REPOSITORY" -p "Dsh.Mobile.Pro.V0.1.apk" -D "$RUNNER_TEMP/dsh-seed"
           unzip -p "$RUNNER_TEMP/dsh-seed/Dsh.Mobile.Pro.V0.1.apk" assets/snapshot.tar.xz > "$RUNNER_TEMP/dsh-seed/seed.tar.xz"
@@ -109,7 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output runtime-audit.json
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock runtime-release-family.json --output runtime-audit.json
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-android-arm64-runtime-${{ github.run_number }}
@@ -117,6 +126,7 @@ jobs:
             app/src/main/assets/snapshot.tar.xz
             runtime-audit.json
             runtime-build-audit.json
+            runtime-release-family.json
           if-no-files-found: error
           retention-days: 7
   assemble-legacy-signed:
@@ -138,7 +148,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock scripts/dsh-release-family-lock.json --output runtime-audit.json
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock runtime-release-family.json --output runtime-audit.json
           python3 - <<'PY'
           import json, pathlib
           d=json.loads(pathlib.Path('runtime-audit.json').read_text())
@@ -157,7 +167,7 @@ jobs:
           set -euo pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
           echo "$ANDROID_HOME/build-tools/36.0.0" >> "$GITHUB_PATH"
-          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=44
+          bash ./gradlew --no-daemon --console=plain :app:assembleDebug -PdshUpgradeVersionCode=45
       - name: Explicitly sign APK with verified original key
         shell: bash
         run: |
@@ -178,7 +188,7 @@ jobs:
             --snapshot app/src/main/assets/snapshot.tar.xz \
             --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-            --version-code 44
+            --version-code 45
       - name: Create and verify direct APK / distribution ZIP
         shell: bash
         run: |
@@ -206,17 +216,63 @@ jobs:
           compression-level: 0
           retention-days: 30
           if-no-files-found: error
-      - name: Publish direct-download APK, ZIP and checksums as release
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+  # Download and release only the directly installable APK; transferring the
+  # extra 680MB ZIP doubles the chance of network failure on mobile downloads.
+  # ZIP is still retained independently as an Actions artifact.
+  publish-direct-release:
+    needs: assemble-legacy-signed
+    if: (github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/upgrade-dsh-v0.2.2-rc.5-20261119')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DSH-ARM64-APK-${{ github.run_number }}
+          path: dist
+      - name: Verify retrieved signed APK and its SHA256 checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          apks = list(Path('dist').glob('*.apk'))
+          if len(apks) != 1:
+              raise SystemExit('expected exactly one signed APK artifact')
+          apk = apks[0]
+          lines = Path('dist/SHA256SUMS.txt').read_text().splitlines()
+          matching = [line.split('  ', 1)[0] for line in lines
+                      if line.endswith('  ' + apk.name)]
+          if len(matching) != 1 or len(matching[0]) != 64:
+              raise SystemExit('missing or ambiguous signed APK SHA256 entry')
+          actual = hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest()
+          if actual != matching[0]:
+              raise SystemExit('signed APK checksum mismatch before Release upload')
+          print('Direct signed APK verified:', apk.name, actual)
+          PY
+      - name: Publish verified direct-download files with retries
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="dsh-android-build-${{ github.run_number }}"
-          gh release create "$tag" dist/*.apk dist/*.zip dist/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "DSH Android signed upgrade #${{ github.run_number }}" \
-            --notes "APK and ZIP verified with CRC and SHA256. Use direct APK download on Android; install over existing application. Keep backup." \
-            --latest=false
+          tag="dsh-android-0.2.2-rc.5-build-${{ github.run_number }}"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --latest=false --title "DSH Android signed upgrade #${{ github.run_number }}" --notes "Verified direct-install ARM64 APK and SHA256; ZIP remains available as a GitHub Actions artifact. Back up user data before installing."
+          fi
+          for attempt in 1 2 3 4; do
+            if gh release upload "$tag" dist/*.apk dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"; then
+              asset="$(basename dist/*.apk)"
+              if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$asset"; then
+                gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+                gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url --jq .url
+                exit 0
+              fi
+            fi
+            echo "Release upload failed (${attempt}/4); retrying..." >&2
+            sleep $((attempt * 12))
+          done
+          echo "APK artifacts remain available. Rerun only publish-direct-release." >&2
+          exit 1

@@ -474,26 +474,32 @@ eachPackage('@deepseek-ai/dsh-sandbox-local', 'lib/index.js', (file) => {
   const marker = 'DSH Android compat: partial app-UID sandbox runner'
   const oldArgv = 'argv: [runner, policy.mode, policy.workspaceRoot, "--", ...argv]'
   const bridgedArgv = 'argv: ["/system/bin/sh", runner, policy.mode, policy.workspaceRoot, "--", ...argv]'
+  const newBridgedArgv = 'argv: ["/system/bin/sh", runner, policy.mode, canonicalPath(policy.workspaceRoot), "--", ...argv]'
   if (txt.includes(marker)) {
-    if (txt.includes(bridgedArgv)) return 'already'
+    if (txt.includes(bridgedArgv) || txt.includes(newBridgedArgv)) return 'already'
     if (!txt.includes(oldArgv)) throw new Error('sandbox-local existing Android runner entry changed: ' + file)
     txt = txt.replace(oldArgv, bridgedArgv)
     write(file, txt)
     checkPatchedJavaScript(file)
     return 'patched'
   }
-  const anchor = /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
+  // 0.2.2 exposes async confine(argv, policy, signal); old releases used
+  // the two-argument sync API. Do not alter other sandbox entry points.
+  const anchor = versionAtLeast(targetVersion, '0.2.0-rc.1')
+    ? /async\s+confine\s*\(\s*argv\s*,\s*policy\s*,\s*signal\s*\)\s*\{/
+    : /confine\s*\(\s*argv\s*,\s*policy\s*\)\s*\{/
   const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
   if (matches.length !== 1) throw new Error(`sandbox-local confine anchor changed (${matches.length}): ${file}`)
   const injection = `${matches[0]}
     // ${marker}.
     if (process.env.DSH_ANDROID_STANDALONE === "1") {
+      ${versionAtLeast(targetVersion, '0.2.0-rc.1') ? 'signal?.throwIfAborted();' : ''}
       const runner = process.env.DSH_ANDROID_SANDBOX_RUNNER;
       if (!runner) {
         throw new Error("DSH Android sandbox runner path is missing");
       }
       return {
-        argv: ["/system/bin/sh", runner, policy.mode, policy.workspaceRoot, "--", ...argv],
+        argv: ["/system/bin/sh", runner, policy.mode, ${versionAtLeast(targetVersion, '0.2.0-rc.1') ? 'canonicalPath(policy.workspaceRoot)' : 'policy.workspaceRoot'}, "--", ...argv],
         enforcement: "partial",
         denialSignatures: ["permission denied", "read-only file system", "operation not permitted"],
         runnerFailureRules: [{
@@ -520,7 +526,7 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
   // different compiled layout. Its containment method cannot be re-patched.
   // Only the NEW model Bash environment fix is permitted on this seed;
   // fresh release-family installations still receive the original rewrites.
-  const seededCompatOnly = Boolean(process.env.DSH_COMPAT_ONLY_PACKAGES)
+  const seededCompatOnly = process.env.DSH_COMPAT_SEED_SUBPROCESS_ONLY === "1"
   let changed = false
   if (!seededCompatOnly && !txt.includes(marker)) {
     const anchor = /selectContainmentMode\s*\(\s*kind\s*\)\s*\{/
@@ -541,7 +547,12 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
     // underlying spawn.ts function is folded into a different bundle chunk.
     // Transform its API request, preserving the entire spec and exact argv.
     // This covers both ordinary and non-confined Bash/CLI child launches.
-    const anchor = /spawnSubprocess\(\s*spec\s*,\s*this\.internals\s*\)/g
+    const modern = versionAtLeast(targetVersion, '0.2.0-rc.1')
+    // 0.2.2 passes a per-call object with the spill handler merged in.
+    const internalsArg = modern ? 'internals' : 'this.internals'
+    const anchor = modern
+      ? /spawnSubprocess\(\s*spec\s*,\s*internals\s*\)/g
+      : /spawnSubprocess\(\s*spec\s*,\s*this\.internals\s*\)/g
     const matches = txt.match(anchor) ?? []
     if (matches.length !== 1) {
       const sample = [...txt.matchAll(/[^\n]{0,90}spawnSubprocess[^\n]{0,170}/g)]
@@ -558,7 +569,7 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
       '  const program = String(spec.argv[0]);',
       '  if (program.startsWith("/system/") || program.startsWith("/apex/")) return spec;',
       '  return { ...spec, argv: ["/system/bin/sh", prefix + "/libexec/dsh-mobile/android-exec.sh", ...spec.argv] };',
-      '})(), this.internals)',
+      '})(), ' + internalsArg + ')',
     ].join('\n'))
     changed = true
   }
@@ -626,7 +637,7 @@ eachPackage('@deepseek-ai/dsh-terminal-bash', 'lib/index.js', (file) => {
     const anchor = /((?:const|let|var)\s+DEFAULT_BASH_SHELL\s*=\s*)["']\/bin\/bash["']/
     const matches = txt.match(new RegExp(anchor.source, 'g')) ?? []
     if (matches.length !== 1) {
-      if (!process.env.DSH_COMPAT_ONLY_PACKAGES || matches.length !== 0)
+      if ((!process.env.DSH_COMPAT_ONLY_PACKAGES && !versionAtLeast(targetVersion, '0.2.0-rc.1')) || matches.length !== 0)
         throw new Error('terminal-bash DEFAULT_BASH_SHELL anchor changed: ' + file)
       // The signed seed already has its own Bash default rewrite. Do not
       // touch it; only update the PTY argv bridge below.

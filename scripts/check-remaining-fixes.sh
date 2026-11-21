@@ -36,18 +36,20 @@ must "$MA" 'Files.createLink(candidate.toPath(), temp.toPath())'
 must "$MA" 'if (!candidate.createNewFile()) continue'
 forbid "$MA" 'uniqueWorkspaceDestination'
 
-# M-02/M-03 archive abuse limits.
-must "$MA" 'MAX_PLUGIN_PACKAGE_BYTES = 512L * 1024 * 1024'
-must "$MA" 'MAX_PLUGIN_ZIP_ENTRY_BYTES = 256L * 1024 * 1024'
-must "$MA" 'MAX_PLUGIN_ZIP_ENTRIES = 20_000'
-must "$MA" 'MAX_PLUGIN_ZIP_DEPTH = 32'
-must "$MA" 'copyWithLimit(input, output, MAX_PLUGIN_PACKAGE_BYTES'
+# M-02/M-03: Android's duplicate ZIP/plugin installer has been removed.
+# The upstream DSH Plugins page owns package import, install and configuration.
+forbid "$MA" 'MAX_PLUGIN_PACKAGE_BYTES = 512L * 1024 * 1024'
+forbid "$MA" 'MAX_PLUGIN_ZIP_ENTRY_BYTES = 256L * 1024 * 1024'
+must "$MA" 'private fun openOfficialPluginsPage()'
+must "$MA" 'window.__dshOpenOfficialPlugins'
+must "$MA" 'openOfficialPluginConfig(findSettingsParts())'
 
-# M-04 plain dependencies are classified and cannot be toggled as bundles.
+# M-04: bundle classification and recovery remain in the Host adapter,
+# but are not exposed as a second Android plugin management interface.
 must "$EM" 'val bundle: Boolean'
 must "$EM" 'packageDeclaresBundle(name, profile)'
 must "$EM" '没有声明 dsh.bundle.patch，不能作为 profile 层启用'
-must "$MA" 'isEnabled = info.bundle'
+must "$EM" 'fun listPluginBundles(profile: String = "web")'
 
 # M-04b Codex subscription keeps backend/model directory capabilities while
 # Android DSH owns the composer model-picker slot.

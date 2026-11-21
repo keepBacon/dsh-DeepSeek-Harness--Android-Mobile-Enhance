@@ -3,7 +3,12 @@
 import argparse, hashlib, json, pathlib, re, sys, tarfile
 
 REQUIRED = (
- 'usr/bin/node','usr/bin/bash','usr/bin/proot',
+ 'usr/bin/node','usr/bin/npm','usr/bin/npx','usr/bin/pnpm',
+ 'usr/lib/node_modules/npm/package.json',
+ 'usr/lib/node_modules/npm/bin/npm-cli.js',
+ 'usr/lib/node_modules/npm/bin/npx-cli.js',
+ 'usr/lib/node_modules/pnpm/package.json',
+ 'usr/bin/bash','usr/bin/proot',
  'usr/bin/git','usr/bin/gh','usr/bin/ssh',
  'usr/bin/rg','usr/bin/fd','usr/bin/fzf',
  'usr/bin/fzf-tmux', 'usr/share/fzf/key-bindings.bash',
@@ -65,6 +70,8 @@ def validate(snapshot, lock):
   raise ValueError('missing or placeholder runtime archive')
  version=json.loads(lock.read_text())['version']
  found=set()
+ pnpm_entrypoint=False
+ npm_manifest=None
  package=None
  arch=False
  entries=0
@@ -82,6 +89,14 @@ def validate(snapshot, lock):
     'usr/libexec/git-core/git-remote-https','usr/lib/git-core/git-remote-https',
     'usr/etc/tls/cert.pem','usr/etc/ssl/cert.pem','usr/etc/ssl/certs/ca-certificates.crt'
    ) and (member.isfile() or member.issym() or member.islnk()): found.add(name)
+   if name in (
+    'usr/lib/node_modules/pnpm/bin/pnpm.cjs',
+    'usr/lib/node_modules/pnpm/bin/pnpm.mjs',
+    'usr/lib/node_modules/pnpm/bin/pnpm.js'
+   ) and member.isfile(): pnpm_entrypoint=True
+   if name=='usr/lib/node_modules/npm/package.json':
+    if not member.isfile() or member.size>1024*1024: raise ValueError('bad npm manifest')
+    npm_manifest=json.load(f.extractfile(member))
    if name=='usr/lib/node_modules/@deepseek-ai/dsh/package.json':
     if not member.isfile() or member.size>1024*1024: raise ValueError('bad DSH manifest')
     package=json.load(f.extractfile(member))
@@ -111,6 +126,9 @@ def validate(snapshot, lock):
   raise ValueError('missing Git HTTPS CA trust bundle')
  if set(REQUIRED)-found: raise ValueError('missing required paths: '+', '.join(sorted(set(REQUIRED)-found)))
  if not arch: raise ValueError('node is not ARM64 ELF')
+ if not pnpm_entrypoint: raise ValueError('pnpm JavaScript CLI entrypoint is missing')
+ if not isinstance(npm_manifest,dict) or npm_manifest.get('name')!='npm':
+  raise ValueError('npm package manifest missing or incorrect')
  # Native seeds can contain neither or only one of these Web-profile modules.
  # Verify every packaged module independently; the Android startup patch
  # covers separately installed profile modules.

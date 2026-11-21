@@ -49,6 +49,8 @@ TOOL_SEEDS = (
     # Linux x86_64 user-mode emulator, not a Windows DLL loader or KVM.
     "qemu-user-x86-64",
     "lua-language-server",
+    # DSH 0.2.2 requires Node >=24.9; refresh the Android ELF, not just JS.
+    "nodejs", "npm",
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
@@ -243,6 +245,16 @@ def fetch_packages(stage, workspace):
             prefix = extracted / "usr"
         if not prefix.is_dir():
             raise ValueError("unrecognized Android package prefix " + name)
+        # npm is a separate Termux JS package. Remove the old global npm
+        # directory before overlay, so files removed between npm releases
+        # do not survive as a mixed-version tool installation. The new .deb
+        # has already been SHA256 verified above.
+        if name == "npm":
+            legacy_npm = stage / "usr/lib/node_modules/npm"
+            if legacy_npm.is_symlink():
+                raise ValueError("unexpected symlink at legacy npm package root")
+            if legacy_npm.is_dir():
+                shutil.rmtree(legacy_npm)
         # The seed can contain a stale pip package and entrypoint. Refresh the
         # exact package-owned Python-pip payload from the verified .deb, not
         # arbitrary user-installed site-packages or HOME virtual environments.
@@ -266,7 +278,14 @@ def fetch_packages(stage, workspace):
             for file in files:
                 src = parent / file
                 dst = outdir / file
-                replace_abi = should_replace_native(name, abi_cohort, src, rel / file) or name in ("python-pip", "lua-language-server")
+                # npm is a separate Termux package. Replace its legacy JS
+                # installation and entrypoint scripts, not just the Node ELF.
+                npm_file = name == "npm" and (
+                    rel.parts[:3] == ("lib", "node_modules", "npm")
+                    or (rel.parts[:1] == ("bin",) and file in ("npm", "npx")))
+                replace_abi = (should_replace_native(name, abi_cohort, src, rel / file)
+                               or name in ("python-pip", "lua-language-server")
+                               or npm_file)
                 if overlay_one(src, dst, allow_replace=replace_abi) and replace_abi:
                     abi_replacements.append(str((rel / file).as_posix()))
             for folder in dirs[:]:
@@ -279,6 +298,32 @@ def fetch_packages(stage, workspace):
         manifest.append({"package": name, "version": package.get("Version"), "sha256": digest})
         downloaded.unlink()
         shutil.rmtree(extracted)
+    # npm is distributed separately from Node. Require its current files,
+    # otherwise plugin scripts may execute the obsolete npm from the seed.
+    npm_package = next((p for p in manifest if p["package"] == "npm"), None)
+    if not npm_package:
+        raise ValueError("Termux npm package absent from upgraded Node runtime")
+    for cli in ("npm-cli.js", "npx-cli.js"):
+        entry = stage / "usr/lib/node_modules/npm/bin" / cli
+        if not entry.is_file() or entry.is_symlink():
+            raise ValueError("Termux npm JavaScript CLI incomplete: " + cli)
+    for cli in ("npm", "npx"):
+        entry = stage / "usr/bin" / cli
+        if not (entry.is_file() or entry.is_symlink()):
+            raise ValueError("Termux package manager entrypoint missing: " + cli)
+    # The published DSH CLI enforces engines.node >=24.9.0. Retaining the
+    # signed seed's Node 22 is not an upgrade even with a correct JS graph.
+    node_package = next((p for p in manifest if p["package"] == "nodejs"), None)
+    if not node_package:
+        raise ValueError("DSH 0.2.2 requires refreshed native Termux nodejs")
+    node_version = re.match(r"^(\d+)\.(\d+)\.(\d+)", node_package["version"] or "")
+    if not node_version or tuple(map(int, node_version.groups())) < (24, 9, 0):
+        raise ValueError("Termux nodejs below required 24.9.0: " + str(node_package["version"]))
+    node_elf = stage / "usr/bin/node"
+    with node_elf.open("rb") as node_file:
+        hdr = node_file.read(20)
+    if len(hdr) < 20 or hdr[:4] != b"\x7fELF" or int.from_bytes(hdr[18:20], "little") != 183:
+        raise ValueError("upgraded native Node executable is not Android ARM64 ELF")
     if not libcxx_sha256:
         raise ValueError("No verified libc++ package was fetched")
     abi_report = validate_apt_abi(stage, libcxx_sha256, abi_replacements)
@@ -552,6 +597,20 @@ def main():
         manifest, abi_report = fetch_packages(stage, workspace)
         install_lua_language_server_launcher(stage)
         overlay_sources(stage, args.repo)
+        # Upgrade the complete JS package family; the seed is only an Android
+        # ABI/toolchain carrier, not a source of 0.1.5 DSH modules.
+        from runpy import run_path
+        install_release=run_path(str(args.repo / 'scripts/ci-upgrade-dsh-runtime.py'))['install_release']
+        family_audit=install_release(stage, workspace, args.repo)
+        shutil.copyfile(stage / "usr/lib/dsh-release-family.json",
+                        args.repo / "runtime-release-family.json")
+        # Older validation workflows still point at the checked-in 0.1.5
+        # family lock. During this ephemeral builder job they must validate
+        # against the *generated 0.2.2* lock, not the legacy source baseline.
+        # Both paths are copied from the exact same pinned upstream manifest;
+        # no package/version checks are disabled.
+        shutil.copyfile(stage / "usr/lib/dsh-release-family.json",
+                        args.repo / "scripts/dsh-release-family-lock.json")
         # The GitHub native builder reuses an already-patched DSH seed.
         # Only update its PTY and sandbox launcher entrypoints. The seed's
         # subprocess-local bundle does not contain the upstream containment
@@ -560,8 +619,8 @@ def main():
         # rely on the Termux execution bridge for nested CLI commands.
         subprocess.run(
             ["node", str(args.repo / "scripts/android-runtime-patch.mjs"), str(stage / "usr")],
-            check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.1.5-rc.2",
-                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local"})
+            check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.2.2-rc.5",
+                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local,@deepseek-ai/dsh-subprocess-local,node-addon-require-builtin,@deepseek-ai/node-addon-system"})
         patch_web_fetch_limits(stage)
         stage_modsearch(stage, workspace)
         install_typescript(stage, workspace)
@@ -576,6 +635,7 @@ def main():
             "buildSystem": "GitHub-hosted Ubuntu ARM64, not a Termux build",
             "seedSha256": hashlib.sha256(args.seed.read_bytes()).hexdigest(),
             "sourceOverlay": list(SCRIPT_MAP.values()),
+            "upgradedDshFamily": family_audit,
             "androidPackageArchives": manifest,
             "pyright": pyright_audit,
             "aptAbi": abi_report,
