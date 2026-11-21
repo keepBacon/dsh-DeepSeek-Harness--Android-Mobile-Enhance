@@ -48,9 +48,10 @@ const androidZIndex=(selector)=>{
  const start=source.indexOf(marker)
  assert.ok(start>=0,'missing Android layer: '+selector)
  const rule=source.slice(start,source.indexOf('}',start))
- const matched=/z-index:\s*(\d+)/.exec(rule)
- assert.ok(matched,'missing z-index on '+selector)
- return Number(matched[1])
+ // Ignore references inside comments: the real declaration comes last.
+ const declarations=[...rule.matchAll(/^\s*z-index:\s*(\d+)/gm)]
+ assert.ok(declarations.length===1,'expected one z-index declaration on '+selector)
+ return Number(declarations[0][1])
 }
 const toolsMaskZ=androidZIndex('#dsh-android-tools-scrim')
 const toolsPanelZ=androidZIndex('#dsh-android-tools-panel')
