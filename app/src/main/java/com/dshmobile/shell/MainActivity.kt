@@ -2475,19 +2475,19 @@ class MainActivity : ComponentActivity() {
 
         let lastWorkspaceSyncKey = '';
         let workspaceSyncRunning = false;
+        let lastWorkspaceAttemptSession = '';
+        let lastWorkspaceAttemptAt = 0;
+        const WORKSPACE_SYNC_INTERVAL_MS = 5000;
+        const WORKSPACE_RPC_TIMEOUT_MS = 6000;
         const activeSessionId = () => {
           try {
-            // The Workspace browser exposes the real main-view selection as a
-            // treeitem. Prefer it over URL shape: DSH navigation is client
-            // state and does not require every selection to rewrite history.
+            // The Workspace browser owns session selection; route fallback
+            // only applies to builds that publish the active session in URL.
             const selected = document.querySelector(
               '[data-row-key^="session:"][aria-selected="true"]'
             );
             const rowKey = selected && selected.getAttribute('data-row-key');
             if (rowKey && rowKey.startsWith('session:')) return rowKey.slice('session:'.length);
-
-            // Mount-aware fallback for builds that do publish Session identity
-            // into the route.
             const parts = location.pathname.split('/').filter(Boolean);
             const at = parts.lastIndexOf('session');
             return at >= 0 && at + 1 < parts.length ? decodeURIComponent(parts[at + 1]) : null;
@@ -2496,13 +2496,23 @@ class MainActivity : ComponentActivity() {
         const syncActiveWorkspace = async () => {
           const sessionId = activeSessionId();
           if (!sessionId || workspaceSyncRunning) return;
+          const now = Date.now();
+          // The UI sync() handler runs after many unrelated button clicks and
+          // mutations. Avoid re-listing every Host session on each click.
+          if (lastWorkspaceAttemptSession === sessionId &&
+              now - lastWorkspaceAttemptAt < WORKSPACE_SYNC_INTERVAL_MS) return;
+          lastWorkspaceAttemptSession = sessionId;
+          lastWorkspaceAttemptAt = now;
           workspaceSyncRunning = true;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), WORKSPACE_RPC_TIMEOUT_MS);
           try {
             const rpcId = 'android-workspace-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
             const apiUrl = new URL('api/session/list', document.baseURI).href;
             const response = await fetch(apiUrl, {
               method: 'POST',
               credentials: 'include',
+              signal: controller.signal,
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({
                 type: 'client-request',
@@ -2519,19 +2529,29 @@ class MainActivity : ComponentActivity() {
             const session = items.find((item) => item && item.sessionId === sessionId);
             const cwd = session && typeof session.cwd === 'string' ? session.cwd : '';
             if (!cwd || cwd.charAt(0) !== '/') return;
+            // A user may switch sessions while the network request is pending.
+            // Never change the bridge workspace using that stale response.
+            if (activeSessionId() !== sessionId) return;
             const key = sessionId + '\n' + cwd;
             if (key === lastWorkspaceSyncKey) return;
             let accepted = false;
             try {
-              accepted = !!(window.androidBridge
-                && window.androidBridge.setCurrentWorkspacePath(BRIDGE_CAP, cwd));
+              accepted = !!(window.androidBridge &&
+                window.androidBridge.setCurrentWorkspacePath(BRIDGE_CAP, cwd));
             } catch (_) {}
             if (accepted) lastWorkspaceSyncKey = key;
           } catch (_) {
-            // Session navigation can race the Host list update. The next
-            // structural navigation/click retries without changing the root.
+            // Abort/network/Host errors are not a reason to clear the active
+            // workspace. A later click or session switch retries safely.
           } finally {
+            clearTimeout(timeout);
             workspaceSyncRunning = false;
+            // Process a session switch that happened while this request ran.
+            // Never queue a retry for the same session on failure.
+            const currentSession = activeSessionId();
+            if (currentSession && currentSession !== sessionId) {
+              queueMicrotask(() => { void syncActiveWorkspace(); });
+            }
           }
         };
 
