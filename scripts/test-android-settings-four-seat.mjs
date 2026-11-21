@@ -48,6 +48,10 @@ assert.ok(source.includes("['plugins', '插件'].includes("),
  'native Plugins navigation must never substring-match Built-in plugins')
 assert.ok(source.includes("target = Array.from(globalNav.querySelectorAll("),
  'official Plugins control must be scoped to the Global panels nav')
+assert.ok(source.includes("const target = globalNav && candidates.find(item =>"),
+ 'settings-to-Plugins navigation must stay within Global panels')
+assert.ok(!source.includes("!!item.closest('nav, [role=\"navigation\"]') && isPlugins(item)"),
+ 'navigation must not fall back to unrelated Plugins or inventory tabs')
 const engineSource=readFileSync('app/src/main/java/com/dshmobile/shell/EngineManager.kt','utf8')
 for(const token of [
  'dsh-zcode-startplan', 'dsh-providers-hub',
