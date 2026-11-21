@@ -3292,6 +3292,71 @@ class MainActivity : ComponentActivity() {
           return parts;
         };
 
+        // DSH >=0.2.2 moved configurable plugin forms to the standalone
+        // Plugins page. "Settings > Built-in plugins" is inventory-only.
+        // Offer a real navigation to the upstream page, NOT a fake form or
+        // the Android package installer, and preserve upstream save actions.
+        const openOfficialPluginConfig = (parts) => {
+          const candidates = Array.from(document.querySelectorAll(
+            'button, [role="tab"], [role="treeitem"], a[href]'
+          )).filter((item) =>
+            !item.closest('[role="dialog"], [aria-modal="true"], #' + TOOLS_PANEL_ID)
+            && !item.closest('#dsh-android-mobile-bar')
+            && !item.closest('#dsh-android-skill-settings-panel')
+          );
+          const target = candidates.find((item) => {
+            const label = (
+              (item.getAttribute('aria-label') || '') + ' ' +
+              (item.getAttribute('title') || '') + ' ' +
+              (item.textContent || '')
+            ).trim().replace(/\\s+/g, ' ').toLowerCase();
+            return label === '插件' || label === 'plugins';
+          });
+          if (!target) {
+            // The default mobile sidebar can hide the Plugins navigation.
+            // Fail visibly instead of silently returning to an empty panel.
+            openToolsPanel();
+            return false;
+          }
+          const close = parts.header.querySelector('button:last-of-type');
+          if (close) close.click();
+          closeSidebar();
+          // Do not replace React navigation or lose plugin-owned form state.
+          queueMicrotask(() => target.click());
+          return true;
+        };
+
+        const syncOfficialPluginConfigLink = (parts) => {
+          if (!parts) return;
+          const selected = parts.navButtons.some((button) => {
+            const label = ((button.textContent || '') + ' ' +
+              (button.getAttribute('aria-label') || '')).toLowerCase();
+            return (label.includes('插件') || label.includes('plugins')) &&
+              (button.hasAttribute('aria-current') ||
+                button.getAttribute('aria-selected') === 'true' ||
+                button.getAttribute('data-state') === 'active');
+          });
+          let button = parts.header.querySelector('[data-dsh-mobile-plugin-config-link]');
+          if (!selected) { if (button) button.remove(); return; }
+          if (!button) {
+            button = document.createElement('button');
+            button.type = 'button';
+            button.setAttribute('data-dsh-mobile-plugin-config-link', '');
+            button.addEventListener('click', () => {
+              const current = findSettingsParts();
+              if (current) openOfficialPluginConfig(current);
+            });
+            // Before the upstream close button, after its action controls.
+            const close = parts.header.querySelector('button:last-of-type');
+            if (close) close.before(button);
+            else parts.header.appendChild(button);
+          }
+          const zh = (document.documentElement.lang || navigator.language || '')
+            .toLowerCase().startsWith('zh');
+          button.textContent = zh ? '插件配置' : 'Configure plugins';
+          button.setAttribute('aria-label', button.textContent);
+        };
+
         let skillSettingsActive = false;
 
         const readSkills = () => {
@@ -3616,7 +3681,8 @@ class MainActivity : ComponentActivity() {
           installMobileChrome();
           if (UI_MODE === 'mobile') {
             resolveFrame();
-            tagSettings();
+            const parts = tagSettings();
+            syncOfficialPluginConfigLink(parts);
           } else {
             ROOT.removeAttribute('data-dsh-mobile-sidebar-open');
           }
