@@ -34,6 +34,20 @@ assert.ok(!source.includes("const header = content.firstElementChild;"),
  'the dialog title must not be used as a fake section container')
 assert.ok(!source.includes("const options = content.lastElementChild;"),
  'the 0.2.2 settings content is already a direct grid seat')
+assert.ok(!source.includes('private fun showNativePluginManager('),
+ 'remove the old Android-native plugin manager instead of hiding its entry')
+assert.ok(!source.includes('private fun showPluginInstallDialog('),
+ 'remove the old Android-native plugin installer')
+assert.ok(!source.includes('queueMicrotask(openToolsPanel)'),
+ 'a missing upstream Plugins control must not open the Android Tools panel')
+const engineSource=readFileSync('app/src/main/java/com/dshmobile/shell/EngineManager.kt','utf8')
+for(const token of [
+ 'dsh-zcode-startplan', 'dsh-providers-hub',
+ 'val requiredClients = client.optJSONArray("inject")',
+ 'val bundlePatch = root.optJSONObject("dsh")?.optJSONObject("bundle")',
+ 'findRuntimePackageDir(dependency)',
+ 'prepare 构建'
+]) assert.ok(engineSource.includes(token),'missing community plugin compatibility: '+token)
 
 // Exercise real source parser with a tiny four-sibling DOM fixture.
 const start=source.indexOf('        const findSettingsParts = () => {')
