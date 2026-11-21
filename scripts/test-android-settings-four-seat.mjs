@@ -60,6 +60,11 @@ for(const token of [
  'val requiredClients = client.optJSONArray("inject")',
  'val bundlePatch = root.optJSONObject("dsh")?.optJSONObject("bundle")',
  'findRuntimePackageDir(dependency)',
+ 'val priorityPlugins = listOf("dsh-zcode-startplan", "dsh-providers-hub")',
+ 'val otherPlugins = try {',
+ 'npmPackageName.matches(it)',
+ 'for (name in (priorityPlugins + otherPlugins).distinct())',
+ 'if (name in priorityPlugins)',
  'prepare 构建'
 ]) assert.ok(engineSource.includes(token),'missing community plugin compatibility: '+token)
 
