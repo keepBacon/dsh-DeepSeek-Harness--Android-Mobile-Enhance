@@ -3320,7 +3320,7 @@ class MainActivity : ComponentActivity() {
             openToolsPanel();
             return false;
           }
-          const close = parts.header.querySelector('button:last-of-type');
+          const close = parts.header.querySelector(':scope > button:last-of-type');
           if (close) close.click();
           closeSidebar();
           // Do not replace React navigation or lose plugin-owned form state.
@@ -3349,7 +3349,7 @@ class MainActivity : ComponentActivity() {
               if (current) openOfficialPluginConfig(current);
             });
             // Before the upstream close button, after its action controls.
-            const close = parts.header.querySelector('button:last-of-type');
+            const close = parts.header.querySelector(':scope > button:last-of-type');
             if (close) close.before(button);
             else parts.header.appendChild(button);
           }
