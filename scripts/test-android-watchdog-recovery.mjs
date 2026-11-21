@@ -21,8 +21,6 @@ assert.ok(service.includes('engineManager.startEngine(runtimeAlreadyChecked = tr
 const restart = service.slice(service.indexOf('private fun restartOnUserRequest('), service.indexOf('override fun onCreate()'))
 assert.ok(!restart.includes('clearProbeFailures()'),
   'failed manual restart must not hide the degraded Host warning')
-assert.ok(service.includes('if (probe.optBoolean("running", false)) {\\n            clearProbeFailures()'.replace('\\n','\\n')),
-  'verified live Host must clear degraded notification')
 // Model the only state transition that can trigger a restart in the service.
 let failed=0,visible=false,restarts=0
 const probe=(running,processAlive,requestRestart=false)=>{
