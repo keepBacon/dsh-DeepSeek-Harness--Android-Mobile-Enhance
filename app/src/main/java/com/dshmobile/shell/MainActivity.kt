@@ -562,12 +562,13 @@ class MainActivity : ComponentActivity() {
       }
 
       override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage): Boolean {
+        // The upstream Web console and third-party plugins can print API
+        // credentials, signed URLs and authorization headers. Count severity
+        // only; never copy raw messages or source URLs into Android Logcat.
         webViewInspector.recordConsole(consoleMessage)
-        Log.d(
-          "dsh-web",
-          "${consoleMessage.messageLevel()}: ${consoleMessage.message()} " +
-            "(${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})",
-        )
+        if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+          Log.d("dsh-web", "Console level=${consoleMessage.messageLevel()} (content redacted)")
+        }
         return true
       }
     }
@@ -5955,7 +5956,10 @@ class MainActivity : ComponentActivity() {
 
   /** 命中判定：引擎源 + 会话导出路径 + GET（HEAD 是前端预检，不得触发跳转）。 */
   private fun isSessionExport(url: String, method: String): Boolean {
-    return method == "GET" && isEngineSource(url) && url.contains(SESSION_EXPORT_PATH)
+    // Match URI path, not query/fragment substrings or similarly prefixed
+    // endpoints. A false-positive download would interrupt live WebView nav.
+    return method == "GET" && isEngineSource(url) &&
+      Uri.parse(url).path == SESSION_EXPORT_PATH
   }
 
   /**
