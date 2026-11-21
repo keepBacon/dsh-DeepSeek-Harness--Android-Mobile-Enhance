@@ -3272,16 +3272,20 @@ class MainActivity : ComponentActivity() {
             && !item.closest('#dsh-android-mobile-bar')
             && !item.closest('#dsh-android-skill-settings-panel')
           );
-          const target = candidates.find((item) => {
-            // aria-label + title + visible text frequently repeat the same
-            // name; comparing their concatenation hides the real nav item.
-            const labels = [
-              item.getAttribute('aria-label'),
-              item.getAttribute('title'),
-              item.textContent
-            ].map(value => (value || '').trim().replace(/\s+/g, ' ').toLowerCase());
-            return labels.some(label => label === '插件' || label === 'plugins');
-          });
+          // DSH 0.2.2 Web's Plugins page belongs to the "Global panels"
+          // navigation. Avoid matching an unrelated "插件" button elsewhere.
+          const isPlugins = (item) => [
+            item.getAttribute('aria-label'), item.getAttribute('title'), item.textContent
+          ].some(value => (value || '').trim().replace(/\s+/g, ' ').toLowerCase() === '插件' ||
+            (value || '').trim().toLowerCase() === 'plugins');
+          const globalNav = Array.from(document.querySelectorAll('nav, [role="navigation"]'))
+            .find(nav => {
+              const label = (nav.getAttribute('aria-label') || '').trim().toLowerCase();
+              return label === '全局面板' || label === 'global panels' || label === 'global panel';
+            });
+          const target = (globalNav && candidates.find(item =>
+            globalNav.contains(item) && isPlugins(item))) || candidates.find(item =>
+              !!item.closest('nav, [role="navigation"]') && isPlugins(item));
           if (!target) {
             // A deployment without a visible sidebar plugin control still
             // has the Android Tools surface picker. Close the modal first:
