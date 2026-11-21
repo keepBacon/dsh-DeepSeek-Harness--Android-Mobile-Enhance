@@ -175,7 +175,7 @@ const surfaceStart=source.indexOf('        const openDshSurface = (surface, onFa
 const surfaceEnd=source.indexOf('        const installToolsPanel = () => {',surfaceStart)
 assert.ok(surfaceStart>=0 && surfaceEnd>surfaceStart,'DSH surface navigator not found')
 const surfaceSource=source.slice(surfaceStart,surfaceEnd)
-let upstreamClicks=0,inventoryClicks=0,panelCloses=0,sidebarOpens=0,sidebarCloses=0
+let upstreamClicks=0,inventoryClicks=0,panelCloses=0,sidebarOpens=0,surfaceSidebarCloses=0
 const upstreamItem={
  textContent:'插件',
  getAttribute(key){return key==='aria-label'?'Plugins':null},
@@ -198,14 +198,14 @@ const buildSurface=(navs)=>new Function('document','closeToolsPanel','closeSideb
  'openSidebar','requestAnimationFrame','setTimeout','findDshSurfaceControl',
  surfaceSource+'return openDshSurface')(
  {querySelectorAll(sel){assert.equal(sel,'nav, [role="navigation"]');return navs}},
- ()=>{panelCloses++},()=>{sidebarCloses++},()=>{sidebarOpens++},
+ ()=>{panelCloses++},()=>{surfaceSidebarCloses++},()=>{sidebarOpens++},
  fn=>fn(),fn=>fn(),()=>{throw new Error('must not use generic surface selector for plugins')}
 )
 const official=buildSurface([settingNav,upstreamNav])
 official({id:'plugins',tests:['plugins','插件']},()=>{throw new Error('official control should be found')})
 assert.equal(upstreamClicks,1,'exact Plugins global navigation must be activated')
 assert.equal(inventoryClicks,0,'the Built-in plugins inventory must never be selected')
-assert.equal(sidebarCloses,1,'mobile drawer must close after native Plugins navigation')
+assert.equal(surfaceSidebarCloses,1,'mobile drawer must close after native Plugins navigation')
 let missingPanelFailures=0
 const unavailable=buildSurface([settingNav])
 unavailable({id:'plugins',tests:['plugins','插件']},()=>{missingPanelFailures++})
