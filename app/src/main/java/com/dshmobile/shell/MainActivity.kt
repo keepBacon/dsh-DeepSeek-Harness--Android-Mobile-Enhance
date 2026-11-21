@@ -1235,7 +1235,7 @@ class MainActivity : ComponentActivity() {
             #dsh-android-mobile-bar {
               position: fixed;
               inset: 0 0 auto 0;
-              z-index: 1200;
+              z-index: 980;
               height: var(--dsh-mobile-bar);
               padding: 6px max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
               display: grid;
@@ -1317,7 +1317,7 @@ class MainActivity : ComponentActivity() {
             #dsh-android-tools-scrim {
               position: fixed;
               inset: var(--dsh-mobile-bar) 0 0 0;
-              z-index: 1180;
+              z-index: 960;
               background: rgba(0, 0, 0, .24);
               opacity: 0;
               pointer-events: none;
@@ -1326,7 +1326,7 @@ class MainActivity : ComponentActivity() {
 
             #dsh-android-tools-panel {
               position: fixed;
-              z-index: 1190;
+              z-index: 970;
               top: var(--dsh-mobile-bar);
               right: 0;
               bottom: 0;
@@ -1888,7 +1888,11 @@ class MainActivity : ComponentActivity() {
             [data-dsh-mobile-settings-overlay] {
               position: fixed !important;
               inset: 0 !important;
-              z-index: 2147483000 !important;
+              /* Keep Settings below the DSH body-portaled Modal primitive
+                 (z-index: 1000). Its model-discovery picker, credential and
+                 delete-confirmation dialogs must be able to appear above it.
+                 Android chrome itself is deliberately below this layer. */
+              z-index: 990 !important;
               width: 100vw !important;
               height: 100dvh !important;
               max-width: none !important;

@@ -40,6 +40,30 @@ assert.ok(!source.includes('private fun showPluginInstallDialog('),
  'remove the old Android-native plugin installer')
 assert.ok(!source.includes('queueMicrotask(openToolsPanel)'),
  'a missing upstream Plugins control must not open the Android Tools panel')
+// Upstream DSH 0.2.2 has a body-portaled ui-primitives Modal at z-index
+// 1000. Its model discovery picker and confirmation dialogs must not render
+// behind Android's Settings overlay, nor behind shell chrome.
+const androidZIndex=(selector)=>{
+ const marker='            '+selector+' {'
+ const start=source.indexOf(marker)
+ assert.ok(start>=0,'missing Android layer: '+selector)
+ const rule=source.slice(start,source.indexOf('}',start))
+ // Ignore references inside comments: the real declaration comes last.
+ const declarations=[...rule.matchAll(/^\s*z-index:\s*(\d+)/gm)]
+ assert.ok(declarations.length===1,'expected one z-index declaration on '+selector)
+ return Number(declarations[0][1])
+}
+const toolsMaskZ=androidZIndex('#dsh-android-tools-scrim')
+const toolsPanelZ=androidZIndex('#dsh-android-tools-panel')
+const mobileBarZ=androidZIndex('#dsh-android-mobile-bar')
+const settingsZ=androidZIndex('[data-dsh-mobile-settings-overlay]')
+const upstreamModalZ=1000
+assert.ok(toolsMaskZ<toolsPanelZ && toolsPanelZ<mobileBarZ
+ && mobileBarZ<settingsZ && settingsZ<upstreamModalZ,
+ 'Android modal layering must not obscure upstream portaled dialogs')
+assert.ok(!source.includes('z-index: 2147483000 !important'),
+ 'no Android settings overlay may escape upstream modal layering')
+
 assert.ok(source.includes('settingsDialog?.dismiss()'),
  'Android Settings must close before showing the upstream Plugins panel')
 assert.ok(source.includes("if (surface.id === 'plugins')"),

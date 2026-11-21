@@ -318,7 +318,11 @@ must "$BT" 'Resolve the complete ELF NEEDED closure'
 must "$BT" '{ "$readelf_bin" -d "$current" 2>/dev/null || true; }'
 must "$BT" 'copy_link_deps is also called for package-owned shell/Perl wrappers'
 must "$BT" 'libpcre2-8.so missing from embedded runtime'
-must "$MA" 'z-index: 2147483000 !important'
+# The DSH 0.2.2 ModelListEditor opens a separate body-portaled Modal
+# (upstream z-index 1000). A maximal Android Settings overlay obscured it.
+# Keep Android chrome < Settings < upstream dialogs so actions remain visible.
+must "$MA" 'z-index: 990 !important'
+forbid "$MA" 'z-index: 2147483000 !important'
 must "$MA" 'width: min(980px, calc(100dvw - 20px)) !important'
 must "$MA" 'height: min(920px, calc(100dvh - 20px)) !important'
 must "$SKM" 'skill-duplicates-backup/'
