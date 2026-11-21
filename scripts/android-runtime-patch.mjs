@@ -918,46 +918,69 @@ function ensureFsPromisesImport(text, names) {
   return text.slice(0, m.index) + m[1] + middle + m[3] + text.slice(m.index + m[0].length)
 }
 
-// Android shared storage rejects hard links on many devices/ROMs.  The staged
-// session file is on the same filesystem; rename keeps atomic publication.
+// DSH 0.2.2 materializes zstd JSONL session artifacts with link(tmp, final).
+// Android app-UID storage can reject hard links even within one private tree.
+// Preserve the upstream no-replace, synced publication contract: COPYFILE_EXCL
+// on a denied link is safe; rename(tmp, final) is NOT (it overwrites races).
+// This patch is version-scoped to the exact 0.2.2 release-family shape.
 eachPackage('@deepseek-ai/dsh-session-persistence-jsonl', 'lib/index.js', (file) => {
   let txt = read(file)
-  let changed = false
-  if (!txt.includes('DSH Android compat: session link to rename')) {
-    const re = /([ \t]*)await link\(\s*tmp\s*,\s*finalPath\s*\);/
-    const m = re.exec(txt)
-    if (m) {
-      txt = txt.replace(re, `$1// DSH Android compat: session link to rename (shared storage rejects link).\n$1await rename(tmp, finalPath);`)
-      txt = ensureFsPromisesImport(txt, ['rename'])
-      changed = true
-    } else {
-      if (androidStableStorageMandatory) throw new Error(`session materialize anchor changed: ${file}`)
-      warn(`session materialize anchor not present (may be upstream-fixed): ${file}`)
-    }
+  const marker = 'DSH Android compat: exclusive session copy fallback'
+  if (txt.includes(marker)) return 'already'
+  const anchor = 'await link(tmp, finalPath);'
+  const count = txt.split(anchor).length - 1
+  if (count !== 1) throw new Error('session materialize hard-link anchor missing or ambiguous (' + count + '): ' + file)
+  const replacement = `// ${marker}: do not overwrite an existing session.
+      try {
+        await link(tmp, finalPath);
+      } catch (androidLinkError) {
+        if (!(androidLinkError && ["EACCES", "EPERM", "ENOTSUP", "EOPNOTSUPP"].includes(androidLinkError.code))) throw androidLinkError;
+        // COPYFILE_EXCL is 1 in node:fs.constants; unlike rename this refuses
+        // an existing finalPath and preserves cross-process session isolation.
+        await copyFile(tmp, finalPath, 1);
+        // copyFile creates a fresh inode: sync it, not just its parent directory.
+        const androidCopyHandle = await open(finalPath, "r");
+        try { await androidCopyHandle.sync(); }
+        finally { await androidCopyHandle.close(); }
+      }`
+  txt = txt.replace(anchor, replacement)
+  txt = ensureFsPromisesImport(txt, ['copyFile'])
+  // The generated import can be formatted across lines; the syntax checker
+  // below also validates the final module before the APK is assembled.
+  if (!txt.includes('node:fs/promises') || !txt.includes('copyFile')) {
+    throw new Error('session copyFile import not found: ' + file)
   }
-  if (txt.includes('async function publishCurrentExclusive(') && !txt.includes('DSH Android compat: publishCurrentExclusive')) {
-    const old = `\ttry {\n\t\tawait internals.fs.link(staged, currentPath);\n\t} catch (error) {\n\t\t/* v8 ignore else -- a non-collision filesystem error propagates unchanged. */\n\t\tif (isEEXIST(error)) return false;\n\t\t/* v8 ignore next -- the filesystem error is already complete. */\n\t\tthrow error;\n\t}`
-    if (txt.includes(old)) {
-      const repl = `\t// DSH Android compat: publishCurrentExclusive; preserve EEXIST semantics,\n\t// fall back to same-filesystem rename when hard links are forbidden.\n\ttry {\n\t\tawait internals.fs.link(staged, currentPath);\n\t} catch (error) {\n\t\tif (isEEXIST(error)) return false;\n\t\tif (!(error instanceof Error && 'code' in error && (error.code === 'EPERM' || error.code === 'EACCES'))) throw error;\n\t\tlet existed = true;\n\t\ttry { await internals.fs.lstat(currentPath); } catch (probeError) {\n\t\t\tif (!(probeError instanceof Error && 'code' in probeError && probeError.code === 'ENOENT')) throw probeError;\n\t\t\texisted = false;\n\t\t}\n\t\tif (existed) return false;\n\t\tawait rename(staged, currentPath);\n\t}`
-      txt = txt.replace(old, repl)
-      txt = ensureFsPromisesImport(txt, ['rename'])
-      changed = true
-    } else {
-      if (androidStableStorageMandatory) throw new Error(`publishCurrentExclusive anchor changed: ${file}`)
-      warn(`publishCurrentExclusive anchor changed: ${file}`)
-    }
-  }
-  if (androidStableStorageMandatory) {
-    if (!txt.includes('DSH Android compat: session link to rename')) {
-      throw new Error(`session materialize patch missing after rewrite: ${file}`)
-    }
-    if (txt.includes('async function publishCurrentExclusive(') && !txt.includes('DSH Android compat: publishCurrentExclusive')) {
-      throw new Error(`session publishCurrentExclusive patch missing after rewrite: ${file}`)
-    }
-  }
-  if (changed) { write(file, txt); return 'patched' }
-  return txt.includes('DSH Android compat:') ? 'already' : 'no-op'
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
 }, { mandatory: androidStableStorageMandatory })
+
+// The 0.2.2 background generation migrator uses a second hard-link entry
+// point. A failed link can be recovered without weakening competing-writer
+// detection, again using exclusive copy and syncing the resulting inode.
+// Published npm 0.2.2 bundles generation.ts into lib/index.js.
+eachPackage('@deepseek-ai/dsh-session-persistence-jsonl', 'lib/index.js', (file) => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: exclusive migration copy fallback'
+  if (txt.includes(marker)) return 'already'
+  const anchor = 'await internals.fs.link(staged, currentPath);'
+  const count = txt.split(anchor).length - 1
+  if (count !== 1) throw new Error('session migration hard-link anchor missing or ambiguous (' + count + '): ' + file)
+  txt = txt.replace(anchor, `// ${marker}: preserve EEXIST false-result semantics.
+    try {
+      await internals.fs.link(staged, currentPath);
+    } catch (androidLinkError) {
+      if (!(androidLinkError && ["EACCES", "EPERM", "ENOTSUP", "EOPNOTSUPP"].includes(androidLinkError.code))) throw androidLinkError;
+      await copyFile(staged, currentPath, 1);
+      const androidCopyHandle = await fsOpen(currentPath, "r");
+      try { await androidCopyHandle.sync(); }
+      finally { await androidCopyHandle.close(); }
+    }`)
+  txt = ensureFsPromisesImport(txt, ['copyFile'])
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: versionAtLeast(targetVersion, '0.2.0-rc.1') })
 
 // Workspace create-if-absent publication has the same hard-link limitation.
 eachPackage('@deepseek-ai/dsh-fs-local', 'lib/index.js', (file) => {
