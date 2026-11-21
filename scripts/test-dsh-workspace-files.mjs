@@ -82,6 +82,25 @@ try{
  const journals=await projectFileCall('workspace_refactor_recover',{root})
  assert.equal(journals.ok,true)
  assert.equal(journals.transactions.length,0)
+ // Crash during CREATE before a successful ownership record: another actor
+ // creates identical content. Never delete that actor's file on recovery.
+ const otherFile=join(root,'src','other-writer.ts')
+ const otherContent='export const untouched = true\\n'
+ await writeFile(otherFile,otherContent)
+ const otherDir=join(process.env.DSH_WORKSPACE_JOURNAL_DIR,journalHash,'uncertain-create')
+ await mkdir(otherDir,{recursive:true})
+ await writeFile(join(otherDir,'manifest.json'),JSON.stringify({
+  version:1,id:'uncertain-create',root:await (await import('node:fs/promises')).realpath(root),
+  phase:'applying',createdAt:new Date().toISOString(),
+  actions:[{type:'create',from:otherFile,to:null,oldHash:null,afterHash:hash(otherContent),
+    mode:0o600,size:Buffer.byteLength(otherContent),backup:'file-0.bak'}],
+ }))
+ const uncertain=await projectFileCall('workspace_refactor_recover',{root})
+ assert.equal(uncertain.ok,false)
+ assert.equal(uncertain.transactions[0].status,'conflict')
+ assert.equal(await readFile(otherFile,'utf8'),otherContent)
+ await rm(otherDir,{recursive:true,force:true})
+
  await writeFile(join(root,'pyproject.toml'),'[build-system]\nrequires=[]\n')
  const invalidProject=await projectFileCall('workspace_refactor',{root,system:'python',verify:true,runTests:false,
   timeoutMs:15000,operations:[{type:'create',path:'src/invalid.py',content:'def invalid(:\n'}]})
