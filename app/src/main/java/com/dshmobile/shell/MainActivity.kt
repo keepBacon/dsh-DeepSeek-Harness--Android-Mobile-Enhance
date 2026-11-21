@@ -535,39 +535,57 @@ class MainActivity : ComponentActivity() {
       override fun onCreateWindow(
         view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message,
       ): Boolean {
-        // Electron sends target=_blank HTTP(S) links to the OS browser. Mirror
-        // that behavior instead of silently dropping them in WebView.
+        // target=_blank must be a separate browsing context. Never navigate
+        // the main WebView, which may hold unsaved models, plugin edits or
+        // composer text. A same-origin popup retains the shared WebView cookie
+        // store; a system browser would not have the DSH login cookie.
+        val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
         val popup = WebView(this@MainActivity)
-        popup.settings.javaScriptEnabled = true
-        var routed = false
+        popup.settings.apply {
+          javaScriptEnabled = true
+          domStorageEnabled = true
+          allowFileAccess = false
+          mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        }
+        // Deliberately no addJavascriptInterface: popup windows never receive
+        // privileged Android bridge methods or its capability token.
+        val dialog = android.app.AlertDialog.Builder(this@MainActivity)
+          .setTitle("DSH")
+          .setView(popup)
+          .setNegativeButton("关闭", null)
+          .create()
+        var externalRouted = false
         popup.webViewClient = object : WebViewClient() {
-          private fun route(url: String): Boolean {
-            if (url == "about:blank") return false
-            if (routed) return true
-            routed = true
-            // target=_blank is a separate browsing context. Never replace
-            // the main DSH WebView: doing so destroys unsaved model drafts,
-            // plugin forms, composer text and pending session UI state.
-            // Mirrors upstream Electron's external-browser policy. No
-            // privileged Android bridge is installed into this popup.
+          private fun rejectOrOpenExternal(url: String): Boolean {
+            if (url == "about:blank" || isEngineSource(url)) return false
+            if (externalRouted) return true
+            externalRouted = true
             val target = Uri.parse(url)
             if (target.scheme.equals("http", true) || target.scheme.equals("https", true)) {
               openInExternalBrowser(target)
             } else {
               Log.w("dsh-web", "Blocked popup navigation with non-HTTP(S) scheme")
             }
-            try { popup.destroy() } catch (_: Throwable) {}
+            dialog.dismiss()
             return true
           }
-          override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean = route(request.url.toString())
+          override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean =
+            rejectOrOpenExternal(request.url.toString())
           override fun onPageStarted(v: WebView, url: String, favicon: android.graphics.Bitmap?) {
             super.onPageStarted(v, url, favicon)
-            if (url != "about:blank") route(url)
+            rejectOrOpenExternal(url)
           }
         }
-        val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+        dialog.setOnDismissListener {
+          try { popup.stopLoading(); popup.destroy() } catch (_: Throwable) {}
+        }
         transport.webView = popup
         resultMsg.sendToTarget()
+        dialog.show()
+        dialog.window?.setLayout(
+          android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+          (resources.displayMetrics.heightPixels * 0.85f).toInt(),
+        )
         return true
       }
 
