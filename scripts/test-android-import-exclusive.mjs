@@ -17,7 +17,7 @@ assert.ok(block.includes('java.nio.file.StandardOpenOption.CREATE_NEW'))
 assert.ok(block.includes('java.nio.channels.FileChannel.open(candidate.toPath()'),
   'reserve/open must be a single exclusive operation')
 assert.ok(block.includes('channel.force(true)'),'copied content must be synced')
-assert.ok(!block.includes('candidate.createNewFile() continue'),
+assert.ok(!block.includes('if (!candidate.createNewFile())'),
   'reserve + reopen race must not be the active fallback')
 assert.ok(block.includes('if (created) candidate.delete()'),
   'failed copies may only remove this operation’s reserved candidate')
