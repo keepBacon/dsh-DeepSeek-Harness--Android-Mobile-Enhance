@@ -38,8 +38,8 @@ export async function publishCurrentExclusive(staged,currentPath) {
   }
   return true;
 }`
-  await writeFile(join(pkg,'lib/index.js'),index)
-  await writeFile(join(pkg,'lib/generation.js'),generation)
+  // The published 0.2.2 npm bundle places generation in lib/index.js.
+  await writeFile(join(pkg,'lib/index.js'),index + '\\n' + generation)
   const patch=()=>spawnSync(process.execPath,['scripts/android-runtime-patch.mjs',prefix],{
     cwd:new URL('..',import.meta.url).pathname,
     env:{...process.env,DSH_TARGET_VERSION:'0.2.2-rc.5',DSH_COMPAT_ONLY_PACKAGES:'@deepseek-ai/dsh-session-persistence-jsonl'},
@@ -52,12 +52,12 @@ export async function publishCurrentExclusive(staged,currentPath) {
   assert.equal(statuses.length,2)
   assert.ok(statuses.every(x=>x.status==='patched'))
   assert.match(await readFile(join(pkg,'lib/index.js'),'utf8'),/copyFile\(tmp, finalPath, 1\)/)
-  assert.match(await readFile(join(pkg,'lib/generation.js'),'utf8'),/copyFile\(staged, currentPath, 1\)/)
+  assert.match(await readFile(join(pkg,'lib/index.js'),'utf8'),/copyFile\(staged, currentPath, 1\)/)
   const again=patch()
   assert.equal(again.status,0,'idempotent patch failed: '+again.stderr)
   assert.ok(JSON.parse(again.stdout).patches.filter(x=>x.name==='@deepseek-ai/dsh-session-persistence-jsonl').every(x=>x.status==='already'))
   const {materialize}=await import(pathToFileURL(join(pkg,'lib/index.js')).href)
-  const {publishCurrentExclusive}=await import(pathToFileURL(join(pkg,'lib/generation.js')).href)
+  const {publishCurrentExclusive}=await import(pathToFileURL(join(pkg,'lib/index.js')).href)
   const tmp=join(prefix,'new.tmp'),target=join(prefix,'session.v4.jsonl.zstd')
   await writeFile(tmp,'session data')
   await materialize(tmp,target)
