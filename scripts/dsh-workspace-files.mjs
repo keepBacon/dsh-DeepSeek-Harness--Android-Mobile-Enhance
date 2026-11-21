@@ -2,7 +2,8 @@
 // Only regular files inside the explicit project root are eligible. Existing
 // source-text edits continue to use code_edit_verify and its journal.
 import {createHash,randomBytes} from 'node:crypto'
-import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,link,open} from 'node:fs/promises'
+import {mkdir,readFile,writeFile,rename,rm,readdir,lstat,realpath,link,open,copyFile} from 'node:fs/promises'
+import {constants as fsConstants} from 'node:fs'
 import {resolve,join,dirname,basename,sep,isAbsolute,relative} from 'node:path'
 import {homedir} from 'node:os'
 import {acquirePathLocks} from './dsh-code-engine-journal.mjs'
@@ -19,6 +20,24 @@ async function syncDir(dir){
   // Some Android filesystems do not allow opening directories as FDs.
   if(!['EINVAL','EISDIR','EPERM','EACCES','EOPNOTSUPP'].includes(e.code))throw e
  }finally{await fd?.close()}
+}
+// Android FUSE and several shared-storage mounts reject hard links (EACCES).
+// The original hard-link publication remains the fast/atomic path; only a
+// verified unsupported-link errno permits an EXCLUSIVE copy fallback.
+// Unlike rename(), COPYFILE_EXCL refuses a destination created by another
+// app/process since the last transaction check and never overwrites its data.
+const deniedHardLink=new Set(['EACCES','EPERM','ENOTSUP','EOPNOTSUPP','EXDEV','ENOSYS'])
+export async function publishWorkspaceCreateExclusive(staged,destination,linkFile=link){
+ try{
+  await linkFile(staged,destination)
+  return 'link'
+ }catch(e){
+  if(!deniedHardLink.has(e?.code))throw e
+ }
+ await copyFile(staged,destination,fsConstants.COPYFILE_EXCL)
+ const handle=await open(destination,'r')
+ try{await handle.sync()}finally{await handle.close()}
+ return 'exclusive-copy'
 }
 const obj=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false})
 const str={type:'string'}
@@ -132,9 +151,9 @@ async function apply(row){
   try{
    await durableWrite(tmp,row.content,0o600)
    if(await existing(row.from))throw Error('concurrent create target: '+row.from)
-   // link() is exclusive: unlike rename(), it cannot overwrite a
-   // concurrently-created target between the last check and commit.
-   await link(tmp,row.from)
+   // Android shared storage may deny link(). The fallback is COPYFILE_EXCL,
+   // never an unchecked rename that could replace another writer's file.
+   await publishWorkspaceCreateExclusive(tmp,row.from)
    await syncDir(dirname(row.from))
   }finally{await rm(tmp,{force:true}).catch(()=>{})}
  }
