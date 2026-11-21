@@ -2608,7 +2608,22 @@ class MainActivity : ComponentActivity() {
         const openDshSurface = (surface, onFailure) => {
           if (!surface) return;
           const tryOpen = () => {
-            const target = findDshSurfaceControl(surface.tests || []);
+            let target = null;
+            if (surface.id === 'plugins') {
+              // "Built-in plugins" in Settings is only an inventory. Never
+              // select it, or a Tools-panel shortcut, as the Plugins page.
+              const globalNav = Array.from(document.querySelectorAll('nav, [role="navigation"]'))
+                .find(nav => ['global panels', 'global panel', '全局面板']
+                  .includes((nav.getAttribute('aria-label') || '').trim().toLowerCase()));
+              if (globalNav) {
+                target = Array.from(globalNav.querySelectorAll(
+                  'button, [role="tab"], [role="treeitem"], a[href]'
+                )).find(item => [item.getAttribute('aria-label'), item.getAttribute('title'), item.textContent]
+                  .some(label => ['plugins', '插件'].includes((label || '').trim().toLowerCase()))) || null;
+              }
+            } else {
+              target = findDshSurfaceControl(surface.tests || []);
+            }
             if (!target) return false;
             closeToolsPanel();
             try {
