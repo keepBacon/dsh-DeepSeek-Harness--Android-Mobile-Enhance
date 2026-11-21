@@ -67,4 +67,61 @@ assert.equal(found.nav,nav)
 assert.equal(found.header,header)
 assert.equal(found.content,options)
 assert.equal(found.navButtons.length,4)
+// Exercise the actual click route: Settings > Built-in plugins has a
+// dedicated control that closes the modal and selects the *separate* Plugins
+// page, not the settings inventory, and never duplicates the control.
+const configStart=source.indexOf('        const openOfficialPluginConfig = (parts) => {')
+const configEnd=source.indexOf('        let skillSettingsActive = false;',configStart)
+assert.ok(configStart>=0 && configEnd>configStart,'official plugin route missing')
+let navClicks=0,closeClicks=0,toolsOpens=0,created=0
+let link=null
+const close={click(){closeClicks++},before(node){link=node}}
+const pluginNav={
+ textContent:'插件', getAttribute(key){return key==='aria-label'?'插件':null},
+ closest(){return null},click(){navClicks++}
+}
+const headerNode={
+ querySelector(sel){
+  if(sel==='[data-dsh-mobile-plugin-config-link]')return link
+  if(sel===':scope > button:last-of-type')return close
+  return null
+ },appendChild(node){link=node}
+}
+const selectedPlugin={
+ textContent:'内置插件',
+ getAttribute(key){return key==='aria-current'?'true':null},
+ hasAttribute(key){return key==='aria-current'}
+}
+const pluginParts={header:headerNode,navButtons:[selectedPlugin]}
+let availableControls=[pluginNav]
+const dom={
+ querySelectorAll(){return availableControls},
+ documentElement:{lang:'zh'},
+ createElement(){
+  created++
+  return {
+   type:'',textContent:'',
+   setAttribute(){},addEventListener(type,callback){this.onClick=callback},
+   remove(){link=null}
+  }
+ }
+}
+const config=new Function('document','TOOLS_PANEL_ID','openToolsPanel',
+ 'closeSidebar','queueMicrotask','findSettingsParts','navigator',source.slice(configStart,configEnd)+
+ 'return {openOfficialPluginConfig,syncOfficialPluginConfigLink}')
+let sidebarCloses=0
+const handlers=config(dom,'dsh-tools',()=>{toolsOpens++},()=>{sidebarCloses++},
+ callback=>callback(),()=>pluginParts,{language:'zh-CN'})
+handlers.syncOfficialPluginConfigLink(pluginParts)
+handlers.syncOfficialPluginConfigLink(pluginParts)
+assert.equal(created,1,'one navigation control per dialog')
+assert.equal(link.textContent,'插件配置')
+link.onClick()
+assert.equal(closeClicks,1)
+assert.equal(navClicks,1)
+assert.equal(sidebarCloses,1)
+availableControls=[]
+handlers.openOfficialPluginConfig(pluginParts)
+assert.equal(toolsOpens,1,'missing sidebar must open visible Tools fallback')
+
 console.log('[DSH] DSH 0.2.2 mobile settings: four-seat layout and Plugins configuration navigation OK')
