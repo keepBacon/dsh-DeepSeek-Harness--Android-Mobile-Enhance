@@ -150,6 +150,7 @@ jobs:
           node scripts/test-android-model-bash-bridge.mjs
           node scripts/test-android-model-shell-noexec-fix.mjs
           node scripts/test-android-settings-four-seat.mjs
+          node scripts/test-android-workspace-sync.mjs
           node scripts/test-android-foundation-bugs.mjs
           python3 scripts/test-android-git-gh-runtime.py
           node scripts/test-android-plugin-git-spawn.mjs
