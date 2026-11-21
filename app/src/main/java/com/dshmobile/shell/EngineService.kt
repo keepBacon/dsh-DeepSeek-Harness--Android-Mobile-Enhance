@@ -82,7 +82,8 @@ class EngineService : Service() {
           EngineManager.endMaintenance()
         }
       } finally {
-        if (!stopRequested.get()) clearProbeFailures()
+        // Keep the degraded Host warning until a subsequent verified probe
+        // succeeds. A failed manual stop or failed relaunch is not recovery.
         restartInFlight.set(false)
       }
     }
@@ -191,7 +192,8 @@ class EngineService : Service() {
       exec.scheduleWithFixedDelay({
         try {
           if (stopRequested.get() || EngineManager.isMaintenanceMode() || restartInFlight.get()) {
-            clearProbeFailures()
+            // A pending restart does not prove the Host recovered. Preserve
+            // the actionable warning until a live Host responds again.
             return@scheduleWithFixedDelay
           }
           val generation = lifecycleGeneration.get()
@@ -209,6 +211,7 @@ class EngineService : Service() {
           // tool execution or an overloaded Gateway. Do not spawn a duplicate
           // Host or kill active sessions simply because HTTP timed out.
           if (engineManager.isEngineProcessAlive()) {
+            if (stopRequested.get() || generation != lifecycleGeneration.get()) return@scheduleWithFixedDelay
             markUnresponsiveHost()
             // Avoid logging the possibly sensitive HTTP error body every 5 s.
             return@scheduleWithFixedDelay
