@@ -48,7 +48,7 @@ const androidZIndex=(selector)=>{
  const start=source.indexOf(marker)
  assert.ok(start>=0,'missing Android layer: '+selector)
  const rule=source.slice(start,source.indexOf('}',start))
- const matched=/z-index:\\s*(\\d+)/.exec(rule)
+ const matched=/z-index:\s*(\d+)/.exec(rule)
  assert.ok(matched,'missing z-index on '+selector)
  return Number(matched[1])
 }
