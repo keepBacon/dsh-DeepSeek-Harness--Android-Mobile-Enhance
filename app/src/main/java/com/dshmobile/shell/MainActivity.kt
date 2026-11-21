@@ -145,6 +145,46 @@ class MainActivity : ComponentActivity() {
    * The target is snapshotted before Android's picker opens. Selecting a phone
    * file never creates, replaces, or switches the workspace itself.
    */
+  /**
+   * Dedicated SAF picker for external attachment workspaces, independent of
+   * the DSH Host session cwd and the Host's own directory picker callback.
+   */
+  private var pendingExternalChooserAccepts: Array<String>? = null
+  private var pendingExternalChooserMultiple = false
+  private val externalFileWorkspacePicker =
+    registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+      val accepts = pendingExternalChooserAccepts
+      val multiple = pendingExternalChooserMultiple
+      pendingExternalChooserAccepts = null
+      pendingExternalChooserMultiple = false
+      if (filePathCallback == null || accepts == null) return@registerForActivityResult
+      if (uri == null) {
+        // The system picker was dismissed: settle the browser's upload request.
+        finishWorkspaceFileChooser(null)
+        return@registerForActivityResult
+      }
+      val selected = AndroidBridge.resolvePickedPath(uri)
+      val root = try {
+        java.io.File(selected).canonicalFile.takeIf { selected.startsWith("/") &&
+          it.isDirectory && it.canRead() && it.canWrite() &&
+          !java.nio.file.Files.isSymbolicLink(java.io.File(selected).toPath()) }
+      } catch (_: Throwable) { null }
+      if (root == null || !isExternalFileWorkspace(root)) {
+        finishWorkspaceFileChooser(null)
+        showSimpleMessage("外部工作区不可访问",
+          "所选目录必须是应用可直接读写的外部存储目录。请授予文件访问权限后重试；不会自动改用私有 HOME。")
+        return@registerForActivityResult
+      }
+      try {
+        contentResolver.takePersistableUriPermission(uri,
+          Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+      } catch (_: Throwable) {
+        // Raw filesystem access was independently verified above.
+      }
+      ShellState.rememberExternalFileChooserDirectory(this, root.absolutePath)
+      openWorkspaceFileSelection(root, accepts, multiple)
+    }
+
   private val workspaceFilePicker =
     registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
       val workspace = pendingWorkspaceImportPath
@@ -525,8 +565,8 @@ class MainActivity : ComponentActivity() {
       override fun onShowFileChooser(
         webView: WebView, filePathCallback: ValueCallback<Array<Uri>>, fileChooserParams: FileChooserParams,
       ): Boolean {
-        // Never open Android's global file provider for model/composer input.
-        // The currently active DSH Workspace is the sole file browse domain.
+        // The upload chooser offers separately persisted external and private
+        // file workspaces; the Host session cwd must not be silently substituted.
         this@MainActivity.filePathCallback?.onReceiveValue(null)
         this@MainActivity.filePathCallback = filePathCallback
         val accepts = fileChooserParams.acceptTypes.filter { it.isNotBlank() }.toTypedArray()
@@ -5490,25 +5530,103 @@ class MainActivity : ComponentActivity() {
   }
 
   /**
-   * File chooser used by WebView <input type=file>. The browser is rooted at
-   * the active DSH Workspace and never exposes Android's global filesystem.
+   * File input has two explicit workspaces. Neither is inferred from DSH_HOME
+   * or the currently active session: attachment browsing may use a user-picked
+   * shared directory, even when the Host's cwd remains private.
    */
   private fun showWorkspaceFileChooser(accepts: Array<String>, allowMultiple: Boolean) {
-    val callback = filePathCallback ?: return
-    val root = currentWorkspaceRoot()
-    if (root == null) {
-      filePathCallback = null
-      callback.onReceiveValue(null)
-      showSimpleMessage("没有当前工作目录", "请先在 DSH 中打开工作区，再选择文件。")
+    if (filePathCallback == null) return
+    val privateRoot = java.io.File(filesDir, "workspaces")
+    val preferredExternal = externalFileWorkspaceRoot()
+    val options = mutableListOf("应用私有存储")
+    if (preferredExternal != null) options.add("用户外部存储 · ${preferredExternal.absolutePath}")
+    options.add("选择外部存储目录…")
+    android.app.AlertDialog.Builder(this)
+      .setTitle("添加文件 · 选择工作区")
+      .setItems(options.toTypedArray()) { _, which ->
+        when (options[which]) {
+          "应用私有存储" -> {
+            if (!privateRoot.isDirectory && !privateRoot.mkdirs()) {
+              finishWorkspaceFileChooser(null)
+              showSimpleMessage("私有工作区不可用", "无法创建应用私有工作区。")
+            } else {
+              openWorkspaceFileSelection(privateRoot.canonicalFile, accepts, allowMultiple)
+            }
+          }
+          "选择外部存储目录…" -> chooseExternalFileWorkspace(accepts, allowMultiple)
+          else -> {
+            if (preferredExternal != null) {
+              openWorkspaceFileSelection(preferredExternal, accepts, allowMultiple)
+            } else {
+              chooseExternalFileWorkspace(accepts, allowMultiple)
+            }
+          }
+        }
+      }
+      .setNegativeButton("取消") { _, _ -> finishWorkspaceFileChooser(null) }
+      .setOnCancelListener { finishWorkspaceFileChooser(null) }
+      .show()
+  }
+
+  private fun isExternalFileWorkspace(root: java.io.File): Boolean {
+    // The external attachment workspace must be physically outside the app's
+    // private HOME; no selection may implicitly rewrite a Host session cwd.
+    val privatePath = filesDir.canonicalPath
+    val externalPath = android.os.Environment.getExternalStorageDirectory().canonicalPath
+    return (root.path == externalPath || root.path.startsWith(externalPath + java.io.File.separator)) &&
+      root.path != privatePath && !root.path.startsWith(privatePath + java.io.File.separator)
+  }
+
+  private fun externalFileWorkspaceRoot(): java.io.File? {
+    val saved = ShellState.externalFileChooserDirectory(this) ?: return null
+    return try {
+      val root = java.io.File(saved).canonicalFile
+      root.takeIf { it.isDirectory && it.canRead() && it.canWrite() &&
+        isExternalFileWorkspace(it) && !isWorkspaceSymlink(java.io.File(saved)) }
+    } catch (_: Throwable) { null }
+  }
+
+  private fun chooseExternalFileWorkspace(accepts: Array<String>, allowMultiple: Boolean) {
+    if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+      finishWorkspaceFileChooser(null)
+      android.app.AlertDialog.Builder(this)
+        .setTitle("外部存储权限未授权")
+        .setMessage("DSH 需要直接访问用户选择的真实路径（例如 Download/work 或 Delta）。授权后重新点击“添加文件”选择外部目录。不会转为私有存储。")
+        .setNegativeButton("取消", null)
+        .setPositiveButton("授权文件访问") { _, _ -> requestWorkspaceStorageAccess() }
+        .show()
       return
     }
+    if (Build.VERSION.SDK_INT < 30 && !hasLegacyStoragePermission()) {
+      finishWorkspaceFileChooser(null)
+      requestLegacyStoragePermission()
+      showSimpleMessage("需要存储权限", "授权后请重新添加文件并选择外部存储。")
+      return
+    }
+    pendingExternalChooserAccepts = accepts
+    pendingExternalChooserMultiple = allowMultiple
+    try {
+      externalFileWorkspacePicker.launch(null)
+    } catch (t: Throwable) {
+      pendingExternalChooserAccepts = null
+      finishWorkspaceFileChooser(null)
+      showSimpleMessage("选择外部目录失败", t.message ?: t.javaClass.simpleName)
+    }
+  }
 
+  private fun finishWorkspaceFileChooser(files: Array<Uri>?) {
+    val callback = filePathCallback ?: return
+    filePathCallback = null
+    callback.onReceiveValue(files)
+  }
+
+  private fun openWorkspaceFileSelection(
+    root: java.io.File, accepts: Array<String>, allowMultiple: Boolean,
+  ) {
+    if (filePathCallback == null) return
     showWorkspaceFileSelection(root, accepts, allowMultiple) { files ->
-      val cb = filePathCallback
-      filePathCallback = null
-      if (cb == null) return@showWorkspaceFileSelection
       if (files.isNullOrEmpty()) {
-        cb.onReceiveValue(null)
+        finishWorkspaceFileChooser(null)
         return@showWorkspaceFileSelection
       }
       val uris = files.mapNotNull { file ->
@@ -5516,11 +5634,9 @@ class MainActivity : ComponentActivity() {
           val canonical = file.canonicalFile
           if (!canonical.isFile || isWorkspaceSymlink(file) || !isInsideWorkspace(root, canonical)) null
           else FileProvider.getUriForFile(this, "$packageName.workspace-files", canonical)
-        } catch (_: Throwable) {
-          null
-        }
+        } catch (_: Throwable) { null }
       }
-      cb.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
+      finishWorkspaceFileChooser(if (uris.isEmpty()) null else uris.toTypedArray())
     }
   }
 
