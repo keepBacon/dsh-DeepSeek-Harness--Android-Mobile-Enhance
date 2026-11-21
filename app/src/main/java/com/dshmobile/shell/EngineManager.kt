@@ -2924,15 +2924,34 @@ class EngineManager(private val context: Context, private val pickToken: String?
     // Resolve the release-family tree once for all plugin dependencies.
     // Repeated walkTopDown() scans would delay Android Web Host startup.
     val runtimeClientPresence = mutableMapOf<String, Boolean>()
-    for (name in listOf("dsh-zcode-startplan", "dsh-providers-hub")) {
+    val priorityPlugins = listOf("dsh-zcode-startplan", "dsh-providers-hub")
+    // Inspect installed Web-profile dependencies, not just two known plugin
+    // names. Backend-only libraries do not need a Web client and are skipped.
+    // Bound the metadata scan so an oversized manifest cannot stall boot.
+    val otherPlugins = try {
+      val manifest = profileManifest(profile)
+      val dependencies = JSONObject(manifest.readText()).optJSONObject("dependencies")
+      dependencies?.keys()?.asSequence()
+        ?.filter { it !in priorityPlugins && !it.startsWith("@deepseek-ai/") }
+        ?.take(96)?.toList().orEmpty()
+    } catch (_: Throwable) { emptyList() }
+    for (name in (priorityPlugins + otherPlugins).distinct()) {
       val packageFile = installedPackageManifest(name, profile)
       if (!packageFile.isFile) continue
       try {
         val root = JSONObject(packageFile.readText())
         val parent = packageFile.parentFile ?: continue
         val client = root.optJSONObject("dsh")?.optJSONObject("client")
-        if (client == null || client.optString("platform") != "web") {
-          warnings += "$name: 未声明 DSH Web client，插件配置页面无法注册"
+        if (client == null) {
+          // Most libraries and headless bundles intentionally do not ship a
+          // browser half. ZCode/Providers Hub are explicitly expected to
+          // expose account configuration in the official Plugins panel.
+          if (name in priorityPlugins)
+            warnings += "$name: 未声明 DSH Web client，插件配置页面无法注册"
+          continue
+        }
+        if (client.optString("platform") != "web") {
+          warnings += "$name: DSH client 不是 Web 平台，Android Plugins 页面无法加载"
           continue
         }
         val exports = root.optJSONObject("exports")
