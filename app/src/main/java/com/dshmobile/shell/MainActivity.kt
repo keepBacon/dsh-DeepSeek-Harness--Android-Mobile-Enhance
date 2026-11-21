@@ -728,6 +728,7 @@ class MainActivity : ComponentActivity() {
   /** App-only settings opened from the gear icon in the top navigation bar. */
   private fun showAppSettings() {
     val density = resources.displayMetrics.density
+    var settingsDialog: android.app.AlertDialog? = null
     val wrap = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
       setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), 0)
@@ -783,7 +784,12 @@ class MainActivity : ComponentActivity() {
     })
     wrap.addView(Button(this).apply {
       text = "插件（DSH 官方页面）"
-      setOnClickListener { openOfficialPluginsPage() }
+      setOnClickListener {
+        // An Android AlertDialog otherwise covers the WebView after the
+        // React Plugins panel has opened. Leave Settings before navigating.
+        settingsDialog?.dismiss()
+        openOfficialPluginsPage()
+      }
     })
     wrap.addView(Button(this).apply {
       text = "导入 Skill（ZIP / SKILL.md）"
@@ -1039,7 +1045,7 @@ class MainActivity : ComponentActivity() {
       addView(wrap)
     }
 
-    android.app.AlertDialog.Builder(this)
+    settingsDialog = android.app.AlertDialog.Builder(this)
       .setTitle("应用设置")
       .setIcon(android.R.drawable.ic_menu_preferences)
       .setView(scroll)
