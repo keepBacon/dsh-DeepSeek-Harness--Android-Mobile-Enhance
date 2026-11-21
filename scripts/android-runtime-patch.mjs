@@ -1202,7 +1202,8 @@ eachPackage('@deepseek-ai/dsh-attachment-local', 'lib/index.js', (file) => {
   }
   // If current upstream still publishes the staged object via hard link, make
   // EPERM/EACCES recoverable without weakening EEXIST integrity checks.
-  if (!txt.includes('DSH Android compat: attachment staged rename')) {
+  if (!versionAtLeast(targetVersion, '0.2.0-rc.1') &&
+      !txt.includes('DSH Android compat: attachment staged rename')) {
     const re = /await link\(staged\.path, target\);/
     if (re.test(txt)) {
       txt = txt.replace(re, `try {\n\t\t\tawait link(staged.path, target);\n\t\t} catch (androidLinkError) {\n\t\t\tif (!(androidLinkError instanceof Error && 'code' in androidLinkError && (androidLinkError.code === 'EPERM' || androidLinkError.code === 'EACCES'))) throw androidLinkError;\n\t\t\t// DSH Android compat: attachment staged rename.\n\t\t\tawait rename(staged.path, target);\n\t\t}`)
@@ -1215,7 +1216,9 @@ eachPackage('@deepseek-ai/dsh-attachment-local', 'lib/index.js', (file) => {
   }
   // Immutable aliases cannot rename the content-addressed source.  On Android
   // copy it exclusively instead, preserving the original object.
-  if (txt.includes('async function publishImmutableAlias(') && !txt.includes('DSH Android compat: publishImmutableAlias')) {
+  if (!versionAtLeast(targetVersion, '0.2.0-rc.1') &&
+      txt.includes('async function publishImmutableAlias(') &&
+      !txt.includes('DSH Android compat: publishImmutableAlias')) {
     const anchor = `\t\t\t/* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */\n\t\t\tif (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;\n\t\t\tif (await digestFile(target) !== sha256) throw new AttachmentError("Stored attachment failed integrity verification.", "ATTACHMENT_CORRUPT");`
     if (txt.includes(anchor)) {
       const repl = `\t\t\t// DSH Android compat: publishImmutableAlias; hard links may be forbidden.\n\t\t\tif (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {\n\t\t\t\ttry { await copyFile(source, target, constants.COPYFILE_EXCL); } catch (copyError) {\n\t\t\t\t\tif (!(copyError instanceof Error && "code" in copyError && copyError.code === "EEXIST")) throw copyError;\n\t\t\t\t}\n\t\t\t} else if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;\n\t\t\tif (await digestFile(target) !== sha256) throw new AttachmentError("Stored attachment failed integrity verification.", "ATTACHMENT_CORRUPT");`
