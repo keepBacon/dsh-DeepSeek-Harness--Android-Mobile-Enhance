@@ -54,7 +54,6 @@ class EngineService : Service() {
   }
 
   private fun restartOnUserRequest(generation: Long) {
-    if (stopRequested.get() || !restartInFlight.compareAndSet(false, true)) return
     lifecycleExecutor.execute {
       try {
         if (stopRequested.get() || lifecycleGeneration.get() != generation) return@execute
@@ -133,8 +132,10 @@ class EngineService : Service() {
     if (intent?.action == ACTION_RESTART) {
       // STOP wins if a restart notification is delivered during teardown.
       if (stopRequested.get()) return START_NOT_STICKY
-      val generation = lifecycleGeneration.incrementAndGet()
-      restartOnUserRequest(generation)
+      if (restartInFlight.compareAndSet(false, true)) {
+        val generation = lifecycleGeneration.incrementAndGet()
+        restartOnUserRequest(generation)
+      }
       return START_STICKY
     }
     stopRequested.set(false)
@@ -215,7 +216,15 @@ class EngineService : Service() {
           clearProbeFailures()
           if (!stopRequested.get() && generation == lifecycleGeneration.get() &&
               !EngineManager.isMaintenanceMode() && !restartInFlight.get()) {
-            engineManager.startEngine(runtimeAlreadyChecked = true)
+            // Queue behind an in-flight lifecycle action; never start a Host
+            // directly on the independent watchdog executor.
+            lifecycleExecutor.execute {
+              if (!stopRequested.get() && generation == lifecycleGeneration.get() &&
+                  !EngineManager.isMaintenanceMode() && !restartInFlight.get() &&
+                  !engineManager.isEngineProcessAlive()) {
+                engineManager.startEngine(runtimeAlreadyChecked = true)
+              }
+            }
           }
         } catch (_: Throwable) {
         }
