@@ -12,7 +12,7 @@ function between(start, end) {
 }
 const onStart = between('  override fun onStartCommand(', '  override fun onBind(')
 const stop = between('    if (intent?.action == ACTION_STOP) {', '    if (intent?.action == ACTION_RESTART) {')
-const ensure = between('  private fun ensureEngine() {', '  /**\n   * Always arm the watchdog')
+const ensure = between('  private fun ensureEngine(generation: Long) {', '  /**\n   * Always arm the watchdog')
 const watchdog = between('  private fun armWatchdog() {', '  private fun buildNotification(')
 assert.ok(stop.includes('stopRequested.set(true)'))
 assert.ok(stop.includes('lifecycleExecutor.execute {'))
