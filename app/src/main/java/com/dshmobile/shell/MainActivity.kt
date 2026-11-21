@@ -3329,9 +3329,12 @@ class MainActivity : ComponentActivity() {
             return labels.some(label => label === '插件' || label === 'plugins');
           });
           if (!target) {
-            // The default mobile sidebar can hide the Plugins navigation.
-            // Fail visibly instead of silently returning to an empty panel.
-            openToolsPanel();
+            // A deployment without a visible sidebar plugin control still
+            // has the Android Tools surface picker. Close the modal first:
+            // its overlay is intentionally above the mobile Tools panel.
+            const close = parts.header.querySelector(':scope > button:last-of-type');
+            if (close) close.click();
+            queueMicrotask(openToolsPanel);
             return false;
           }
           const close = parts.header.querySelector(':scope > button:last-of-type');
