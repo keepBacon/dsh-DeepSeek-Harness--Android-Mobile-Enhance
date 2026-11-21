@@ -23,11 +23,11 @@ for(const token of [
  "syncOfficialPluginConfigLink(parts)",
  "const current = findSettingsParts()",
  "queueMicrotask(() => target.click())",
- "queueMicrotask(openToolsPanel)",
+ "queueMicrotask(() => openDshSurface(",
  "parts.header.querySelector(':scope > button:last-of-type')",
  "content.scrollTop = 0",
  "modal.dataset.dshMobileSection !== section",
- "label === '插件' || label === 'plugins'",
+ "const globalNav = Array.from(document.querySelectorAll(",
  "'内置插件'", "'Built-in plugins'"
 ]) must(token,'missing 0.2.2 settings contract: '+token)
 assert.ok(!source.includes("const header = content.firstElementChild;"),
@@ -73,7 +73,7 @@ assert.equal(found.navButtons.length,labels.length)
 const configStart=source.indexOf('        const openOfficialPluginConfig = (parts) => {')
 const configEnd=source.indexOf('        let skillSettingsActive = false;',configStart)
 assert.ok(configStart>=0 && configEnd>configStart,'official plugin route missing')
-let navClicks=0,closeClicks=0,toolsOpens=0,created=0
+let navClicks=0,closeClicks=0,toolsOpens=0,created=0,routeFallbacks=0
 let link=null
 const close={click(){closeClicks++},before(node){link=node}}
 const pluginNav={
@@ -94,8 +94,12 @@ const selectedPlugin={
 }
 const pluginParts={header:headerNode,navButtons:[selectedPlugin]}
 let availableControls=[pluginNav]
+const globalNav={
+ getAttribute(key){return key==='aria-label'?'Global panels':null},
+ contains(node){return node===pluginNav}
+}
 const dom={
- querySelectorAll(){return availableControls},
+ querySelectorAll(sel){return sel==='nav, [role="navigation"]'?[globalNav]:availableControls},
  documentElement:{lang:'zh'},
  createElement(){
   created++
@@ -107,11 +111,12 @@ const dom={
  }
 }
 const config=new Function('document','TOOLS_PANEL_ID','openToolsPanel',
- 'closeSidebar','queueMicrotask','findSettingsParts','navigator',source.slice(configStart,configEnd)+
+ 'closeSidebar','queueMicrotask','findSettingsParts','navigator','openDshSurface','DSH_SURFACE_DEFS','window',source.slice(configStart,configEnd)+
  'return {openOfficialPluginConfig,syncOfficialPluginConfigLink}')
 let sidebarCloses=0
 const handlers=config(dom,'dsh-tools',()=>{toolsOpens++},()=>{sidebarCloses++},
- callback=>callback(),()=>pluginParts,{language:'zh-CN'})
+ callback=>callback(),()=>pluginParts,{language:'zh-CN'},
+ surface=>{assert.equal(surface.id,'plugins');routeFallbacks++},[{id:'plugins'}],{alert:()=>{throw new Error('missing native plugin page')}})
 handlers.syncOfficialPluginConfigLink(pluginParts)
 handlers.syncOfficialPluginConfigLink(pluginParts)
 assert.equal(created,1,'one navigation control per dialog')
@@ -122,6 +127,8 @@ assert.equal(navClicks,1)
 assert.equal(sidebarCloses,1)
 availableControls=[]
 handlers.openOfficialPluginConfig(pluginParts)
-assert.equal(toolsOpens,1,'missing sidebar must open visible Tools fallback')
+assert.equal(routeFallbacks,1,'missing sidebar must route through official Plugins surface')
+assert.equal(toolsOpens,0,'plugin route must never open Android Tools panel')
+assert.equal(closeClicks,2,'settings modal must close before both plugin navigation paths')
 
 console.log('[DSH] DSH 0.2.2 mobile settings: four-seat layout and Plugins configuration navigation OK')
