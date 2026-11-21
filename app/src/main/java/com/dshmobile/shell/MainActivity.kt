@@ -5487,28 +5487,20 @@ class MainActivity : ComponentActivity() {
   }
 
   /**
-   * Resolve a SAF tree to a raw path usable by the embedded shell. Android 8/9
-   * can use legacy shared storage after runtime permission. On devices where
-   * Android 10 scoped storage refuses the raw path, fall back to an app-owned
-   * external workspace so the feature remains functional instead of hanging.
+   * Resolve the user-selected external tree to a real writable shell path.
+   * Never silently redirect a denied external folder to app-private storage:
+   * the user may switch to the explicit private workspace option instead.
    */
   private fun resolveWritableWorkspacePath(uri: Uri): String? {
     val resolved = AndroidBridge.resolvePickedPath(uri)
-    if (resolved.startsWith("/")) {
-      try {
-        val dir = java.io.File(resolved).canonicalFile
-        if (dir.isDirectory && dir.canRead() && dir.canWrite()) return dir.absolutePath
-      } catch (_: Throwable) {}
-    }
-    if (Build.VERSION.SDK_INT < 30) {
-      val base = getExternalFilesDir("workspaces") ?: java.io.File(filesDir, "legacy-workspace")
-      val fallback = java.io.File(base, "DSH-Workspace").apply { mkdirs() }
-      if (fallback.isDirectory && fallback.canWrite()) {
-        showTestNotification("已使用兼容工作区", "系统限制了所选目录的原始路径，已改用应用可写工作区")
-        return fallback.canonicalPath
-      }
-    }
-    return null
+    if (!resolved.startsWith("/")) return null
+    return try {
+      val dir = java.io.File(resolved).canonicalFile
+      if (dir.isDirectory && dir.canRead() && dir.canWrite() &&
+          isExternalFileWorkspace(dir) && !isWorkspaceSymlink(java.io.File(resolved))) {
+        dir.absolutePath
+      } else null
+    } catch (_: Throwable) { null }
   }
 
   private data class WorkspaceBrowserEntry(
