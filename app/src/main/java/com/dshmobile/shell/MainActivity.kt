@@ -3242,8 +3242,8 @@ class MainActivity : ComponentActivity() {
             const navButtons = Array.from(nav.querySelectorAll('button')).filter((button) => {
               if (button.id === SKILL_NAV_ID) return false;
               const value = ((button.textContent || '') + ' ' + (button.getAttribute('aria-label') || '')).trim();
-              return ['通用设置', '模型', '内置插件', '插件', 'Agent 预设', '已归档会话',
-                'General', 'Models', 'Built-in plugins', 'Plugins', 'Agent presets', 'Archived sessions'].some((name) =>
+              return ['通用设置', '模型', '内置插件', '插件', 'Agent 预设', '规则设定', '规则设置', '已归档会话',
+                'General', 'Models', 'Built-in plugins', 'Plugins', 'Agent presets', 'Rules', 'Rule settings', 'Archived sessions'].some((name) =>
                   value === name || value.startsWith(name + ' '));
             });
             if (navButtons.length < 2) continue;
