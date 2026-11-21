@@ -124,10 +124,16 @@ class MobileIndexService(private val engine: EngineManager, private val store: M
     // Resolve only that entry point, while rejecting links below the root.
     val canonical = try { root.canonicalFile } catch (_: Exception) { return emptyList<Pair<String,File>>() to false }
     val publicSessionRoot = File(engine.dshDataDir, "sessions")
-    val allowed = (canonical == publicSessionRoot.canonicalFile &&
-      !Files.isSymbolicLink(publicSessionRoot.toPath())) ||
-      (!Files.isSymbolicLink(root.toPath()) &&
-        canonical.toPath().startsWith(File(engine.homeDir, ".dsh").canonicalFile.toPath()))
+    val allowed = try {
+      (canonical == publicSessionRoot.canonicalFile &&
+        !Files.isSymbolicLink(publicSessionRoot.toPath())) ||
+        (!Files.isSymbolicLink(root.toPath()) &&
+          canonical.toPath().startsWith(File(engine.homeDir, ".dsh").canonicalFile.toPath()))
+    } catch (_: Exception) {
+      // An inaccessible public Documents mount is a partial scan, not an
+      // authoritative empty result. Never prune earlier session metadata.
+      false
+    }
     if (!allowed || !canonical.isDirectory) return emptyList<Pair<String,File>>() to false
     val found = ArrayList<Pair<String, File>>()
     val queue = ArrayDeque<Pair<File, Int>>()
@@ -164,11 +170,19 @@ class MobileIndexService(private val engine: EngineManager, private val store: M
     if (profile.isFile) {
       // A broken package.json must not wipe the previous plugin inventory.
       val manifest = runCatching { org.json.JSONObject(profile.readText()) }.getOrNull()
-      if (manifest?.optJSONObject("dependencies") != null) {
-        engine.listPluginBundles().forEach { p ->
-          items += Extension("plugin", p.name, p.version, p.enabled)
+      val dependencies = manifest?.optJSONObject("dependencies")
+      if (dependencies != null) {
+        // EngineManager.listPluginBundles() is fail-open: an unreadable or
+        // malformed profile returns emptyList(). When the profile declares
+        // dependencies, an empty result is therefore not proof that every
+        // previously indexed plugin was removed. Preserve the old snapshot.
+        val bundles = engine.listPluginBundles()
+        if (bundles.isNotEmpty() || dependencies.length() == 0) {
+          bundles.forEach { p ->
+            items += Extension("plugin", p.name, p.version, p.enabled)
+          }
+          fullKinds += "plugin"
         }
-        fullKinds += "plugin"
       }
     }
     val root = File(home, "skills")
