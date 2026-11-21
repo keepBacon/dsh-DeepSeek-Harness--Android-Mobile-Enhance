@@ -18,7 +18,8 @@ s.camera.yaw=0;s.camera.pitch=0;s.items=[];s.plots=[];
 s.agents=[{id:'overlap',role:'target',position:V(0,1.5,0),velocity:V(0,0,0),yaw:0,radius:.7}];
 o=S.observe(s);assert.equal(o.reticle.worldHit.kind,'agent');
 assert.equal(o.reticle.worldHit.id,'overlap');
-assert.deepEqual(o.reticle.worldHit.normal,{x:0,y:0,z:-1});
+// The center-overlap fallback is the inverse of screenRay (forward is -Z).
+assert.deepEqual(o.reticle.worldHit.normal,{x:0,y:0,z:1});
 assert.equal(o.agents[0].visibility,'camera_overlaps_agent');
 s=S.defaultScene();s.items=[{id:'wall',position:V(0,1,3),half:V(4,1,.1),rotation:{yaw:0,pitch:0,roll:0},solid:true}];s.plots=[];
 s.agents=[{id:'moving',role:'ally',position:V(0,1,1),velocity:V(0,0,5),yaw:0,radius:.3}];
