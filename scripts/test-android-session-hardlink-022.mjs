@@ -40,7 +40,7 @@ export async function publishCurrentExclusive(staged,currentPath) {
 }`
   await writeFile(join(pkg,'lib/index.js'),index)
   await writeFile(join(pkg,'lib/generation.js'),generation)
-  const patch=()=>spawnSync(process.execPath,['scripts/android-runtime-patch.mjs',join(prefix,'usr')],{
+  const patch=()=>spawnSync(process.execPath,['scripts/android-runtime-patch.mjs',prefix],{
     cwd:new URL('..',import.meta.url).pathname,
     env:{...process.env,DSH_TARGET_VERSION:'0.2.2-rc.5',DSH_COMPAT_ONLY_PACKAGES:'@deepseek-ai/dsh-session-persistence-jsonl'},
     encoding:'utf8',
