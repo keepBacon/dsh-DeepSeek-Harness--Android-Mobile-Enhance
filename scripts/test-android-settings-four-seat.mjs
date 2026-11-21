@@ -40,6 +40,14 @@ assert.ok(!source.includes('private fun showPluginInstallDialog('),
  'remove the old Android-native plugin installer')
 assert.ok(!source.includes('queueMicrotask(openToolsPanel)'),
  'a missing upstream Plugins control must not open the Android Tools panel')
+assert.ok(source.includes('settingsDialog?.dismiss()'),
+ 'Android Settings must close before showing the upstream Plugins panel')
+assert.ok(source.includes("if (surface.id === 'plugins')"),
+ 'Plugins navigation must have an exact upstream Global panels selector')
+assert.ok(source.includes("['plugins', '插件'].includes("),
+ 'native Plugins navigation must never substring-match Built-in plugins')
+assert.ok(source.includes("target = Array.from(globalNav.querySelectorAll("),
+ 'official Plugins control must be scoped to the Global panels nav')
 const engineSource=readFileSync('app/src/main/java/com/dshmobile/shell/EngineManager.kt','utf8')
 for(const token of [
  'dsh-zcode-startplan', 'dsh-providers-hub',
