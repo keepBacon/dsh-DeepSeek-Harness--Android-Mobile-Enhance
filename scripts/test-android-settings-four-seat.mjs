@@ -23,6 +23,9 @@ for(const token of [
  "syncOfficialPluginConfigLink(parts)",
  "const current = findSettingsParts()",
  "queueMicrotask(() => target.click())",
+ "parts.header.querySelector(':scope > button:last-of-type')",
+ "content.scrollTop = 0",
+ "modal.dataset.dshMobileSection !== section",
  "label === '插件' || label === 'plugins'",
  "'内置插件'", "'Built-in plugins'"
 ]) must(token,'missing 0.2.2 settings contract: '+token)
