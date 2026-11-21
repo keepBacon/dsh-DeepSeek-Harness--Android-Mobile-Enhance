@@ -132,13 +132,8 @@ class MainActivity : ComponentActivity() {
     const val MAX_WORKSPACE_IMPORT_DEPTH = 64
 
     /** Imported plugin archive size before extraction. */
-    const val MAX_PLUGIN_PACKAGE_BYTES = 512L * 1024 * 1024
 
     /** 解压本地插件 ZIP 的总大小上限。 */
-    const val MAX_PLUGIN_ZIP_BYTES = 512L * 1024 * 1024
-    const val MAX_PLUGIN_ZIP_ENTRY_BYTES = 256L * 1024 * 1024
-    const val MAX_PLUGIN_ZIP_ENTRIES = 20_000
-    const val MAX_PLUGIN_ZIP_DEPTH = 32
   }
 
   // WebView file input is intentionally NOT backed by Android OpenDocument.
@@ -3138,16 +3133,6 @@ class MainActivity : ComponentActivity() {
           return null;
         };
 
-        const pluginSurfaceVisible = (anchor) => {
-          if (!anchor) return false;
-          const scope = anchor.closest('[role="dialog"], [aria-modal="true"]') || anchor.parentElement;
-          if (!scope) return false;
-          const active = Array.from(scope.querySelectorAll('button[aria-current], button[aria-selected="true"], button[data-state="active"]'))
-            .some((el) => /^(插件|plugins?)\b/i.test((el.textContent || '').trim()));
-          if (active) return true;
-          return !!scope.querySelector('input[type="search"], input[placeholder*="搜索"], input[placeholder*="Search" i]');
-        };
-
         const wireConfig = () => {
           const original = findConfigButton();
           if (!original || original.dataset.dshAndroidNative === '1') return original;
@@ -4344,114 +4329,6 @@ class MainActivity : ComponentActivity() {
         null,
       )
     } catch (_: Throwable) {}
-  }
-
-  /**
-   * DSH/pnpm accepts tarballs and directories but does not treat a generic ZIP
-   * as a package tarball. Extract phone-picked ZIP plugins into app-private
-   * storage and install the shallowest directory that owns package.json.
-   */
-  private fun prepareImportedPluginPackage(file: java.io.File): String {
-    if (!file.name.endsWith(".zip", ignoreCase = true)) return file.absolutePath
-    val base = file.name.substringBeforeLast('.', file.name)
-    val outDir = java.io.File(file.parentFile, "$base-unpacked-${System.currentTimeMillis()}")
-    if (outDir.exists()) outDir.deleteRecursively()
-    outDir.mkdirs()
-    val rootPath = outDir.canonicalPath
-    val rootPrefix = rootPath + java.io.File.separator
-    var extractedBytes = 0L
-    var entries = 0
-    val buffer = ByteArray(64 * 1024)
-    try {
-      java.util.zip.ZipInputStream(file.inputStream().buffered()).use { zip ->
-        var entry = zip.nextEntry
-        while (entry != null) {
-          entries++
-          if (entries > MAX_PLUGIN_ZIP_ENTRIES) throw java.io.IOException("插件 ZIP 文件项超过 $MAX_PLUGIN_ZIP_ENTRIES 个")
-          val normalized = entry.name.replace('\\', '/').trimStart('/')
-          val segments = normalized.split('/').filter { it.isNotEmpty() }
-          if (normalized.isBlank() || segments.any { it == ".." || it == "." } || segments.size > MAX_PLUGIN_ZIP_DEPTH) {
-            throw java.io.IOException("ZIP 包含不安全或过深路径：${entry.name}")
-          }
-          val output = java.io.File(outDir, normalized)
-          val canonical = output.canonicalPath
-          if (canonical != rootPath && !canonical.startsWith(rootPrefix)) {
-            throw java.io.IOException("ZIP 路径越界：${entry.name}")
-          }
-          if (entry.isDirectory) {
-            if (!output.exists() && !output.mkdirs()) throw java.io.IOException("无法创建 ZIP 目录：${entry.name}")
-          } else {
-            output.parentFile?.let { parent ->
-              if (!parent.exists() && !parent.mkdirs()) throw java.io.IOException("无法创建 ZIP 父目录：${entry.name}")
-            }
-            var entryBytes = 0L
-            output.outputStream().use { sink ->
-              while (true) {
-                val count = zip.read(buffer)
-                if (count <= 0) break
-                entryBytes += count
-                extractedBytes += count
-                if (entryBytes > MAX_PLUGIN_ZIP_ENTRY_BYTES) throw java.io.IOException("ZIP 单文件超过 256 MB：${entry.name}")
-                if (extractedBytes > MAX_PLUGIN_ZIP_BYTES) throw java.io.IOException("插件 ZIP 解压后超过 512 MB")
-                sink.write(buffer, 0, count)
-              }
-            }
-          }
-          zip.closeEntry()
-          entry = zip.nextEntry
-        }
-      }
-    } catch (t: Throwable) {
-      outDir.deleteRecursively()
-      throw t
-    }
-    val manifests = outDir.walkTopDown()
-      .filter { it.isFile && it.name == "package.json" }
-      .toList()
-    if (manifests.isEmpty()) throw java.io.IOException("ZIP 中未找到 package.json，无法作为 DSH 插件安装")
-
-    // GitHub ZIPs can be monorepos. Prefer the shallowest package that actually
-    // declares a DSH bundle instead of blindly choosing the repository root.
-    val bundleManifests = manifests.filter { candidate ->
-      try {
-        val json = org.json.JSONObject(candidate.readText())
-        json.optJSONObject("dsh")?.optJSONObject("bundle")?.optString("patch", "")?.isNotBlank() == true
-      } catch (_: Throwable) { false }
-    }
-    val candidates = if (bundleManifests.isNotEmpty()) bundleManifests else manifests
-    val manifest = candidates.minByOrNull {
-      it.relativeTo(outDir).invariantSeparatorsPath.count { ch -> ch == '/' }
-    } ?: throw java.io.IOException("无法确定插件 package.json")
-    val packageRoot = manifest.parentFile ?: throw java.io.IOException("无法确定插件根目录")
-
-    // ZIP does not reliably preserve Unix executable bits. Restore every path
-    // declared by package.json#bin so npm/pnpm lifecycle scripts can invoke
-    // CLI helpers exactly as they would from a tarball or git checkout.
-    try {
-      val json = org.json.JSONObject(manifest.readText())
-      val bins = mutableListOf<String>()
-      when (val bin = json.opt("bin")) {
-        is String -> bins += bin
-        is org.json.JSONObject -> {
-          val keys = bin.keys()
-          while (keys.hasNext()) {
-            val value = bin.optString(keys.next(), "").trim()
-            if (value.isNotBlank()) bins += value
-          }
-        }
-      }
-      val packageCanonical = packageRoot.canonicalPath
-      val packagePrefix = packageCanonical + java.io.File.separator
-      for (relative in bins.distinct()) {
-        val target = java.io.File(packageRoot, relative).canonicalFile
-        if ((target.path == packageCanonical || target.path.startsWith(packagePrefix)) && target.isFile) {
-          target.setExecutable(true, false)
-        }
-      }
-    } catch (_: Throwable) {
-      // package metadata diagnostics are handled by DSH/pnpm after selection.
-    }
-    return packageRoot.absolutePath
   }
 
   /** Unified Android tool inventory: MCP declarations plus installed CLI tools. */
