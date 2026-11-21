@@ -2931,8 +2931,10 @@ class EngineManager(private val context: Context, private val pickToken: String?
     val otherPlugins = try {
       val manifest = profileManifest(profile)
       val dependencies = JSONObject(manifest.readText()).optJSONObject("dependencies")
+      val npmPackageName = Regex("""^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$""")
       dependencies?.keys()?.asSequence()
-        ?.filter { it !in priorityPlugins && !it.startsWith("@deepseek-ai/") }
+        ?.filter { it !in priorityPlugins && !it.startsWith("@deepseek-ai/") &&
+          npmPackageName.matches(it) }
         ?.take(96)?.toList().orEmpty()
     } catch (_: Throwable) { emptyList() }
     for (name in (priorityPlugins + otherPlugins).distinct()) {
