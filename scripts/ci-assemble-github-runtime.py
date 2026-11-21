@@ -612,7 +612,7 @@ def main():
         shutil.copyfile(stage / "usr/lib/dsh-release-family.json",
                         args.repo / "scripts/dsh-release-family-lock.json")
         # The GitHub native builder reuses an already-patched DSH seed.
-        # Only update its PTY and sandbox launcher entrypoints. The seed's
+        # Apply current core's session-storage publication compatibility too. The seed's
         # subprocess-local bundle does not contain the upstream containment
         # anchor used by the full fresh-install patch; rerunning that rewrite
         # aborts signed assembly. Keep the original patched module intact and
@@ -620,7 +620,7 @@ def main():
         subprocess.run(
             ["node", str(args.repo / "scripts/android-runtime-patch.mjs"), str(stage / "usr")],
             check=True, env={**os.environ, "DSH_TARGET_VERSION": "0.2.2-rc.5",
-                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local,@deepseek-ai/dsh-subprocess-local,node-addon-require-builtin,@deepseek-ai/node-addon-system"})
+                             "DSH_COMPAT_ONLY_PACKAGES": "@deepseek-ai/dsh-terminal-bash,@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-bash-local,@deepseek-ai/dsh-subprocess-local,node-addon-require-builtin,@deepseek-ai/node-addon-system,@deepseek-ai/dsh-session-persistence-jsonl"})
         patch_web_fetch_limits(stage)
         stage_modsearch(stage, workspace)
         install_typescript(stage, workspace)
