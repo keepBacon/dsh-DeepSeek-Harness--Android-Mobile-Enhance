@@ -19,7 +19,7 @@ assert.ok(stop.includes('lifecycleExecutor.execute {'))
 assert.ok(stop.indexOf('lifecycleExecutor.execute {') < stop.indexOf('engineManager.stopEngine()'),
   'stopEngine must execute on a worker, not the service main thread')
 assert.ok(stop.includes('Handler(android.os.Looper.getMainLooper()).post'))
-assert.ok(stop.includes('if (stopRequested.get())'))
+assert.ok(stop.includes('if (stopRequested.get() && lifecycleGeneration.get() == generation)'))
 assert.ok(stop.includes('stopSelf(startId)'),
   'an older stop must not terminate service ownership from a later START')
 assert.ok(!onStart.includes('engineManager.stopEngine()\n      stopForeground'),
