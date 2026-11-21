@@ -3301,9 +3301,8 @@ class MainActivity : ComponentActivity() {
               const label = (nav.getAttribute('aria-label') || '').trim().toLowerCase();
               return label === '全局面板' || label === 'global panels' || label === 'global panel';
             });
-          const target = (globalNav && candidates.find(item =>
-            globalNav.contains(item) && isPlugins(item))) || candidates.find(item =>
-              !!item.closest('nav, [role="navigation"]') && isPlugins(item));
+          const target = globalNav && candidates.find(item =>
+            globalNav.contains(item) && isPlugins(item));
           // Always dismiss Settings first: its modal overlay intercepts
           // pointer events intended for the DSH Plugins page.
           const close = parts && parts.header.querySelector(':scope > button:last-of-type');
