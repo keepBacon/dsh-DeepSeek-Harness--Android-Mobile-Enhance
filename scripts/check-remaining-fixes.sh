@@ -33,7 +33,10 @@ forbid() { ! grep -Fq -- "$2" "$1" || fail "forbidden in $(basename "$1"): $2"; 
 
 # M-01 workspace import publication must never use a check-then-rename overwrite path.
 must "$MA" 'Files.createLink(candidate.toPath(), temp.toPath())'
-must "$MA" 'if (!candidate.createNewFile()) continue'
+must "$MA" 'java.nio.file.StandardOpenOption.CREATE_NEW'
+must "$MA" 'java.nio.channels.FileChannel.open(candidate.toPath()'
+must "$MA" 'channel.force(true)'
+forbid "$MA" 'if (!candidate.createNewFile()) continue'
 forbid "$MA" 'uniqueWorkspaceDestination'
 
 # M-02/M-03: Android's duplicate ZIP/plugin installer has been removed.
