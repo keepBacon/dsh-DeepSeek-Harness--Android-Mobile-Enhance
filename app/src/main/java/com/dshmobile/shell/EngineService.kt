@@ -21,8 +21,11 @@ class EngineService : Service() {
 
   private lateinit var engineManager: EngineManager
   private var watchdog: ScheduledExecutorService? = null
+  // Service lifecycle operations are serialized: a delayed Stop cannot kill
+  // a newer Start, and a queued Restart cannot run after explicit Stop.
+  private val lifecycleExecutor = Executors.newSingleThreadExecutor()
+  private val lifecycleGeneration = java.util.concurrent.atomic.AtomicLong(0L)
   private val restartInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
-  private val ensureInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
   private val stopRequested = java.util.concurrent.atomic.AtomicBoolean(false)
   private var failedAliveProbes = 0
   private var degradedNotificationVisible = false
@@ -50,33 +53,40 @@ class EngineService : Service() {
     }
   }
 
-  private fun restartOnUserRequest() {
-    if (!restartInFlight.compareAndSet(false, true)) return
-    Thread({
+  private fun restartOnUserRequest(generation: Long) {
+    if (stopRequested.get() || !restartInFlight.compareAndSet(false, true)) return
+    lifecycleExecutor.execute {
       try {
+        if (stopRequested.get() || lifecycleGeneration.get() != generation) return@execute
         EngineManager.beginMaintenance()
-        val stopped = try {
-          engineManager.stopEngine()
-        } catch (t: Throwable) {
-          Log.e("DSH-Watchdog", "Explicit restart failed during stop", t)
-          false
+        try {
+          val stopped = try {
+            engineManager.stopEngine()
+          } catch (t: Throwable) {
+            Log.e("DSH-Watchdog", "Explicit restart failed during stop", t)
+            false
+          }
+          if (stopped && !stopRequested.get()) {
+            // Stop and Start both invalidate queued restarts. Keep maintenance
+            // active until the replacement Host has finished launching.
+            if (lifecycleGeneration.get() == generation) {
+              try {
+                engineManager.startEngine(runtimeAlreadyChecked = true)
+              } catch (t: Throwable) {
+                Log.e("DSH-Watchdog", "Explicit restart failed during boot", t)
+              }
+            }
+          } else if (!stopped) {
+            Log.w("DSH-Watchdog", "Explicit restart blocked: old Host is still alive")
+          }
         } finally {
           EngineManager.endMaintenance()
         }
-        if (stopped && !stopRequested.get()) {
-          try {
-            engineManager.startEngine(runtimeAlreadyChecked = true)
-          } catch (t: Throwable) {
-            Log.e("DSH-Watchdog", "Explicit restart failed during boot", t)
-          }
-        } else if (!stopped) {
-          Log.w("DSH-Watchdog", "Explicit restart blocked: old Host is still alive")
-        }
       } finally {
-        clearProbeFailures()
+        if (!stopRequested.get()) clearProbeFailures()
         restartInFlight.set(false)
       }
-    }, "dsh-user-host-restart").start()
+    }
   }
 
   override fun onCreate() {
@@ -90,13 +100,13 @@ class EngineService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
-      // stopEngine can wait for graceful/forced Node shutdown for several
-      // seconds. Never block the Android service main thread or the notification
-      // action while waiting for a potentially unresponsive Host.
       stopRequested.set(true)
+      val generation = lifecycleGeneration.incrementAndGet()
       watchdog?.shutdownNow()
       watchdog = null
-      Thread({
+      // Queue the stop after any in-flight Start/Restart. It is important
+      // that Stop is serialized, not merely moved to another independent thread.
+      lifecycleExecutor.execute {
         try {
           EngineManager.beginMaintenance()
           try {
@@ -110,22 +120,26 @@ class EngineService : Service() {
           Log.e("DSH-Watchdog", "Explicit Host stop failed", t)
         } finally {
           android.os.Handler(android.os.Looper.getMainLooper()).post {
-            // A later START may have requested continued service ownership.
-            if (stopRequested.get()) {
+            // Never terminate ownership of a newer START/RESTART.
+            if (stopRequested.get() && lifecycleGeneration.get() == generation) {
               stopForeground(STOP_FOREGROUND_REMOVE)
               stopSelf(startId)
             }
           }
         }
-      }, "dsh-user-host-stop").start()
+      }
       return START_NOT_STICKY
     }
     if (intent?.action == ACTION_RESTART) {
-      restartOnUserRequest()
+      // STOP wins if a restart notification is delivered during teardown.
+      if (stopRequested.get()) return START_NOT_STICKY
+      val generation = lifecycleGeneration.incrementAndGet()
+      restartOnUserRequest(generation)
       return START_STICKY
     }
     stopRequested.set(false)
-    ensureEngine()
+    val generation = lifecycleGeneration.incrementAndGet()
+    ensureEngine(generation)
     armWatchdog()
     return START_STICKY
   }
@@ -134,34 +148,35 @@ class EngineService : Service() {
 
   override fun onDestroy() {
     stopRequested.set(true)
+    lifecycleGeneration.incrementAndGet()
     watchdog?.shutdownNow()
     watchdog = null
+    lifecycleExecutor.shutdown()
     // Do not kill the Host here: Android may recreate a foreground service.
     // Explicit user stop goes through ACTION_STOP above.
     super.onDestroy()
   }
 
   /** Start the engine if it is not listening yet. */
-  private fun ensureEngine() {
-    if (stopRequested.get() || !ensureInFlight.compareAndSet(false, true)) return
-    // Both the localhost probe and a cold Node startup can block. Lifecycle
-    // callbacks run on Android's main thread, so perform this work off-thread.
-    Thread({
+  private fun ensureEngine(generation: Long) {
+    // Probe, runtime validation, and cold startup all run off the main thread.
+    // Newer lifecycle requests invalidate any queued older ensure task.
+    lifecycleExecutor.execute {
       try {
-        if (stopRequested.get() || EngineManager.isMaintenanceMode()) return@Thread
-        if (EngineProbe.check(350).optBoolean("running", false)) return@Thread
-        if (stopRequested.get() || EngineManager.isMaintenanceMode()) return@Thread
-        if (engineManager.isEngineProcessAlive()) return@Thread
+        if (stopRequested.get() || lifecycleGeneration.get() != generation ||
+            EngineManager.isMaintenanceMode()) return@execute
+        if (EngineProbe.check(350).optBoolean("running", false)) return@execute
+        if (stopRequested.get() || lifecycleGeneration.get() != generation ||
+            EngineManager.isMaintenanceMode()) return@execute
+        if (engineManager.isEngineProcessAlive()) return@execute
         if (engineManager.engineReady && !stopRequested.get() &&
-            !EngineManager.isMaintenanceMode()) {
+            lifecycleGeneration.get() == generation && !EngineManager.isMaintenanceMode()) {
           engineManager.startEngine(runtimeAlreadyChecked = true)
         }
       } catch (t: Throwable) {
         Log.e("DSH-Watchdog", "Foreground Host ensure failed", t)
-      } finally {
-        ensureInFlight.set(false)
       }
-    }, "dsh-service-host-ensure").start()
+    }
   }
 
   /**
@@ -178,8 +193,9 @@ class EngineService : Service() {
             clearProbeFailures()
             return@scheduleWithFixedDelay
           }
+          val generation = lifecycleGeneration.get()
           val probe = EngineProbe.check(650)
-          if (stopRequested.get()) return@scheduleWithFixedDelay
+          if (stopRequested.get() || generation != lifecycleGeneration.get()) return@scheduleWithFixedDelay
           if (probe.optBoolean("running", false)) {
             clearProbeFailures()
             return@scheduleWithFixedDelay
@@ -197,7 +213,8 @@ class EngineService : Service() {
             return@scheduleWithFixedDelay
           }
           clearProbeFailures()
-          if (!stopRequested.get() && !EngineManager.isMaintenanceMode()) {
+          if (!stopRequested.get() && generation == lifecycleGeneration.get() &&
+              !EngineManager.isMaintenanceMode() && !restartInFlight.get()) {
             engineManager.startEngine(runtimeAlreadyChecked = true)
           }
         } catch (_: Throwable) {
