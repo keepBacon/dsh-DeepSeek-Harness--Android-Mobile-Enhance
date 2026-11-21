@@ -39,7 +39,7 @@ export async function publishCurrentExclusive(staged,currentPath) {
   return true;
 }`
   // The published 0.2.2 npm bundle places generation in lib/index.js.
-  await writeFile(join(pkg,'lib/index.js'),index + '\\n' + generation)
+  await writeFile(join(pkg,'lib/index.js'),index + String.fromCharCode(10) + generation)
   const patch=()=>spawnSync(process.execPath,['scripts/android-runtime-patch.mjs',prefix],{
     cwd:new URL('..',import.meta.url).pathname,
     env:{...process.env,DSH_TARGET_VERSION:'0.2.2-rc.5',DSH_COMPAT_ONLY_PACKAGES:'@deepseek-ai/dsh-session-persistence-jsonl'},
