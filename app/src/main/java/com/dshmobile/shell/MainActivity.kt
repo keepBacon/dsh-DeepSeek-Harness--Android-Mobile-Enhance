@@ -3325,8 +3325,8 @@ class MainActivity : ComponentActivity() {
             button.removeAttribute('aria-haspopup');
             button.removeAttribute('aria-expanded');
             button.removeAttribute('disabled');
-            button.setAttribute('aria-label', '从当前工作目录选择文件');
-            button.setAttribute('title', '从当前工作目录选择文件');
+            button.setAttribute('aria-label', '选择文件（外部或私有工作区）');
+            button.setAttribute('title', '选择文件（外部或私有工作区）');
             button.innerHTML = icon('import');
             button.addEventListener('click', (event) => {
               event.preventDefault();
