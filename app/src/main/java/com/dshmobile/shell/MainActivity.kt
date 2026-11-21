@@ -131,9 +131,6 @@ class MainActivity : ComponentActivity() {
     const val MAX_WORKSPACE_IMPORT_ENTRIES = 100_000
     const val MAX_WORKSPACE_IMPORT_DEPTH = 64
 
-    /** Imported plugin archive size before extraction. */
-
-    /** 解压本地插件 ZIP 的总大小上限。 */
   }
 
   // WebView file input is intentionally NOT backed by Android OpenDocument.
