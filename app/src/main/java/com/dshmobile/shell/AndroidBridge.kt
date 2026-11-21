@@ -20,8 +20,6 @@ class AndroidBridge(
   private val onNotify: (title: String, text: String) -> Unit,
   private val onHasAllFilesAccess: () -> Boolean = { false },
   private val onAllFilesAccessRequest: () -> Unit = {},
-  private val onOpenPluginInstaller: () -> Unit = {},
-  private val onOpenPluginManager: () -> Unit = {},
   private val onOpenConfigEditor: () -> Unit = {},
   private val onOpenAppSettings: () -> Unit = {},
   private val onImportWorkspaceFiles: () -> Unit = {},
@@ -79,16 +77,6 @@ class AndroidBridge(
   @JavascriptInterface
   fun requestAllFilesAccess(capability: String) {
     if (authorized(capability)) onAllFilesAccessRequest()
-  }
-
-  @JavascriptInterface
-  fun openPluginInstaller(capability: String) {
-    if (authorized(capability)) onOpenPluginInstaller()
-  }
-
-  @JavascriptInterface
-  fun openPluginManager(capability: String) {
-    if (authorized(capability)) onOpenPluginManager()
   }
 
   @JavascriptInterface
