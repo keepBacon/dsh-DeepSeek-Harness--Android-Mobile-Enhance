@@ -22,6 +22,7 @@ class EngineService : Service() {
   private lateinit var engineManager: EngineManager
   private var watchdog: ScheduledExecutorService? = null
   private val restartInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+  private val stopRequested = java.util.concurrent.atomic.AtomicBoolean(false)
   private var failedAliveProbes = 0
   private var degradedNotificationVisible = false
   private val degradedProbeThreshold = 12 // One minute at 5-second intervals.
@@ -51,26 +52,29 @@ class EngineService : Service() {
   private fun restartOnUserRequest() {
     if (!restartInFlight.compareAndSet(false, true)) return
     Thread({
-      EngineManager.beginMaintenance()
-      var stopped = false
       try {
-        stopped = engineManager.stopEngine()
-      } catch (t: Throwable) {
-        Log.e("DSH-Watchdog", "Explicit restart failed during stop", t)
-      } finally {
-        EngineManager.endMaintenance()
-      }
-      if (stopped) {
-        try {
-          engineManager.startEngine(runtimeAlreadyChecked = true)
+        EngineManager.beginMaintenance()
+        val stopped = try {
+          engineManager.stopEngine()
         } catch (t: Throwable) {
-          Log.e("DSH-Watchdog", "Explicit restart failed during boot", t)
+          Log.e("DSH-Watchdog", "Explicit restart failed during stop", t)
+          false
+        } finally {
+          EngineManager.endMaintenance()
         }
-      } else {
-        Log.w("DSH-Watchdog", "Explicit restart blocked: old Host is still alive")
+        if (stopped && !stopRequested.get()) {
+          try {
+            engineManager.startEngine(runtimeAlreadyChecked = true)
+          } catch (t: Throwable) {
+            Log.e("DSH-Watchdog", "Explicit restart failed during boot", t)
+          }
+        } else if (!stopped) {
+          Log.w("DSH-Watchdog", "Explicit restart blocked: old Host is still alive")
+        }
+      } finally {
+        clearProbeFailures()
+        restartInFlight.set(false)
       }
-      clearProbeFailures()
-      restartInFlight.set(false)
     }, "dsh-user-host-restart").start()
   }
 
@@ -85,6 +89,7 @@ class EngineService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
+      stopRequested.set(true)
       watchdog?.shutdownNow()
       watchdog = null
       engineManager.stopEngine()
@@ -96,6 +101,7 @@ class EngineService : Service() {
       restartOnUserRequest()
       return START_STICKY
     }
+    stopRequested.set(false)
     ensureEngine()
     armWatchdog()
     return START_STICKY
@@ -104,6 +110,7 @@ class EngineService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onDestroy() {
+    stopRequested.set(true)
     watchdog?.shutdownNow()
     watchdog = null
     // Do not kill the Host here: Android may recreate a foreground service.
