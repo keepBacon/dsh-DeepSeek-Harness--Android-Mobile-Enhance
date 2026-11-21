@@ -1002,7 +1002,7 @@ eachPackage('@deepseek-ai/dsh-fs-local', 'lib/index.js', (file) => {
   const block = `${i}if (!["EACCES", "EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"].includes(error?.code)) {\n${i}  await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n${i}}\n${i}let existing;\n${i}try {\n${i}  existing = await inspectPublicationTarget(absolutePath);\n${i}} catch (metadataError) {\n${i}  if (!isENOENT(metadataError) && !isENOTDIR(metadataError)) throw metadataError;\n${i}}\n${i}if (existing !== void 0) {\n${i}  await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n${i}}\n${i}// ${marker}: COPYFILE_EXCL is no-replace even across races.\n${i}try {\n${i}  await copyFile(tempPath, absolutePath, 1);\n${i}} catch (copyError) {\n${i}  await throwGuardedCreateFailure(copyError, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);\n${i}}\n${i}const androidPublishedHandle = await open(absolutePath, "r");\n${i}try { await androidPublishedHandle.sync(); }\n${i}finally { await androidPublishedHandle.close(); }`
   txt = txt.replace(re, block)
   txt = ensureFsPromisesImport(txt, ['copyFile', 'open'])
-  const importMatch = txt.match(/import\\s*\\{([^}]*)\\}\\s*from\\s*["']node:fs\\/promises["']/)
+  const importMatch = txt.match(/import\s*\{([^}]*)\}\s*from\s*["']node:fs\/promises["']/)
   const importedNames = (importMatch?.[1] || '').split(',').map(part => part.trim())
   if (!importedNames.includes('copyFile') || !importedNames.includes('open')) {
     throw new Error('fs-local copyFile/open named imports missing after patch: ' + file)
