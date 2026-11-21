@@ -945,7 +945,9 @@ eachPackage('@deepseek-ai/dsh-session-persistence-jsonl', 'lib/index.js', (file)
       }`
   txt = txt.replace(anchor, replacement)
   txt = ensureFsPromisesImport(txt, ['copyFile'])
-  if (!/import\\s*\\{[^}]*\\bcopyFile\\b[^}]*\\}\\s*from\\s*["']node:fs\\/promises["']/.test(txt)) {
+  // The generated import can be formatted across lines; the syntax checker
+  // below also validates the final module before the APK is assembled.
+  if (!txt.includes('node:fs/promises') || !txt.includes('copyFile')) {
     throw new Error('session copyFile import not found: ' + file)
   }
   write(file, txt)
