@@ -13,7 +13,8 @@ assert.ok(service.includes('restartOnUserRequest()'))
 assert.ok(service.includes('restartInFlight.compareAndSet(false, true)'))
 assert.ok(service.includes('EngineManager.beginMaintenance()'))
 assert.ok(service.includes('stopped = engineManager.stopEngine()'))
-assert.ok(service.includes('if (stopped) {'))
+assert.ok(service.includes('if (stopped && !stopRequested.get()) {'))
+assert.ok(service.includes('stopRequested.set(true)'), 'explicit stop must cancel pending restart')
 assert.ok(service.includes('engineManager.startEngine(runtimeAlreadyChecked = true)'))
 // Model the only state transition that can trigger a restart in the service.
 let failed=0,visible=false,restarts=0
