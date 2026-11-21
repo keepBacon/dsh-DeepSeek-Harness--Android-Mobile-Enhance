@@ -3286,19 +3286,22 @@ class MainActivity : ComponentActivity() {
           const target = (globalNav && candidates.find(item =>
             globalNav.contains(item) && isPlugins(item))) || candidates.find(item =>
               !!item.closest('nav, [role="navigation"]') && isPlugins(item));
-          if (!target) {
-            // A deployment without a visible sidebar plugin control still
-            // has the Android Tools surface picker. Close the modal first:
-            // its overlay is intentionally above the mobile Tools panel.
-            const close = parts && parts.header.querySelector(':scope > button:last-of-type');
-            if (close) close.click();
-            queueMicrotask(openToolsPanel);
-            return false;
-          }
+          // Always dismiss Settings first: its modal overlay intercepts
+          // pointer events intended for the DSH Plugins page.
           const close = parts && parts.header.querySelector(':scope > button:last-of-type');
           if (close) close.click();
+          if (!target) {
+            // Older/customized sidebars may not mount the Global panels nav
+            // until expanded. The fallback still selects DSH's own Plugins
+            // surface; Android must never substitute a second installer UI.
+            queueMicrotask(() => openDshSurface(
+              DSH_SURFACE_DEFS.find((surface) => surface.id === 'plugins'),
+              () => window.alert('DSH 插件页面尚未就绪，请确认运行时已升级且插件管理组件已加载。')
+            ));
+            return false;
+          }
           closeSidebar();
-          // Do not replace React navigation or lose plugin-owned form state.
+          // Keep upstream React navigation and the plugin's staged form state.
           queueMicrotask(() => target.click());
           return true;
         };
