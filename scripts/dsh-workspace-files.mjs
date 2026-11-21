@@ -74,7 +74,7 @@ async function existing(path){
   if(st.isSymbolicLink()||!st.isFile())throw Error('only regular, non-symlink project files are supported: '+path)
   if(st.size>8*1024*1024)throw Error('source exceeds 8 MiB transaction limit')
   const bytes=await readFile(path)
-  return {hash:sha(bytes),bytes,mode:st.mode&0o7777}
+  return {hash:sha(bytes),bytes,mode:st.mode&0o7777,dev:String(st.dev),ino:String(st.ino)}
  }catch(e){if(e.code==='ENOENT')return null;throw e}
 }
 async function validated(root,ops){
@@ -155,6 +155,8 @@ async function apply(row){
    // never an unchecked rename that could replace another writer's file.
    await publishWorkspaceCreateExclusive(tmp,row.from)
    await syncDir(dirname(row.from))
+   const published=await lstat(row.from)
+   return {dev:String(published.dev),ino:String(published.ino)}
   }finally{await rm(tmp,{force:true}).catch(()=>{})}
  }
 }
@@ -165,8 +167,18 @@ async function restore(dir,manifest,{dryRun=false}={}){
   const at=await existing(action.from),dest=action.to?await existing(action.to):null
   let status='unchanged',conflict=null
   if(action.type==='create'){
-   if(at?.hash===action.afterHash){status='remove-created';if(!dryRun)await rm(action.from)}
-   else if(at)conflict='created file was changed externally'
+   // A crash can occur after journal intent is written but before CREATE.
+   // A concurrent process may then create identical bytes. Content hash
+   // alone does NOT prove ownership and must never authorize deletion.
+   const owned=action.published &&
+     at?.dev===action.published.dev && at?.ino===action.published.ino
+   if(at?.hash===action.afterHash && owned){
+    status='remove-created'
+    if(!dryRun)await rm(action.from)
+   }else if(at){
+    conflict=action.published?'created file changed or was replaced externally':
+      'created file ownership was not journaled; refusing unsafe deletion'
+   }
   }else if(action.type==='replace'){
    if(!at)conflict='replaced file is missing'
    else if(at.hash===action.oldHash)status='unchanged'
@@ -247,7 +259,17 @@ async function refactor(args){
   let verification=null
   try{
    t.manifest.phase='applying';await atomicJson(join(t.dir,'manifest.json'),t.manifest)
-   for(const row of current)await apply(row)
+   for(let i=0;i<current.length;i++){
+    const row=current[i]
+    const published=await apply(row)
+    if(row.type==='create' && published){
+     // Persist inode ownership evidence before any later operation/verify can
+     // fail. If power fails before this write, recovery deliberately leaves
+     // the candidate file intact rather than risking someone else's data.
+     t.manifest.actions[i].published=published
+     await atomicJson(join(t.dir,'manifest.json'),t.manifest)
+    }
+   }
    if(args.verify===true){
     verification=await projectBuildCall('workspace_verify',{root,system:args.system,
      runTests:args.runTests!==false,timeoutMs:args.timeoutMs||600000})
