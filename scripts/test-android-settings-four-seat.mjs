@@ -23,6 +23,7 @@ for(const token of [
  "syncOfficialPluginConfigLink(parts)",
  "const current = findSettingsParts()",
  "queueMicrotask(() => target.click())",
+ "queueMicrotask(openToolsPanel)",
  "parts.header.querySelector(':scope > button:last-of-type')",
  "content.scrollTop = 0",
  "modal.dataset.dshMobileSection !== section",
