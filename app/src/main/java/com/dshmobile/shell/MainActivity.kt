@@ -1944,8 +1944,11 @@ class MainActivity : ComponentActivity() {
               position: relative !important;
               inset: auto !important;
               transform: none !important;
-              display: flex !important;
-              flex-direction: column !important;
+              display: grid !important;
+              grid-template-columns: minmax(0, 1fr) !important;
+              grid-template-rows: auto auto auto minmax(0, 1fr) !important;
+              grid-template-areas: "title" "nav" "header" "options" !important;
+              align-content: stretch !important;
               width: min(980px, calc(100dvw - 20px)) !important;
               height: min(920px, calc(100dvh - 20px)) !important;
               max-width: calc(100dvw - 20px) !important;
@@ -1960,6 +1963,7 @@ class MainActivity : ComponentActivity() {
             }
 
             [data-dsh-mobile-settings-nav] {
+              grid-area: nav !important;
               flex: 0 0 auto !important;
               display: block !important;
               width: 100% !important;
@@ -1971,7 +1975,10 @@ class MainActivity : ComponentActivity() {
             }
 
             [data-dsh-mobile-settings-nav-title] {
+              grid-area: title !important;
               display: block !important;
+              min-height: 0 !important;
+              margin: 0 !important;
               padding: 0 4px 8px !important;
               font-size: 16px !important;
               line-height: 24px !important;
@@ -2009,17 +2016,20 @@ class MainActivity : ComponentActivity() {
             }
 
             [data-dsh-mobile-settings-content] {
-              flex: 1 1 auto !important;
+              grid-area: options !important;
               width: 100% !important;
               min-width: 0 !important;
               min-height: 0 !important;
               max-width: 100% !important;
-              display: flex !important;
-              flex-direction: column !important;
-              overflow: hidden !important;
+              display: block !important;
+              overflow-y: auto !important;
+              overflow-x: hidden !important;
+              overscroll-behavior-y: contain;
+              -webkit-overflow-scrolling: touch;
             }
 
             [data-dsh-mobile-settings-header] {
+              grid-area: header !important;
               flex: 0 0 auto !important;
               width: 100% !important;
               min-width: 0 !important;
@@ -2035,7 +2045,20 @@ class MainActivity : ComponentActivity() {
               min-width: 0 !important;
             }
 
+            [data-dsh-mobile-plugin-config-link] {
+              border: 1px solid var(--dsw-alias-border-l3, rgba(127,127,127,.20)) !important;
+              border-radius: 9px !important;
+              color: var(--dsw-alias-label-primary, currentColor) !important;
+              background: var(--dsw-alias-bg-layer-1, transparent) !important;
+              padding: 7px 10px !important;
+              min-height: 34px !important;
+              font-size: 13px !important;
+              white-space: nowrap !important;
+              cursor: pointer !important;
+            }
+
             [data-dsh-mobile-settings-options] {
+              grid-area: options !important;
               flex: 1 1 auto !important;
               width: 100% !important;
               min-width: 0 !important;
@@ -3225,10 +3248,19 @@ class MainActivity : ComponentActivity() {
             });
             if (navButtons.length < 2) continue;
             const navList = commonAncestor(navButtons, nav);
-            const content = Array.from(modal.children).find((child) =>
-              child !== nav && child.id !== SKILL_PANEL_ID);
-            if (!navList || !content) continue;
-            return { modal, nav, navButtons, navList, content };
+            // DSH 0.2.2 SettingsRoot has exactly FOUR sibling grid seats:
+            // navTitle, nav, header, options. The old adapter selected the
+            // first non-nav child (navTitle) as "content", stretching the title
+            // into the entire viewport and losing the actual plugin options.
+            const children = Array.from(modal.children);
+            const navIndex = children.indexOf(nav);
+            if (navIndex < 1 || !navList) continue;
+            const navTitle = children[navIndex - 1];
+            const header = children[navIndex + 1];
+            const content = children[navIndex + 2];
+            if (!navTitle || !header || !content) continue;
+            if (content.id === SKILL_PANEL_ID || header === content) continue;
+            return { modal, nav, navTitle, navButtons, navList, header, content };
           }
           return null;
         };
@@ -3239,7 +3271,7 @@ class MainActivity : ComponentActivity() {
           });
           const parts = findSettingsParts();
           if (!parts) return null;
-          const { modal, nav, navButtons, navList, content } = parts;
+          const { modal, nav, navTitle, navList, header, content } = parts;
           modal.setAttribute('data-dsh-mobile-settings-dialog', '');
           const overlay = modal.parentElement;
           if (overlay) {
@@ -3252,15 +3284,11 @@ class MainActivity : ComponentActivity() {
           }
           nav.setAttribute('data-dsh-mobile-settings-nav', '');
 
-          const navTitle = nav.firstElementChild;
-          if (navTitle) navTitle.setAttribute('data-dsh-mobile-settings-nav-title', '');
+          navTitle.setAttribute('data-dsh-mobile-settings-nav-title', '');
           navList.setAttribute('data-dsh-mobile-settings-nav-list', '');
+          header.setAttribute('data-dsh-mobile-settings-header', '');
           content.setAttribute('data-dsh-mobile-settings-content', '');
-
-          const header = content.firstElementChild;
-          const options = content.lastElementChild;
-          if (header) header.setAttribute('data-dsh-mobile-settings-header', '');
-          if (options && options !== header) options.setAttribute('data-dsh-mobile-settings-options', '');
+          content.setAttribute('data-dsh-mobile-settings-options', '');
           return parts;
         };
 
