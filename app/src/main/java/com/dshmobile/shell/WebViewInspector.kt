@@ -126,12 +126,35 @@ internal class WebViewInspector(
               rect:{x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)},
               visible:r.width>0&&r.height>0&&getComputedStyle(el).visibility!=='hidden'};
           });
+          // This is diagnostic state only. Never collect model identifiers,
+          // provider endpoints, credentials, input values or error messages.
+          // The upstream DSH ModelListEditor translates these exact labels.
+          var fetchLabels=['获取可用模型','Fetch available models','利用可能なモデルを取得'];
+          var fetchingLabels=['正在询问提供商…','Asking the provider…','プロバイダーに問い合わせ中…'];
+          var pickerLabels=['选择模型','Choose models','モデルを選択'];
+          var modelFetchButton=Array.prototype.slice.call(document.querySelectorAll('button')).find(function(el){
+            var label=(el.textContent||'').trim();
+            return fetchLabels.indexOf(label)>=0||fetchingLabels.indexOf(label)>=0;
+          });
+          var modelFetchLabel=modelFetchButton?(modelFetchButton.textContent||'').trim():'';
+          var modelPicker=Array.prototype.slice.call(document.querySelectorAll('[role="dialog"]')).some(function(el){
+            return pickerLabels.indexOf((el.getAttribute('aria-label')||'').trim())>=0;
+          });
+          var modelDiscovery={
+            buttonPresent:!!modelFetchButton,
+            buttonDisabled:!!(modelFetchButton&&modelFetchButton.disabled),
+            buttonVisible:!!(modelFetchButton&&modelFetchButton.getBoundingClientRect().width>0&&
+              modelFetchButton.getBoundingClientRect().height>0),
+            askingProvider:fetchingLabels.indexOf(modelFetchLabel)>=0,
+            pickerOpen:modelPicker
+          };
           var nav=performance.getEntriesByType('navigation')[0];
           return JSON.stringify({
             origin:location.origin,path:location.pathname.slice(0,160),
             readyState:document.readyState,
             viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},
             dom:{totalElements:document.getElementsByTagName('*').length,items:items},
+            modelDiscovery:modelDiscovery,
             timing:nav?{domContentLoadedMs:Math.round(nav.domContentLoadedEventEnd),
               loadMs:Math.round(nav.loadEventEnd),durationMs:Math.round(nav.duration)}:null
           });
