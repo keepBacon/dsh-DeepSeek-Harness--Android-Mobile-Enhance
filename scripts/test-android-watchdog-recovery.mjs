@@ -7,7 +7,7 @@ assert.ok(service.includes('notificationManager.notify(NOTIFICATION_ID, buildNot
 assert.ok(service.includes('if (probe.optBoolean("running", false)) {\n            clearProbeFailures()'))
 assert.ok(service.includes('if (stopRequested.get() || EngineManager.isMaintenanceMode() || restartInFlight.get())'),
   'watchdog must not resurrect the Host after explicit Stop')
-assert.ok(service.includes('if (engineManager.isEngineProcessAlive()) {\n            markUnresponsiveHost()'))
+assert.ok(service.includes('if (engineManager.isEngineProcessAlive()) {\n            if (stopRequested.get() || generation != lifecycleGeneration.get()) return@scheduleWithFixedDelay\n            markUnresponsiveHost()'))
 assert.ok(!service.includes('if (engineManager.isEngineProcessAlive()) {\n            engineManager.stopEngine()'))
 assert.ok(service.includes('ACTION_RESTART'))
 assert.ok(service.includes('restartOnUserRequest(generation)'))
@@ -18,6 +18,11 @@ assert.ok(service.includes('engineManager.stopEngine()'), 'manual restart must s
 assert.ok(service.includes('if (stopped && !stopRequested.get()) {'))
 assert.ok(service.includes('stopRequested.set(true)'), 'explicit stop must cancel pending restart')
 assert.ok(service.includes('engineManager.startEngine(runtimeAlreadyChecked = true)'))
+const restart = service.slice(service.indexOf('private fun restartOnUserRequest('), service.indexOf('override fun onCreate()'))
+assert.ok(!restart.includes('clearProbeFailures()'),
+  'failed manual restart must not hide the degraded Host warning')
+assert.ok(service.includes('if (probe.optBoolean("running", false)) {\\n            clearProbeFailures()'.replace('\\n','\\n')),
+  'verified live Host must clear degraded notification')
 // Model the only state transition that can trigger a restart in the service.
 let failed=0,visible=false,restarts=0
 const probe=(running,processAlive,requestRestart=false)=>{
