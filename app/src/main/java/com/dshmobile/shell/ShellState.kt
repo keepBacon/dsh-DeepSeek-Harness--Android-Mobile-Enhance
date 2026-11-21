@@ -11,6 +11,7 @@ object ShellState {
   private const val PREFS = "dsh-shell"
   private const val PICK_TOKEN = "pick-token"
   private const val LAST_WORKSPACE_PATH = "last-workspace-path"
+  private const val EXTERNAL_FILE_CHOOSER_DIR = "external-file-chooser-dir"
   private const val INTERFACE_MODE = "interface-mode"
   private const val SAFE_MODE = "safe-mode"
   private const val NORMAL_MCP_DIAGNOSTIC = "normal-mcp-diagnostic-disabled"
@@ -42,6 +43,21 @@ object ShellState {
       .apply()
   }
 
+
+  /**
+   * Separate from the Host session cwd: the user's external file attachment
+   * directory is not overwritten when a DSH session uses its private HOME.
+   */
+  fun externalFileChooserDirectory(context: Context): String? =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .getString(EXTERNAL_FILE_CHOOSER_DIR, null)
+      ?.takeIf { it.startsWith("/") }
+
+  fun rememberExternalFileChooserDirectory(context: Context, path: String) {
+    if (!path.startsWith("/")) return
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit().putString(EXTERNAL_FILE_CHOOSER_DIR, path).apply()
+  }
 
   /** Persistent Android shell layout choice. */
   fun interfaceMode(context: Context): String {
