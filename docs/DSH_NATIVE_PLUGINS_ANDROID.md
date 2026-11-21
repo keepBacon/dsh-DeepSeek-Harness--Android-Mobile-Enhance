@@ -73,3 +73,20 @@ home/profile directories, sessions and signing identity across upgrades.
 
 Source checks and GitHub CI do **not** constitute physical Android or
 provider-login acceptance. Do not merge a release with failed checks.
+
+## Model discovery and modal layering (DSH 0.2.2-rc.5)
+
+Upstream `ModelListEditor` opens a second body-portaled `Modal` for
+**Fetch available models** (and other nested confirmations). The upstream
+`ui-primitives` modal root uses `z-index: 1000`; Android must not assign
+an excessively high z-index to the Settings overlay. The Android shell chrome
+is below Settings, and Settings is below secondary upstream dialogs. The same
+layering applies to provider credentials and plugin-owned dialogs. The fix
+preserves the upstream React events, network discovery RPC and form state.
+
+A disabled Fetch button may instead mean that the form lacks a URL, protocol,
+or required API key. Upstream signals that in the button's `disabled` and
+`title` attributes; do not simulate requests or bypass validation.
+
+Test: `node scripts/test-android-settings-four-seat.mjs` checks stacking
+order, Settings navigation and source-level form preservation.
