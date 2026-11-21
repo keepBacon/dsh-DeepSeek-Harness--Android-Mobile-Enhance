@@ -545,7 +545,17 @@ class MainActivity : ComponentActivity() {
             if (url == "about:blank") return false
             if (routed) return true
             routed = true
-            if (isEngineSource(url)) webView.loadUrl(url) else openInExternalBrowser(Uri.parse(url))
+            // target=_blank is a separate browsing context. Never replace
+            // the main DSH WebView: doing so destroys unsaved model drafts,
+            // plugin forms, composer text and pending session UI state.
+            // Mirrors upstream Electron's external-browser policy. No
+            // privileged Android bridge is installed into this popup.
+            val target = Uri.parse(url)
+            if (target.scheme.equals("http", true) || target.scheme.equals("https", true)) {
+              openInExternalBrowser(target)
+            } else {
+              Log.w("dsh-web", "Blocked popup navigation with non-HTTP(S) scheme")
+            }
             try { popup.destroy() } catch (_: Throwable) {}
             return true
           }
