@@ -41,7 +41,7 @@ TOOL_SEEDS = (
     # Git / GitHub CLI must be real Termux ARM64 packages, not desktop binaries.
     # Pin by the SHA256-bearing Termux package index at build time and include
     # the HTTPS trust store, SSH transport and remote helper dependencies.
-    "git", "gh", "openssh", "ca-certificates",
+    "git", "gh", "openssh", "ca-certificates", "curl",
     # Search/navigation: keep the Termux ARM64 pcre2, findutils, ncurses deps.
     "ripgrep", "fd", "fzf",
     # Real Termux/Android ARM64 C/C++ compiler and build/link toolchain.
@@ -54,7 +54,7 @@ TOOL_SEEDS = (
 )
 TOOL_COMMANDS = (
     "jq", "yq", "7zz", "openssl", "file",
-    "dig", "aapt2", "gzip", "git", "gh", "ssh",
+    "dig", "aapt2", "gzip", "git", "gh", "ssh", "curl",
     "rg", "fd", "fzf",
     "clang", "clang++", "make", "cmake", "ninja", "ld.lld", "pkg-config",
     "qemu-x86_64", "lua-language-server",

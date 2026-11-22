@@ -29,6 +29,12 @@ export async function androidSenseNovaCompletionsFetch(input, init) {
   if (!androidSenseNovaEligible(input, init)) return await fetch(input, init)
   try {
     const url = new URL(input instanceof Request ? input.url : input)
+    // Choose transport BEFORE sending a non-idempotent, billable POST.
+    // Never retry after any failed/completed dispatch: it may have reached
+    // SenseNova even if the response could not be read.
+    if (typeof androidCurlRequest === 'function' && await androidCurlAvailable()) {
+      return await androidCurlRequest(url, init)
+    }
     return await androidNativeModelStreamingFetch(url, init)
   } catch (nativeError) {
     // Do not expose credentials, request body or URLs in diagnostics.

@@ -2271,6 +2271,12 @@ class EngineManager(private val context: Context, private val pickToken: String?
       env["PAGER"] = "cat"
       env["npm_config_git"] = gitBin.absolutePath
     }
+    // The Android Termux curl ELF provides an independent, verified-TLS
+    // transport when embedded Node's two HTTP stacks cannot reach SenseNova.
+    // The Host adapter invokes it through the existing noexec linker bridge.
+    // Never add secrets or model request bodies to argv/environment here.
+    val modelCurl = File(usrDir, "bin/curl")
+    if (modelCurl.isFile) env["DSH_ANDROID_CURL_BINARY"] = modelCurl.absolutePath
     if (caBundleFile.isFile) {
       env["GIT_SSL_CAINFO"] = caBundleFile.absolutePath
       env["SSL_CERT_FILE"] = caBundleFile.absolutePath
