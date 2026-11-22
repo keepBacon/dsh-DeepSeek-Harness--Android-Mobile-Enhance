@@ -9,7 +9,7 @@ jobs:
   # Mandatory complete upstream dependency resolution when the major DSH
   # family is upgraded. This prevents reusing a 0.1.5 graph under a 0.2 label.
   upstream-upgrade-family:
-    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2')
+    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2') || contains(github.head_ref || github.ref_name, 'ptc-node-linker')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -45,10 +45,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/dsh-android-sandbox/usr/lib"
           ln -s "$RUNNER_TEMP/dsh-graph/node_modules" "$RUNNER_TEMP/dsh-android-sandbox/usr/lib/node_modules"
           DSH_TARGET_VERSION=0.2.2-rc.5 \
-          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash,node-addon-require-builtin,@deepseek-ai/node-addon-system \
+          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash,node-addon-require-builtin,@deepseek-ai/node-addon-system,@deepseek-ai/dsh-ptc-runtime-node \
             node "$GITHUB_WORKSPACE/scripts/android-runtime-patch.mjs" "$RUNNER_TEMP/dsh-android-sandbox/usr"
           DSH_TARGET_VERSION=0.2.2-rc.5 \
-          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash,node-addon-require-builtin,@deepseek-ai/node-addon-system \
+          DSH_COMPAT_ONLY_PACKAGES=@deepseek-ai/dsh-sandbox-local,@deepseek-ai/dsh-subprocess-local,@deepseek-ai/dsh-terminal-bash,node-addon-require-builtin,@deepseek-ai/node-addon-system,@deepseek-ai/dsh-ptc-runtime-node \
             node "$GITHUB_WORKSPACE/scripts/android-runtime-patch.mjs" "$RUNNER_TEMP/dsh-android-sandbox/usr"
   static-preflight:
     runs-on: ubuntu-latest
@@ -128,7 +128,7 @@ jobs:
           done < <(find scripts -maxdepth 1 -type f -name '*.mjs' -print0)
           node scripts/validate-desktop-web-parity.mjs --self-test
           node scripts/validate-agent-preset-parity.mjs --self-test
-          node --check app/src/main/assets/dsh-tool-call-monitor.js
+          node scripts/test-android-ptc-node-launch.mjs
           node scripts/test-mobile-database-contract.mjs
           node scripts/test-android-mcp-registration-contract.mjs
           node scripts/test-android-mcp-startup-deadline.mjs
@@ -197,13 +197,9 @@ jobs:
           grep -Fq 'applyAndroidCodexSubagentCompat()' app/src/main/java/com/dshmobile/shell/EngineManager.kt
           grep -Fq 'applyAndroidCodexRelayTdzCompat()' app/src/main/java/com/dshmobile/shell/EngineManager.kt
           node --check scripts/dsh-mobile-toolbox-mcp.mjs
-          grep -Fq 'data-chat-call-id' app/src/main/assets/dsh-tool-call-monitor.js
-          grep -Fq 'dsh-android-tool-observed' app/src/main/assets/dsh-tool-call-monitor.js
-          grep -Fq 'font:500 10px/' app/src/main/assets/dsh-tool-call-monitor.js
-          if grep -nE 'fetch\(|XMLHttpRequest|sendBeacon|localStorage|sessionStorage' app/src/main/assets/dsh-tool-call-monitor.js; then
-            echo 'Passive monitor must not fetch, upload or persist tool data' >&2
-            exit 1
-          fi
+          test ! -e app/src/main/assets/dsh-tool-call-monitor.js
+          ! grep -Fq 'installPassiveToolCallMonitor' app/src/main/java/com/dshmobile/shell/MainActivity.kt
+          ! grep -Fq 'recordToolObservation' app/src/main/java/com/dshmobile/shell/AndroidBridge.kt
 
       - name: Live MCP stdio wire regression (host fixture)
         shell: bash
