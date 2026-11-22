@@ -68,6 +68,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Reject release/runtime version and APK provenance drift
+        run: python3 -m unittest discover -s scripts -p 'test_dsh_runtime_provenance.py'
+
       - name: Validate extended Termux tool catalog
         shell: bash
         run: |
@@ -771,7 +774,9 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Resolve exact DSH 0.1.5-rc.2 release family
+      # Legacy compatibility regression ONLY. The production signed APK
+      # and upstream plugin parity use 0.2.2-rc.5.
+      - name: Resolve legacy DSH 0.1.5-rc.2 regression family
         shell: bash
         run: |
           set -euo pipefail
@@ -791,7 +796,7 @@ jobs:
           )
           node scripts/dsh-runtime-family.mjs verify-installed             scripts/dsh-release-family-lock.json "$lib/node_modules" 0.1.5-rc.2
 
-      - name: Validate complete published runtime graph
+      - name: Validate legacy published runtime graph (not current APK target)
         shell: bash
         run: |
           set -euo pipefail
