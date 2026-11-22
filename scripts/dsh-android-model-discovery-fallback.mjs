@@ -24,7 +24,7 @@ export async function androidModelDiscoveryFetch(url, options = {}) {
     // Only model listing is allowed to retry: it is an idempotent GET and
     // the upstream caller has already selected /models. Other model calls
     // and every SDK keep the original transport.
-    if (!target.pathname.replace(/\\/+$/, '').endsWith('/models')) throw originalError
+    if (!target.pathname.replace(/\/+$/, '').endsWith('/models')) throw originalError
 
     const maximum = 2 * 1024 * 1024
     try {
@@ -76,10 +76,16 @@ export async function androidModelDiscoveryFetch(url, options = {}) {
                 headers.set(key, Array.isArray(value) ? value.join(', ') : String(value))
               }
               const status = res.statusCode || 502
-              resolve(new Response(
-                status === 204 || status === 205 || status === 304 ? null : body,
-                { status, headers },
-              ))
+              // Response() rejects status 304 even though the upstream
+              // discovery caller needs to report its actual HTTP status.
+              if (status === 304) {
+                resolve({ ok: false, status, headers })
+              } else {
+                resolve(new Response(
+                  status === 204 || status === 205 ? null : body,
+                  { status, headers },
+                ))
+              }
             } catch (error) { reject(error) }
           })
         })
