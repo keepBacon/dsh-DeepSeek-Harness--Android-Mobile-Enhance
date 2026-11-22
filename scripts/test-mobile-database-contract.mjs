@@ -11,7 +11,6 @@ const backup=read('app/src/main/java/com/dshmobile/shell/database/DatabaseBackup
 const bridge=read('app/src/main/java/com/dshmobile/shell/AndroidBridge.kt');
 const activity=read('app/src/main/java/com/dshmobile/shell/MainActivity.kt');
 const engine=read('app/src/main/java/com/dshmobile/shell/EngineManager.kt');
-const monitor=read('app/src/main/assets/dsh-tool-call-monitor.js');
 const basicTools=read('scripts/dsh-basic-toolbox-mcp.mjs');
 const nativeBuild=read('scripts/ci-assemble-github-runtime.py');
 assert.match(basicTools,/function archiveBinary\(\)/);
@@ -33,7 +32,6 @@ assert.match(runtimePatch,/tools\.schemas\(exec\.agent, exec\.toolSet\)/);
 
 const classifier=read('app/src/main/java/com/dshmobile/shell/database/ToolErrorClassifier.kt');
 const dispatcher=read('app/src/main/java/com/dshmobile/shell/database/ToolObservationDispatcher.kt');
-execFileSync(process.execPath,['--check',new URL('../app/src/main/assets/dsh-tool-call-monitor.js',import.meta.url).pathname]);
 for(const table of ['registry_snapshots','registry_entries','tool_observations','extension_inventory','session_index','audit_events']){
  assert.ok(db.includes('CREATE TABLE '+table),'missing database table '+table);
 }
@@ -76,11 +74,8 @@ assert.match(index,/An inaccessible public Documents mount is a partial scan/);
 assert.match(index,/catch \(_: Exception\) \{[\s\S]*?false[\s\S]*?\}/);
 
 assert.match(index,/complete = false\s+continue/);
-assert.equal((bridge.match(/fun recordToolObservation\(/g)||[]).length,1,'duplicate Android bridge method');
-assert.equal((bridge.match(/private val onRecordToolObservation:/g)||[]).length,1,'duplicate callback');
-assert.match(activity,/onRecordToolObservation =/);
-assert.match(activity,/databaseWriter\.offer/);
-assert.match(activity,/databaseWriter\.close\(\)/);
+assert.doesNotMatch(bridge,/recordToolObservation/);
+assert.doesNotMatch(activity,/installPassiveToolCallMonitor|onRecordToolObservation|databaseWriter/);
 assert.match(activity,/DatabaseBackup\.create/);
 const workspaceProbe=read('app/src/main/assets/dsh-workspace-stream-probe.js');
 assert.match(workspaceProbe,/workspace\/follow/);
@@ -121,23 +116,7 @@ assert.match(engine,/Preserved migration rollback generation/);
 assert.match(engine,/无法完整读取源目录，禁止继续迁移/);
 
 assert.match(activity,/MobileIndexService\(engineManager, db\)\.refresh/);
-assert.match(activity,/script\.replace\(marker, "const MONITOR_CAP = "/);
-assert.match(monitor,/\/\*__DSH_MONITOR_CAP__\*\//);
-assert.match(monitor,/bridge\.recordToolObservation\(/);
-assert.match(monitor,/old\.status !== status/);
-assert.match(monitor,/pendingCalls = new Set\(\)/);
-assert.match(monitor,/if \(queued\) return/);
-assert.match(monitor,/scanTimer = setTimeout/);
-assert.match(monitor,/\.slice\(-MAX_ROWS\)/);
-assert.match(monitor,/observeDom\(scanAll \? null : work\)/);
-assert.match(monitor,/if \(changed\) draw\(\)/);
-assert.match(monitor,/target\?\.closest\('#dsh-pcm-panel,#dsh-pcm-pill'\)/);
-assert.ok(!monitor.includes("requestAnimationFrame(()=>{queued=false;mount();observeDom();draw();})"),
-  'full rescans per animation frame must never return');
-assert.match(classifier,/MCP_SCHEMA_REQUIRED/);
-for(const forbidden of [/fetch\(/,/XMLHttpRequest/,/sendBeacon/,/localStorage/,/sessionStorage/]){
- assert.ok(!forbidden.test(monitor),'monitor unexpectedly uses a network/storage API: '+forbidden);
-}
+assert.doesNotMatch(activity,/dsh-tool-call-monitor\.js|dsh-pcm-pill|dsh-pcm-panel/);
 // Tool settings must expose more than the MCP editor alone.
 assert.match(activity,/private fun showExtendedToolManager\(\)/);
 assert.match(activity,/private fun showToolCatalogSection\(/);
