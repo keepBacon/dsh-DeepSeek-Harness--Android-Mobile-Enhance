@@ -2924,20 +2924,18 @@ class EngineManager(private val context: Context, private val pickToken: String?
     // Resolve the release-family tree once for all plugin dependencies.
     // Repeated walkTopDown() scans would delay Android Web Host startup.
     val runtimeClientPresence = mutableMapOf<String, Boolean>()
-    val priorityPlugins = listOf("dsh-zcode-startplan", "dsh-providers-hub")
-    // Inspect installed Web-profile dependencies, not just two known plugin
-    // names. Backend-only libraries do not need a Web client and are skipped.
+    // Inspect every installed Web-profile dependency generically. A headless
+    // dependency is valid; it must not be judged against a named UI plugin.
     // Bound the metadata scan so an oversized manifest cannot stall boot.
-    val otherPlugins = try {
+    val declaredPlugins = try {
       val manifest = profileManifest(profile)
       val dependencies = JSONObject(manifest.readText()).optJSONObject("dependencies")
       val npmPackageName = Regex("""^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$""")
       dependencies?.keys()?.asSequence()
-        ?.filter { it !in priorityPlugins && !it.startsWith("@deepseek-ai/") &&
-          npmPackageName.matches(it) }
+        ?.filter { !it.startsWith("@deepseek-ai/") && npmPackageName.matches(it) }
         ?.take(96)?.toList().orEmpty()
     } catch (_: Throwable) { emptyList() }
-    for (name in (priorityPlugins + otherPlugins).distinct()) {
+    for (name in declaredPlugins) {
       val packageFile = installedPackageManifest(name, profile)
       if (!packageFile.isFile) continue
       try {
@@ -2945,11 +2943,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
         val parent = packageFile.parentFile ?: continue
         val client = root.optJSONObject("dsh")?.optJSONObject("client")
         if (client == null) {
-          // Most libraries and headless bundles intentionally do not ship a
-          // browser half. ZCode/Providers Hub are explicitly expected to
-          // expose account configuration in the official Plugins panel.
-          if (name in priorityPlugins)
-            warnings += "$name: 未声明 DSH Web client，插件配置页面无法注册"
+          // A server-only bundle or library has no UI by design. The Host
+          // plugin manager, not this metadata observer, owns activation.
           continue
         }
         if (client.optString("platform") != "web") {
@@ -2982,7 +2977,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
         }
         if (packagedFile(clientEntry) == null) {
           warnings += "$name: Web 客户端文件缺失 ($clientEntry)；请安装完整发布包" +
-            if (name == "dsh-providers-hub") "，Git 安装须完成 prepare 构建" else ""
+            "；若由源码安装，请检查 prepare/build 是否生成此产物"
         }
         val bundlePatch = root.optJSONObject("dsh")?.optJSONObject("bundle")
           ?.optString("patch", "").orEmpty()
