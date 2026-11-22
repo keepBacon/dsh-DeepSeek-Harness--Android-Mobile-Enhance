@@ -731,8 +731,13 @@ if (versionAtLeast(targetVersion, '0.2.2-rc.5')) {
     const helperFile = new URL('./dsh-android-model-discovery-fallback.mjs', import.meta.url)
     const helper = fs.readFileSync(helperFile, 'utf8')
       .replace(/^export (async function|function) /gm, '$1 ')
-    txt = txt.replace(discovery, '// ' + marker + '\n' + helper +
-      '\nasync function discoverModels(')
+    // Same private transport provider as Chat Completions: do not introduce
+    // another global fetch, Cordis service container, or API shim.
+    const curlHelper = fs.readFileSync(
+      new URL('./dsh-android-curl-transport.mjs', import.meta.url), 'utf8')
+      .replace(/^export (async function|function) /gm, '$1 ')
+    txt = txt.replace(discovery, '// ' + marker + '\n' + curlHelper +
+      '\n' + helper + '\nasync function discoverModels(')
     txt = txt.replace(call, 'response = await androidModelDiscoveryFetch(url, {')
     txt = txt.replace(error, '`could not reach ${url} (${androidModelDiscoveryFailureHint(error)})`')
     write(file, txt)
