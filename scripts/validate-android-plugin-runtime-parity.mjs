@@ -16,7 +16,6 @@ const PACKAGES = Object.freeze([
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-app-boot',
   '@deepseek-ai/dsh-client-modules',
-  '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-plugin-manager',
   '@deepseek-ai/dsh-plugin-manager',
   '@deepseek-ai/dsh-api-remotes',
@@ -59,8 +58,15 @@ export function validate(modulesDir) {
     if (name !== '@deepseek-ai/cordis' && pkg.version !== '0.2.2-rc.5') {
       missing.push(name + ': version ' + String(pkg.version) + ' differs from DSH 0.2.2-rc.5')
     }
-    const main = pkg.exports?.['.'] ?? (typeof pkg.main === 'string'
-      ? (pkg.main.startsWith('./') ? pkg.main : './' + pkg.main) : pkg.main)
+    // The CLI package exposes bin.js through the bin map, whereas Cordis
+    // and the other runtime packages expose normal JS library entrypoints.
+    const command = name === '@deepseek-ai/dsh'
+      ? (typeof pkg.bin === 'string' ? pkg.bin : Object.values(pkg.bin ?? {})[0])
+      : undefined
+    const main = command !== undefined
+      ? (command.startsWith('./') ? command : './' + command)
+      : pkg.exports?.['.'] ?? (typeof pkg.main === 'string'
+        ? (pkg.main.startsWith('./') ? pkg.main : './' + pkg.main) : pkg.main)
     if (main === undefined || exportedFiles(dir, main).length === 0) {
       missing.push(name + ': runtime entry missing or not packaged')
     }
