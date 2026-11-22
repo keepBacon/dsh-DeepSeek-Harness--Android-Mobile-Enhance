@@ -139,18 +139,18 @@ export async function apply(ctx, config) {
   let lastGood
   const options = () => {
     const raw = current()
-    if (raw === lastRaw && lastGood !== undefined) return { ...lastGood, sessionCookie: session.cookie }
+    if (raw === lastRaw && lastGood !== undefined) return { ...lastGood, sessionCookie: session.cookie, deviceId: session.deviceId }
     try {
       const next = resolveOptions(raw)
       lastRaw = raw
       lastGood = next
-      return { ...next, sessionCookie: session.cookie }
+      return { ...next, sessionCookie: session.cookie, deviceId: session.deviceId }
     } catch (error) {
       if (lastGood === undefined) throw error
       lastRaw = raw
       logger.error?.('today-connector: 配置非法，继续使用上一份可用配置')
       logger.error?.(error)
-      return { ...lastGood, sessionCookie: session.cookie }
+      return { ...lastGood, sessionCookie: session.cookie, deviceId: session.deviceId }
     }
   }
   options()
