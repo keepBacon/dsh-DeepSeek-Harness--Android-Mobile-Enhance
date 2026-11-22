@@ -102,7 +102,7 @@ export async function androidModelDiscoveryFetch(url, options = {}) {
       const exactSenseNova = target.protocol === 'https:'
         && target.hostname === 'token.sensenova.cn'
         && (target.port === '' || target.port === '443')
-        && target.pathname.replace(/\\/+$/, '') === '/v1/models'
+        && target.pathname.replace(/\/+$/, '') === '/v1/models'
         && !target.username && !target.password
       if (exactSenseNova && typeof androidCurlRequest === 'function'
           && await androidCurlAvailable()) {
