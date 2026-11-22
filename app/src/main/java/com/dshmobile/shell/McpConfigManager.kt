@@ -36,7 +36,7 @@ class McpConfigManager(
   /** Both built-in services share an ESM module tree. Verify transitively:
    * one absent indirect import can crash startup and lose a whole namespace. */
   private fun missingToolboxModules(): List<String> {
-    val importPattern = Regex("""(?:from\s+|import\s*\(\s*)['"]\./([A-Za-z0-9._-]+\.mjs)['"]""")
+    val importPattern = Regex("""(?:from\s+|import\s*\(\s*|import\s+)['"]\./([A-Za-z0-9._-]+\.mjs)['"]""")
     val bridge = File(usrDir, "libexec/dsh-mobile/android-exec.sh")
     val missing = mutableListOf<String>()
     if (!bridge.isFile) missing += bridge.name
@@ -118,13 +118,18 @@ class McpConfigManager(
     val root = readRootSafe()
     if (!safeMode) {
       if (root.optBoolean("toolboxEnabled", true)) {
-        if (!toolboxFile.isFile || !basicToolboxFile.isFile)
-          throw java.io.IOException("内置 MCP 工具箱文件缺失；需要修复 DSH 运行时")
+        // A broken built-in namespace must not prevent the Web Gateway,
+        // sessions, and separately configured external MCP servers from
+        // booting. Preserve all user configuration and report the missing
+        // runtime files in the existing diagnostics until runtime repair.
         val missing = missingToolboxModules()
-        if (missing.isNotEmpty())
-          throw java.io.IOException("内置 MCP 依赖模块缺失：" + missing.joinToString(", "))
-        rows += toolboxRow()
-        rows += basicToolboxRow()
+        if (missing.isEmpty()) {
+          rows += toolboxRow()
+          rows += basicToolboxRow()
+        } else {
+          Log.e(tag, "Skipping unavailable built-in MCP toolboxes: " +
+            missing.joinToString(", "))
+        }
       }
       readServersForRuntime(root).filter { it.enabled }.forEach { server ->
         val issue = externalStdioLaunchIssue(server)
@@ -441,7 +446,15 @@ class McpConfigManager(
     val localBin = if (Regex("[A-Za-z0-9_.+-]{1,128}").matches(command)) {
       File(usrDir, "bin/$command").takeIf { it.isFile }
     } else null
-    val requested = localBin ?: if (command.startsWith("/")) File(command) else null
+    val requested = localBin ?: when {
+      command.startsWith("/") -> File(command)
+      // Relative executable paths in user MCP configuration are resolved
+      // against the same cwd that the DSH MCP client receives. Android's
+      // noexec app-private filesystem requires the linker bridge for these,
+      // just like absolute app-private binaries.
+      command.contains('/') -> File(server.cwd.ifBlank { homeDir.absolutePath }, command)
+      else -> null
+    }
     val privateRoot = context.filesDir.canonicalFile.toPath()
     val local = try {
       requested?.takeIf { it.isFile && it.canonicalFile.toPath().startsWith(privateRoot) }
