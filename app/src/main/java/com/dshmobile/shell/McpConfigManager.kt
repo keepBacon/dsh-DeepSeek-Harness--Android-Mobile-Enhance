@@ -17,6 +17,10 @@ data class McpServerConfig(
   val cwd: String = "",
   val url: String = "",
   val bearerAuth: Boolean = false,
+  // Names only. Values are encrypted in Android Keystore, never stored in
+  // mobile/mcp-servers.json, the generated Cordis patch, or diagnostic logs.
+  val envKeys: List<String> = emptyList(),
+  val headerKeys: List<String> = emptyList(),
   val enabled: Boolean = true,
   val preset: String = "generic",
 )
@@ -109,6 +113,18 @@ class McpConfigManager(
       if (!server.enabled || server.transport != HTTP || !server.bearerAuth) continue
       SecureCredentialStore.mcpBearerToken(context, server.id)?.let { result[tokenEnvName(server.id)] = it }
     }
+    for (server in listServers().filter { it.enabled }) {
+      for (key in server.envKeys) {
+        SecureCredentialStore.mcpField(context, server.id, "env", key)?.let {
+          result[fieldEnvName(server.id, "env", key)] = it
+        }
+      }
+      for (key in server.headerKeys) {
+        SecureCredentialStore.mcpField(context, server.id, "header", key)?.let {
+          result[fieldEnvName(server.id, "header", key)] = it
+        }
+      }
+    }
     return result
   }
 
@@ -163,7 +179,19 @@ class McpConfigManager(
    * the log with MODULE_NOT_FOUND on every restart.
    */
   private fun externalStdioLaunchIssue(server: McpServerConfig): String? {
-    if (server.transport != STDIO || !server.enabled) return null
+    if (!server.enabled) return null
+    if (server.transport == HTTP && server.bearerAuth &&
+        !SecureCredentialStore.hasMcpBearerToken(context, server.id))
+      return "Bearer credential missing in Android Keystore"
+    for (key in server.envKeys) {
+      if (SecureCredentialStore.mcpField(context, server.id, "env", key).isNullOrEmpty())
+        return "environment credential missing: " + key
+    }
+    for (key in server.headerKeys) {
+      if (SecureCredentialStore.mcpField(context, server.id, "header", key).isNullOrEmpty())
+        return "HTTP header credential missing: " + key
+    }
+    if (server.transport != STDIO) return null
     val paths = mutableListOf(server.command)
     // Only examine executable-like script arguments, not arbitrary positional
     // arguments such as output locations or URLs.
@@ -232,6 +260,14 @@ class McpConfigManager(
    * must not suppress unrelated working MCP servers. The settings diagnostic
    * still uses strict readServers() and reports the configuration problem.
    */
+  private fun readSecretKeys(obj: JSONObject, field: String): List<String> {
+    if (!obj.has(field)) return emptyList()
+    val array = obj.optJSONArray(field)
+      ?: throw IllegalArgumentException(field + " must be a list")
+    require(array.length() <= 32) { field + " has too many values" }
+    return List(array.length()) { index -> array.getString(index) }
+  }
+
   private fun readServersForRuntime(root: JSONObject): List<McpServerConfig> {
     if (root.optInt("schema", 1) != 1) {
       Log.w(tag, "Unsupported MCP config schema; external servers not loaded")
@@ -254,6 +290,8 @@ class McpConfigManager(
           cwd = obj.optString("cwd", ""),
           url = obj.optString("url", ""),
           bearerAuth = obj.optBoolean("bearerAuth", false),
+          envKeys = readSecretKeys(obj, "envKeys"),
+          headerKeys = readSecretKeys(obj, "headerKeys"),
           enabled = obj.optBoolean("enabled", true),
           preset = obj.optString("preset", "generic"),
         )
@@ -288,6 +326,8 @@ class McpConfigManager(
         cwd = obj.optString("cwd", ""),
         url = obj.optString("url", ""),
         bearerAuth = obj.optBoolean("bearerAuth", false),
+        envKeys = readSecretKeys(obj, "envKeys"),
+        headerKeys = readSecretKeys(obj, "headerKeys"),
         enabled = obj.optBoolean("enabled", true),
         preset = obj.optString("preset", "generic"),
       )
@@ -311,6 +351,8 @@ class McpConfigManager(
         .put("cwd", server.cwd)
         .put("url", server.url)
         .put("bearerAuth", server.bearerAuth)
+        .put("envKeys", JSONArray(server.envKeys))
+        .put("headerKeys", JSONArray(server.headerKeys))
         .put("enabled", server.enabled)
         .put("preset", server.preset))
     }
@@ -345,13 +387,27 @@ class McpConfigManager(
   private fun validate(server: McpServerConfig) {
     UUID.fromString(server.id)
     require(Regex("^[A-Za-z0-9_-]{1,32}$").matches(server.serverName) && server.serverName !in BUILTIN_NAMES) { "MCP 命名空间无效" }
+    require(server.envKeys.size <= 32 && server.envKeys.distinct().size == server.envKeys.size &&
+      server.envKeys.all { Regex("^[A-Za-z_][A-Za-z0-9_]{0,127}$").matches(it) }) {
+      "stdio 环境变量名称无效或重复"
+    }
+    require(server.headerKeys.size <= 32 &&
+      server.headerKeys.map { it.lowercase() }.distinct().size == server.headerKeys.size &&
+      server.headerKeys.all { Regex("^[A-Za-z0-9!#\\$%&'*+.^_`|~-]{1,128}$").matches(it) }) {
+      "HTTP Header 名称无效或重复"
+    }
     when (server.transport) {
       STDIO -> {
         require(server.command.isNotBlank() && !server.command.contains('\n') && server.args.size <= 64) { "stdio 配置无效" }
+        require(server.headerKeys.isEmpty()) { "stdio 不支持 HTTP Headers" }
       }
       HTTP -> {
         val uri = URI(server.url)
         require((uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank() && uri.rawUserInfo == null) { "MCP URL 无效" }
+        require(server.envKeys.isEmpty()) { "HTTP 不支持 stdio 环境变量" }
+        require(!server.bearerAuth || server.headerKeys.none { it.equals("Authorization", ignoreCase = true) }) {
+          "Bearer 与自定义 Authorization Header 不能同时配置"
+        }
       }
       else -> error("不支持的 MCP transport")
     }
@@ -492,14 +548,26 @@ class McpConfigManager(
       append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
       append("      GIT_CONFIG_SYSTEM: ").append(JSONObject.quote(File(usrDir, "etc/gitconfig").absolutePath)).append('\n')
       append("      GIT_TERMINAL_PROMPT: \"0\"\n")
+      // Published dsh-mcp-client merges these values with its scrubbed
+      // ambient environment. Only the encrypted-value reference is written.
+      for (key in server.envKeys) {
+        append("      ").append(JSONObject.quote(key)).append(": !!js 'process.env.")
+          .append(fieldEnvName(server.id, "env", key)).append(" ?? \"\"'\n")
+      }
       append("    cwd: ").append(JSONObject.quote(server.cwd.ifBlank { homeDir.absolutePath })).append('\n')
     } else {
       append("    url: ").append(JSONObject.quote(server.url)).append('\n')
-      if (server.bearerAuth) {
+      if (server.bearerAuth || server.headerKeys.isNotEmpty()) {
         append("    headers:\n")
-        append("      Authorization: !!js '`Bearer \${process.env.")
-        append(tokenEnvName(server.id))
-        append(" ?? \"\"}`'\n")
+        for (key in server.headerKeys) {
+          append("      ").append(JSONObject.quote(key)).append(": !!js 'process.env.")
+            .append(fieldEnvName(server.id, "header", key)).append(" ?? \"\"'\n")
+        }
+        if (server.bearerAuth) {
+          append("      Authorization: !!js '`Bearer \${process.env.")
+          append(tokenEnvName(server.id))
+          append(" ?? \"\"}`'\n")
+        }
       } else {
         append("    headers: {}\n")
       }
@@ -519,5 +587,11 @@ class McpConfigManager(
     const val BUILTIN_BASIC = "basic_tools"
     val BUILTIN_NAMES = setOf(BUILTIN, BUILTIN_BASIC)
     fun tokenEnvName(id: String): String = "DSH_ANDROID_MCP_TOKEN_" + id.uppercase().replace(Regex("[^A-Z0-9]"), "_")
+    fun fieldEnvName(id: String, kind: String, name: String): String {
+      val hash = java.security.MessageDigest.getInstance("SHA-256")
+        .digest((kind + ":" + name).toByteArray(Charsets.UTF_8))
+        .take(12).joinToString("") { "%02X".format(it.toInt() and 0xff) }
+      return "DSH_ANDROID_MCP_FIELD_" + id.uppercase().replace(Regex("[^A-Z0-9]"), "_") + "_" + hash
+    }
   }
 }

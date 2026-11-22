@@ -4691,6 +4691,24 @@ class MainActivity : ComponentActivity() {
       visibility = if (isHttp) View.GONE else View.VISIBLE
     }
     root.addView(args)
+    val cwd = android.widget.EditText(this).apply {
+      hint = "stdio 工作目录（可选）"
+      setSingleLine(true)
+      visibility = if (isHttp) View.GONE else View.VISIBLE
+    }
+    root.addView(cwd)
+    val env = android.widget.EditText(this).apply {
+      hint = "stdio 环境变量，每行 KEY=value（加密保存）"
+      minLines = 2
+      visibility = if (isHttp) View.GONE else View.VISIBLE
+    }
+    root.addView(env)
+    val headers = android.widget.EditText(this).apply {
+      hint = "HTTP Headers，每行 Header: value（加密保存）"
+      minLines = 2
+      visibility = if (isHttp) View.VISIBLE else View.GONE
+    }
+    root.addView(headers)
     val bearer = android.widget.CheckBox(this).apply {
       text = "使用 Bearer Token"
       visibility = if (isHttp) View.VISIBLE else View.GONE
@@ -4705,32 +4723,58 @@ class MainActivity : ComponentActivity() {
 
     val dialog = android.app.AlertDialog.Builder(this)
       .setTitle(if (preset == "ida") "添加 IDA MCP" else "添加 MCP")
-      .setView(root)
+      .setView(android.widget.ScrollView(this).apply { addView(root) })
       .setNegativeButton("取消", null)
       .setPositiveButton("保存", null)
       .create()
     dialog.setOnShowListener {
       dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
         val serverName = name.text?.toString()?.trim().orEmpty()
-        if (!Regex("""^[A-Za-z0-9_-]{1,32}$""").matches(serverName) || serverName == McpConfigManager.BUILTIN) {
+        if (!Regex("""^[A-Za-z0-9_-]{1,32}$""").matches(serverName) || serverName in McpConfigManager.BUILTIN_NAMES) {
           name.error = "命名空间无效"; return@setOnClickListener
         }
         val value = primary.text?.toString()?.trim().orEmpty()
         if (value.isBlank()) { primary.error = "不能为空"; return@setOnClickListener }
+        fun parseExtras(field: android.widget.EditText, delimiter: Char): Map<String, String>? {
+          val out = linkedMapOf<String, String>()
+          for (line in field.text?.toString().orEmpty().lineSequence()) {
+            if (line.isBlank()) continue
+            val at = line.indexOf(delimiter)
+            if (at <= 0) { field.error = "每行必须包含名称与分隔符"; return null }
+            val key = line.substring(0, at).trim()
+            val secret = line.substring(at + 1).trim()
+            if (key.isBlank() || secret.isEmpty() || key in out) {
+              field.error = "名称重复或值为空"; return null
+            }
+            out[key] = secret
+          }
+          return out
+        }
+        val envValues = if (isHttp) emptyMap() else parseExtras(env, '=') ?: return@setOnClickListener
+        val headerValues = if (isHttp) parseExtras(headers, ':') ?: return@setOnClickListener else emptyMap()
+        if (isHttp && bearer.isChecked && headerValues.keys.any { it.equals("Authorization", ignoreCase = true) }) {
+          headers.error = "Bearer 与 Authorization Header 不能同时设置"
+          return@setOnClickListener
+        }
         val server = McpServerConfig(
           id = java.util.UUID.randomUUID().toString(),
           serverName = serverName,
           transport = transport,
           command = if (isHttp) "" else value,
           args = if (isHttp) emptyList() else args.text?.toString()?.lines()?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty(),
+          cwd = if (isHttp) "" else cwd.text?.toString()?.trim().orEmpty(),
           url = if (isHttp) value else "",
           bearerAuth = isHttp && bearer.isChecked,
+          envKeys = envValues.keys.toList(),
+          headerKeys = headerValues.keys.toList(),
           enabled = true,
           preset = preset,
         )
         val bearerToken = token.text?.toString()?.trim().orEmpty().takeIf { it.isNotBlank() }
         dialog.dismiss()
-        runProfileMutation("正在应用 MCP 配置…") { engineManager.saveMcpServer(server, bearerToken) }
+        runProfileMutation("正在应用 MCP 配置…") {
+          engineManager.saveMcpServer(server, bearerToken, envValues, headerValues)
+        }
       }
     }
     dialog.show()

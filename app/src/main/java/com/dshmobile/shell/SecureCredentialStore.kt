@@ -25,6 +25,7 @@ object SecureCredentialStore {
   private const val GIT_TOKEN = "git-token"
   private const val SSH_PASSPHRASE = "ssh-passphrase"
   private const val MCP_TOKEN_PREFIX = "mcp-bearer:"
+  private const val MCP_FIELD_PREFIX = "mcp-field:"
 
   private fun prefs(context: Context) = context.applicationContext
     .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -147,5 +148,33 @@ object SecureCredentialStore {
 
   fun clearMcpBearerToken(context: Context, id: String) {
     prefs(context).edit().remove(mcpTokenKey(id)).apply()
+  }
+
+  private fun mcpFieldKey(id: String, kind: String, name: String): String {
+    mcpTokenKey(id) // Validate the stable server ID.
+    require(kind == "env" || kind == "header") { "Unsupported MCP field kind" }
+    require(name.isNotBlank() && name.length <= 128 && !name.contains(':')) { "Invalid MCP field" }
+    return MCP_FIELD_PREFIX + id + ":" + kind + ":" + name
+  }
+
+  fun saveMcpField(context: Context, id: String, kind: String, name: String, value: String) {
+    require(value.isNotEmpty() && value.length <= 32 * 1024 &&
+      !value.contains('\u0000') && !value.contains('\n') && !value.contains('\r')) {
+      "MCP credential value is invalid"
+    }
+    prefs(context).edit().putString(mcpFieldKey(id, kind, name), encrypt(value)).apply()
+  }
+
+  fun mcpField(context: Context, id: String, kind: String, name: String): String? =
+    decrypt(prefs(context).getString(mcpFieldKey(id, kind, name), null))
+
+  fun clearMcpFields(context: Context, id: String) {
+    mcpTokenKey(id)
+    val prefix = MCP_FIELD_PREFIX + id + ":"
+    val edit = prefs(context).edit()
+    for (key in prefs(context).all.keys) {
+      if (key.startsWith(prefix)) edit.remove(key)
+    }
+    edit.apply()
   }
 }
