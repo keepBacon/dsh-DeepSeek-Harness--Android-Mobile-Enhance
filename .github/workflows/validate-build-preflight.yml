@@ -41,6 +41,7 @@ jobs:
           test -f node_modules/@deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js
           test -f node_modules/@deepseek-ai/dsh/lib/bin.js
           node "$GITHUB_WORKSPACE/scripts/validate-android-plugin-runtime-parity.mjs" node_modules
+          node "$GITHUB_WORKSPACE/scripts/test-android-cordis-runtime-parity.mjs" node_modules
           # Exercise actual 0.2.2 compiled bundles before a costly ARM64
           # runtime rebuild. Keep the 0.1.5-specific contract tests separate.
           mkdir -p "$RUNNER_TEMP/dsh-android-sandbox/usr/lib"
