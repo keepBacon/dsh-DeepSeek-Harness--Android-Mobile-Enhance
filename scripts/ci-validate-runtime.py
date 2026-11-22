@@ -2,6 +2,72 @@
 """Fail-closed, read-only archive inspection, not an Android native smoke test."""
 import argparse, hashlib, json, pathlib, re, sys, tarfile
 
+# The shipped Web UI and model tool bridge must be present in the actual
+# archive, not just in the CI runner's separately-resolved NPM graph.
+REQUIRED_RUNTIME_PACKAGES = (
+ '@deepseek-ai/dsh',
+ '@deepseek-ai/dsh-client-ui-plugin-manager',
+ '@deepseek-ai/dsh-mcp-client',
+ '@deepseek-ai/dsh-tools',
+ '@deepseek-ai/cordis',
+ '@deepseek-ai/schemastery',
+)
+
+
+def verify_family_identity(family, bundled_family, installed, compat, install_lock_sha,
+                           expected_version=None, expected_commit=None):
+ """Read-only release provenance check over the *archived* runtime inventory."""
+ if family.get('schema') != 2 or not isinstance(family.get('packages'), list):
+  raise ValueError('invalid DSH release-family lock')
+ version=family.get('version')
+ if not isinstance(version,str) or not version:
+  raise ValueError('release-family version missing')
+ if expected_version is not None and version!=expected_version:
+  raise ValueError('build target DSH version mismatch: '+str(version)+'; expected '+expected_version)
+ if bundled_family!=family:
+  raise ValueError('packaged DSH release-family lock differs from build input')
+ if not isinstance(installed,dict):
+  raise ValueError('packaged DSH module manifest inventory missing')
+ if not isinstance(compat,dict):
+  raise ValueError('packaged Android DSH compatibility manifest missing')
+ if not isinstance(install_lock_sha,str) or len(install_lock_sha)!=64:
+  raise ValueError('packaged npm install lock missing')
+ packages=set(family['packages'])
+ vendors=family.get('vendorPackages')
+ if not isinstance(vendors,dict) or '@deepseek-ai/cordis' not in vendors:
+  raise ValueError('incomplete Cordis vendor release lock')
+ for name in REQUIRED_RUNTIME_PACKAGES:
+  if name not in installed:
+   raise ValueError('packaged runtime missing required plugin package: '+name)
+ checked=0
+ for name,manifest in installed.items():
+  if not isinstance(manifest,dict) or manifest.get('name')!=name:
+   raise ValueError('packaged manifest name mismatch: '+name)
+  if name=='@deepseek-ai/dsh' or name.startswith('@deepseek-ai/dsh-'):
+   if name not in packages:
+    raise ValueError('packaged DSH module absent from release family: '+name)
+   expected=version
+  elif name in vendors:
+   expected=vendors[name]
+  else:
+   continue
+  if manifest.get('version')!=expected:
+   raise ValueError('packaged module version skew: '+name+'@'+str(manifest.get('version'))+'; expected '+str(expected))
+  checked+=1
+ # Pin a real published graph, not a leftover handful of old seed modules.
+ if checked<200:
+  raise ValueError('packaged DSH release graph is incomplete: '+str(checked)+' validated modules')
+ if compat.get('dsh')!=version:
+  raise ValueError('packaged Android compatibility version does not match DSH')
+ if expected_commit is not None and compat.get('dshSourceCommit')!=expected_commit:
+  raise ValueError('packaged DSH source commit differs from pinned upstream')
+ if compat.get('dshReleaseFamilyLocked') is not True or compat.get('cordisVendorLocked') is not True:
+  raise ValueError('packaged Android runtime lacks verified family/vendor flags')
+ if compat.get('dshNpmLockSha256')!=install_lock_sha:
+  raise ValueError('packaged npm install lock SHA256 differs from Android metadata')
+ return checked
+
+
 REQUIRED = (
  'usr/bin/node','usr/bin/npm','usr/bin/npx','usr/bin/pnpm',
  'usr/lib/node_modules/npm/package.json',
@@ -23,6 +89,10 @@ REQUIRED = (
  'usr/bin/lua-language-server',
  'usr/lib/node_modules/@deepseek-ai/dsh/package.json',
  'usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
+ 'usr/lib/node_modules/@deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js',
+ 'usr/lib/dsh-release-family.json',
+ 'usr/lib/dsh-release-install-lock.json',
+ 'usr/etc/dsh-android-compat.json',
  'usr/libexec/dsh-mobile/android-sandbox-runner.sh',
  'usr/libexec/dsh-mobile/android-exec.sh',
  'usr/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs',
@@ -65,10 +135,11 @@ REQUIRED = (
  'usr/libexec/dsh/wrappers/apt',
  'usr/libexec/dsh/wrappers/dpkg',
 )
-def validate(snapshot, lock):
+def validate(snapshot, lock, expected_version=None, expected_commit=None):
  if not snapshot.is_file() or snapshot.stat().st_size < 1024*1024:
   raise ValueError('missing or placeholder runtime archive')
- version=json.loads(lock.read_text())['version']
+ family=json.loads(lock.read_text())
+ version=family['version']
  found=set()
  pnpm_entrypoint=False
  npm_manifest=None
@@ -77,6 +148,10 @@ def validate(snapshot, lock):
  entries=0
  verified_provider=0
  verified_renderer=0
+ packaged_family=None
+ installed={}
+ compat=None
+ install_lock_sha=None
  with tarfile.open(snapshot,'r:xz') as f:
   for member in f:
    entries+=1
@@ -100,6 +175,22 @@ def validate(snapshot, lock):
    if name=='usr/lib/node_modules/@deepseek-ai/dsh/package.json':
     if not member.isfile() or member.size>1024*1024: raise ValueError('bad DSH manifest')
     package=json.load(f.extractfile(member))
+   if re.fullmatch(r'usr/lib/node_modules/@deepseek-ai/[^/]+/package\.json',name):
+    if not member.isfile() or member.size>1024*1024:
+     raise ValueError('invalid archived DSH package manifest: '+name)
+    obj=json.load(f.extractfile(member))
+    module='@deepseek-ai/'+name.split('/')[4]
+    if module in installed: raise ValueError('duplicate archived DSH manifest: '+module)
+    installed[module]=obj
+   if name=='usr/lib/dsh-release-family.json':
+    if not member.isfile() or member.size>8*1024*1024: raise ValueError('invalid embedded family lock')
+    packaged_family=json.load(f.extractfile(member))
+   if name=='usr/lib/dsh-release-install-lock.json':
+    if not member.isfile() or member.size>32*1024*1024: raise ValueError('invalid embedded install lock')
+    install_lock_sha=hashlib.sha256(f.extractfile(member).read()).hexdigest()
+   if name=='usr/etc/dsh-android-compat.json':
+    if not member.isfile() or member.size>1024*1024: raise ValueError('invalid Android compat manifest')
+    compat=json.load(f.extractfile(member))
    if member.isfile() and name.endswith('/@deepseek-ai/dsh-web-fetch-http/lib/index.js'):
     if member.size>8*1024*1024:raise ValueError('oversized web_fetch provider bundle')
     source=f.extractfile(member).read().decode('utf-8')
@@ -136,18 +227,23 @@ def validate(snapshot, lock):
  # are checked and patched at the real profile's startup path on Android.
  actual=package.get('version') if isinstance(package,dict) else None
  if actual!=version: raise ValueError('runtime DSH version '+str(actual)+' does not match '+version)
+ checked_packages=verify_family_identity(
+  family,packaged_family,installed,compat,install_lock_sha,
+  expected_version=expected_version,expected_commit=expected_commit)
  sha=hashlib.sha256()
  with snapshot.open('rb') as f:
   for block in iter(lambda:f.read(1024*1024),b''):sha.update(block)
- return dict(dsh_version=actual,runtime_sha256=sha.hexdigest(),archive_entries=entries,checked_paths=len(REQUIRED),verified_web_fetch_providers=verified_provider,verified_web_fetch_renderers=verified_renderer,verification='archive-only; Android execution not tested')
+ return dict(dsh_version=actual,runtime_sha256=sha.hexdigest(),archive_entries=entries,checked_paths=len(REQUIRED),verified_family_packages=checked_packages,dsh_source_commit=compat.get('dshSourceCommit'),npm_lock_sha256=install_lock_sha,verified_web_fetch_providers=verified_provider,verified_web_fetch_renderers=verified_renderer,verification='archive-only; Android execution not tested')
 if __name__=='__main__':
  p=argparse.ArgumentParser()
  p.add_argument('--snapshot',type=pathlib.Path,required=True)
  p.add_argument('--lock',type=pathlib.Path,required=True)
+ p.add_argument('--expected-version')
+ p.add_argument('--expected-commit')
  p.add_argument('--output',type=pathlib.Path)
  a=p.parse_args()
  try:
-  v=validate(a.snapshot,a.lock)
+  v=validate(a.snapshot,a.lock,a.expected_version,a.expected_commit)
   if a.output:a.output.write_text(json.dumps(v,indent=2)+'\n')
   print(json.dumps(v))
  except (ValueError,OSError,tarfile.TarError,json.JSONDecodeError) as e:
