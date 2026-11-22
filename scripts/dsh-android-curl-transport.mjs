@@ -70,6 +70,8 @@ export async function androidCurlRequest(input, options = {}) {
   const argv = standalone
     ? [process.env.DSH_ANDROID_EXEC_BRIDGE, binary, '--config', '-']
     : ['--config', '-']
+  // The native process inherits only the explicit environment, not a
+  // per-request proxy override or a shell with the secret in its arguments.
   const child = spawn(command, argv, {
     stdio: ['pipe', 'pipe', 'pipe', ...(method === 'POST' ? ['pipe'] : [])],
     windowsHide: true,
@@ -129,8 +131,12 @@ export async function androidCurlRequest(input, options = {}) {
       if (!output.write(chunk)) child.stdout.pause()
     }
     output.on('drain', () => child.stdout.resume())
+    output.on('close', () => {
+      if (!child.killed && !child.exitCode) stop()
+    })
     child.stdout.on('data', chunk => {
       if (headerDone) { sendBody(chunk); return }
+      if (decided) return
       prefix = Buffer.concat([prefix, chunk])
       if (prefix.length > 64 * 1024) {
         stop()
