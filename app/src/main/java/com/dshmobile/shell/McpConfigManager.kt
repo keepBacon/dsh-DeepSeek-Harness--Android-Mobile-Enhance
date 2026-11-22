@@ -475,6 +475,10 @@ class McpConfigManager(
       append("      PATH: ").append(JSONObject.quote(File(usrDir, "libexec/dsh/wrappers").absolutePath + ":" + File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
       append("      HOME: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
       append("      TMPDIR: ").append(JSONObject.quote(File(homeDir, "tmp").absolutePath)).append('\n')
+      append("      SSL_CERT_FILE: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
+      append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
+      append("      GIT_CONFIG_SYSTEM: ").append(JSONObject.quote(File(usrDir, "etc/gitconfig").absolutePath)).append('\n')
+      append("      GIT_TERMINAL_PROMPT: \"0\"\n")
       append("    cwd: ").append(JSONObject.quote(server.cwd.ifBlank { homeDir.absolutePath })).append('\n')
     } else {
       append("    url: ").append(JSONObject.quote(server.url)).append('\n')
