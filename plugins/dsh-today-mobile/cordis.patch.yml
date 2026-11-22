@@ -1,0 +1,4 @@
+- insert:
+    - id: today-mobile
+      name: '@keepbacon/dsh-today-mobile'
+      config: {}
