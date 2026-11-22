@@ -6084,9 +6084,8 @@ class MainActivity : ComponentActivity() {
     filename: String,
     input: java.io.InputStream,
   ): java.io.File {
-    // Use the root snapshot captured when the user approved the export. A later
-    // UI workspace switch must not redirect or invalidate an already-approved
-    // queued write. Re-canonicalize immediately before opening the target.
+    // Snapshot the approved destination. A workspace switch must never redirect
+    // an in-flight export into the new session's cwd.
     val root = workspaceRoot.canonicalFile
     val dir = destination.canonicalFile
     if (!root.isDirectory || !dir.isDirectory || isWorkspaceSymlink(dir) ||
@@ -6094,30 +6093,28 @@ class MainActivity : ComponentActivity() {
     ) {
       throw java.io.IOException("导出目录不可用或已离开工作目录")
     }
-    val target = reserveUniqueFile(dir, filename)
+    // Never reserve a visible destination name and reopen it by pathname:
+    // another process could replace that entry between createNewFile() and
+    // outputStream(), and an interrupted HTTP transfer would expose a partial
+    // export as if it were complete.
+    val temp = java.io.File(dir, ".dsh-export-${java.util.UUID.randomUUID()}.tmp")
     try {
-      target.outputStream().buffered(128 * 1024).use { out ->
-        copyWithLimit(input, out, MAX_DOWNLOAD_BYTES, "导出文件超过 2 GB 上限")
+      java.nio.channels.FileChannel.open(temp.toPath(),
+        java.nio.file.StandardOpenOption.CREATE_NEW,
+        java.nio.file.StandardOpenOption.WRITE).use { channel ->
+        val output = java.nio.channels.Channels.newOutputStream(channel).buffered(128 * 1024)
+        copyWithLimit(input, output, MAX_DOWNLOAD_BYTES, "导出文件超过 2 GB 上限")
+        output.flush()
+        channel.force(true)
       }
-      return target
-    } catch (t: Throwable) {
-      target.delete()
-      throw t
+      // Existing importer already publishes a completed staging file with
+      // no-replace semantics and a FUSE-compatible exclusive copy fallback.
+      return publishWorkspaceImport(temp, dir, filename)
+    } finally {
+      // An interrupted download must never leave an incomplete final name.
+      // publishWorkspaceImport removes the stage on success as well.
+      temp.delete()
     }
-  }
-
-  /** Atomically reserve a unique filename without overwriting workspace data. */
-  private fun reserveUniqueFile(root: java.io.File, requestedName: String): java.io.File {
-    val clean = sanitizeFilename(requestedName)
-    val dot = clean.lastIndexOf('.')
-    val hasExt = dot > 0 && dot < clean.length - 1
-    val stem = if (hasExt) clean.substring(0, dot) else clean
-    val ext = if (hasExt) clean.substring(dot) else ""
-    for (index in 0..9999) {
-      val candidate = java.io.File(root, if (index == 0) clean else "$stem ($index)$ext")
-      if (candidate.createNewFile()) return candidate
-    }
-    throw java.io.IOException("同名导出文件过多：$clean")
   }
 
   private fun queryDisplayName(uri: Uri): String? {
