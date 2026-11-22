@@ -132,6 +132,8 @@ export function androidModelDiscoveryFailureHint(error) {
   const codes = causes.map(value => value?.code)
     .filter(value => typeof value === 'string' &&
       /^[A-Z][A-Z0-9_]{1,60}$/.test(value))
+  const curlCode = codes.find(code => code.startsWith('DSH_CURL_'))
+  if (curlCode) return 'Android curl transport: ' + curlCode
   if (codes.includes('DSH_ANDROID_MODEL_DISCOVERY_FALLBACK_FAILED')) {
     const nativeCode = codes.find(code =>
       code !== 'DSH_ANDROID_MODEL_DISCOVERY_FALLBACK_FAILED')
