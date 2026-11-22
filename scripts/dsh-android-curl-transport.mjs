@@ -6,7 +6,8 @@
 // Chat Completions POST callers use it; proxies are screened by those callers.
 //
 // Secrets and request bodies travel over process pipes, NEVER argv or logs.
-// Config is fed to curl --config -; POST bodies use an inherited fd 3.
+// Config, headers and JSON POST body are fed to curl --config - on a private
+// stdin pipe. Neither credentials nor body are ever passed in argv.
 // A failure is reported by a stable, credential-free exit code.
 // No -k, no redirects, no automatic POST retries.
 
@@ -61,7 +62,11 @@ export async function androidCurlRequest(input, options = {}) {
     'url = ' + androidCurlConfigQuote(url.href),
     ...[...headers].map(([name, value]) =>
       'header = ' + androidCurlConfigQuote(name + ': ' + value)),
-    ...(method === 'POST' ? ['data-binary = "@/proc/self/fd/3"'] : []),
+    ...(method === 'POST'
+      ? ['data-binary = ' + androidCurlConfigQuote(
+        typeof options.body === 'string'
+          ? options.body : Buffer.from(options.body).toString('utf8'))]
+      : []),
   ].join('\n') + '\n'
 
   const standalone = process.env.DSH_ANDROID_STANDALONE === '1'
@@ -73,14 +78,13 @@ export async function androidCurlRequest(input, options = {}) {
   // The native process inherits only the explicit environment, not a
   // per-request proxy override or a shell with the secret in its arguments.
   const child = spawn(command, argv, {
-    stdio: ['pipe', 'pipe', 'pipe', ...(method === 'POST' ? ['pipe'] : [])],
+    stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   })
   // Do not log curl stderr: a gateway may print secret-bearing response
   // details or query parameters there.
   child.stderr.resume()
   child.stdin.on('error', () => {})
-  if (method === 'POST') child.stdio[3].on('error', () => {})
 
   return await new Promise((resolve, reject) => {
     let decided = false
@@ -204,9 +208,5 @@ export async function androidCurlRequest(input, options = {}) {
       }
     })
     child.stdin.end(config)
-    if (method === 'POST') {
-      const body = options.body
-      child.stdio[3].end(typeof body === 'string' ? Buffer.from(body, 'utf8') : Buffer.from(body))
-    }
   })
 }
