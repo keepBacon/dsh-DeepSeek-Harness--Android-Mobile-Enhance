@@ -29,6 +29,9 @@ class EngineService : Service() {
   private val stopRequested = java.util.concurrent.atomic.AtomicBoolean(false)
   private var failedAliveProbes = 0
   private var degradedNotificationVisible = false
+  // A failed explicit stop must remain visible even if the old Host still
+  // answers HTTP. The probe-success path must not erase that diagnosis.
+  @Volatile private var stopFailureVisible = false
   private val degradedProbeThreshold = 12 // One minute at 5-second intervals.
   private val notificationManager by lazy {
     getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -70,7 +73,10 @@ class EngineService : Service() {
             // active until the replacement Host has finished launching.
             if (lifecycleGeneration.get() == generation) {
               try {
-                engineManager.startEngine(runtimeAlreadyChecked = true)
+                if (engineManager.startEngine(runtimeAlreadyChecked = true)) {
+                  stopFailureVisible = false
+                  notificationManager.notify(NOTIFICATION_ID, buildNotification())
+                }
               } catch (t: Throwable) {
                 Log.e("DSH-Watchdog", "Explicit restart failed during boot", t)
               }
@@ -107,23 +113,34 @@ class EngineService : Service() {
       // Queue the stop after any in-flight Start/Restart. It is important
       // that Stop is serialized, not merely moved to another independent thread.
       lifecycleExecutor.execute {
-        try {
+        val stopped = try {
           EngineManager.beginMaintenance()
           try {
-            if (!engineManager.stopEngine()) {
-              Log.w("DSH-Watchdog", "Explicit stop did not terminate every Host process")
+            engineManager.stopEngine().also { success ->
+              if (!success) Log.w("DSH-Watchdog",
+                "Explicit stop failed: retain foreground owner and live Host handle")
             }
           } finally {
             EngineManager.endMaintenance()
           }
         } catch (t: Throwable) {
           Log.e("DSH-Watchdog", "Explicit Host stop failed", t)
-        } finally {
-          android.os.Handler(android.os.Looper.getMainLooper()).post {
-            // Never terminate ownership of a newer START/RESTART.
-            if (stopRequested.get() && lifecycleGeneration.get() == generation) {
+          false
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+          // An older stop cannot remove a newer START/RESTART owner.
+          if (stopRequested.get() && lifecycleGeneration.get() == generation) {
+            if (stopped) {
               stopForeground(STOP_FOREGROUND_REMOVE)
               stopSelf(startId)
+            } else {
+              // stopEngine() intentionally keeps handles when SIGTERM/SIGKILL
+              // fails. Removing this service would orphan that live process,
+              // hide the stop failure and prevent the watchdog from recovering.
+              stopFailureVisible = true
+              stopRequested.set(false)
+              notificationManager.notify(NOTIFICATION_ID, buildNotification())
+              armWatchdog()
             }
           }
         }
@@ -140,6 +157,10 @@ class EngineService : Service() {
       return START_STICKY
     }
     stopRequested.set(false)
+    if (stopFailureVisible) {
+      stopFailureVisible = false
+      notificationManager.notify(NOTIFICATION_ID, buildNotification())
+    }
     val generation = lifecycleGeneration.incrementAndGet()
     ensureEngine(generation)
     armWatchdog()
@@ -255,7 +276,11 @@ class EngineService : Service() {
     return NotificationCompat.Builder(this, "engine")
       .setSmallIcon(android.R.drawable.stat_notify_chat)
       .setContentTitle("DeepSeek Harness")
-      .setContentText(if (unresponsive) "Host 长期无响应；可手动重启（保留数据）" else "本机 DSH 引擎运行中")
+      .setContentText(when {
+        stopFailureVisible -> "停止失败：旧 Host 仍在运行；请重试停止或强行停止应用（勿清除数据）"
+        unresponsive -> "Host 长期无响应；可手动重启（保留数据）"
+        else -> "本机 DSH 引擎运行中"
+      })
       .setContentIntent(open)
       .apply { if (unresponsive) addAction(0, "重启引擎", restart) }
       .addAction(0, "停止", stop)

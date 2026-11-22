@@ -360,6 +360,14 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    // Settle pending browser uploads before tearing down the WebView; the
+    // ActivityResult callback from this Activity may never arrive after a
+    // rotation, process reclaim, or explicit Activity destruction.
+    finishWorkspaceFileChooser(null)
+    pendingExternalChooserAccepts = null
+    pendingExternalChooserMultiple = false
+    pendingPickCallback = null
+    workspaceChoicePending = false
     if (databaseWriterDelegate.isInitialized()) databaseWriter.close()
     webViewInspector.stop()
     // The foreground EngineService owns the embedded Host lifetime. Activity
@@ -568,7 +576,13 @@ class MainActivity : ComponentActivity() {
       ): Boolean {
         // The upload chooser offers separately persisted external and private
         // file workspaces; the Host session cwd must not be silently substituted.
-        this@MainActivity.filePathCallback?.onReceiveValue(null)
+        // The Android picker only has one pending ActivityResult slot.
+        // Do not cancel and replace its callback: a result from the first
+        // chooser could otherwise be delivered to the second request.
+        if (this@MainActivity.filePathCallback != null) {
+          filePathCallback.onReceiveValue(null)
+          return true
+        }
         this@MainActivity.filePathCallback = filePathCallback
         val accepts = fileChooserParams.acceptTypes.filter { it.isNotBlank() }.toTypedArray()
         showWorkspaceFileChooser(
