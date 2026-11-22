@@ -22,6 +22,19 @@ out="$(/bin/sh "$bridge" "$TMP/usr/bin/printf" 'linker-ok')"
 test "$out" = "linker-ok"
 grep -Fxq "$TMP/usr/bin/printf" "$DSH_LINKER_PROBE_LOG"
 
+# Bare commands must resolve from the bundled usr/bin before the bridge's
+# system-only PATH lookup. These are emitted by MCP and project tool launchers.
+out="$(/bin/sh "$bridge" python3 -c 'print("bare-python-ok")')"
+test "$out" = "bare-python-ok"
+grep -Fxq "$TMP/usr/bin/python3" "$DSH_LINKER_PROBE_LOG"
+out="$(/bin/sh "$bridge" printf 'bare-printf-ok')"
+test "$out" = "bare-printf-ok"
+# An absent executable must not execute an arbitrary host PATH command.
+if /bin/sh "$bridge" dsh-nonexistent-bare-tool >/dev/null 2>&1; then
+  echo '[FAIL] missing bare executable must return an error' >&2
+  exit 1
+fi
+
 # A workspace ELF is not inside the Termux usr/bin directory. It still gets
 # passed to the system-linker bridge rather than execve(workspace-path).
 # GNU printf is a coreutils multicall executable and rejects a renamed argv0.
