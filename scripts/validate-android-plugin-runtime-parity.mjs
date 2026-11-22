@@ -59,7 +59,8 @@ export function validate(modulesDir) {
     if (name !== '@deepseek-ai/cordis' && pkg.version !== '0.2.2-rc.5') {
       missing.push(name + ': version ' + String(pkg.version) + ' differs from DSH 0.2.2-rc.5')
     }
-    const main = pkg.exports?.['.'] ?? pkg.main
+    const main = pkg.exports?.['.'] ?? (typeof pkg.main === 'string'
+      ? (pkg.main.startsWith('./') ? pkg.main : './' + pkg.main) : pkg.main)
     if (main === undefined || exportedFiles(dir, main).length === 0) {
       missing.push(name + ': runtime entry missing or not packaged')
     }
