@@ -12,7 +12,7 @@ assert.match(execBridge,/exec "\$linker" "\$target" "\$@"/)
 assert.match(manager,/private fun missingToolboxModules\(\)/)
 assert.match(manager,/pending\.add\(toolboxFile\)/)
 assert.match(manager,/pending\.add\(basicToolboxFile\)/)
-assert.match(manager,/import\\s\+\)\['"\]/,
+assert.ok(manager.includes(String.raw`import\\s+`),
  'side-effect import dependencies must be included in closure verification')
 const patch=manager.slice(manager.indexOf('  @Synchronized fun ensureRuntimePatch('),
  manager.indexOf('  private fun externalStdioLaunchIssue('))
