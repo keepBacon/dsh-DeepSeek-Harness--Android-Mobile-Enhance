@@ -171,6 +171,12 @@ class McpConfigManager(
       if (!path.startsWith("/")) continue
       if (!File(path).isFile) return "missing/unreadable executable or script"
     }
+    val (launchCommand, launchArgs) = externalStdioLaunch(server)
+    if (launchCommand == "/system/bin/sh" &&
+        launchArgs.firstOrNull()?.endsWith("/libexec/dsh-mobile/android-exec.sh") == true &&
+        !File(usrDir, "libexec/dsh-mobile/android-exec.sh").isFile) {
+      return "embedded Android executable bridge missing"
+    }
     if (server.cwd.isNotBlank() && server.cwd.startsWith("/") && !File(server.cwd).isDirectory)
       return "missing/unreadable working directory"
     return null
@@ -421,6 +427,34 @@ class McpConfigManager(
     append("    failOnStartupError: false")
   }
 
+  /**
+   * User-configured stdio MCP servers run inside the same embedded Android
+   * runtime as the built-in tools. App-private ELF binaries are not execve-able
+   * on several Android versions (noexec); launch them via android-exec.sh.
+   *
+   * Only commands installed inside our own private runtime are rewritten.
+   * Explicit /system commands, external binaries and HTTP servers retain the
+   * user's requested command/argv, without shell concatenation or eval.
+   */
+  private fun externalStdioLaunch(server: McpServerConfig): Pair<String, List<String>> {
+    val command = server.command
+    val localBin = if (Regex("[A-Za-z0-9_.+-]{1,128}").matches(command)) {
+      File(usrDir, "bin/$command").takeIf { it.isFile }
+    } else null
+    val requested = localBin ?: if (command.startsWith("/")) File(command) else null
+    val privateRoot = context.filesDir.canonicalFile.toPath()
+    val local = try {
+      requested?.takeIf { it.isFile && it.canonicalFile.toPath().startsWith(privateRoot) }
+    } catch (_: Exception) { null }
+    if (local == null) return command to server.args
+
+    val bridge = File(usrDir, "libexec/dsh-mobile/android-exec.sh")
+    // Missing bridge must surface as unavailable, not as an opaque ENOENT
+    // after Host startup. externalStdioLaunchIssue() checks this separately.
+    return "/system/bin/sh" to
+      (listOf(bridge.absolutePath, local.absolutePath) + server.args)
+  }
+
   private fun serverRow(server: McpServerConfig): String = buildString {
     append("- id: android-mcp-").append(server.id.replace("-", "")).append('\n')
     append("  name: '@deepseek-ai/dsh-mcp-client'\n")
@@ -428,9 +462,23 @@ class McpConfigManager(
     append("    serverName: ").append(JSONObject.quote(server.serverName)).append('\n')
     append("    transport: ").append(server.transport).append('\n')
     if (server.transport == STDIO) {
-      append("    command: ").append(JSONObject.quote(server.command)).append('\n')
-      append("    args: ").append(JSONArray(server.args).toString()).append('\n')
-      append("    env: {}\n")
+      val (launchCommand, launchArgs) = externalStdioLaunch(server)
+      append("    command: ").append(JSONObject.quote(launchCommand)).append('\n')
+      append("    args: ").append(JSONArray(launchArgs).toString()).append('\n')
+      // Even external stdio tools need the embedded runtime namespace:
+      // otherwise PATH can resolve to Android system or stale Termux binaries,
+      // and a /system/bin/sh bridge cannot find TERMUX__PREFIX.
+      append("    env:\n")
+      append("      TERMUX__PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
+      append("      PREFIX: ").append(JSONObject.quote(usrDir.absolutePath)).append('\n')
+      append("      LD_LIBRARY_PATH: ").append(JSONObject.quote(File(usrDir, "lib").absolutePath)).append('\n')
+      append("      PATH: ").append(JSONObject.quote(File(usrDir, "libexec/dsh/wrappers").absolutePath + ":" + File(usrDir, "bin").absolutePath + ":/system/bin")).append('\n')
+      append("      HOME: ").append(JSONObject.quote(homeDir.absolutePath)).append('\n')
+      append("      TMPDIR: ").append(JSONObject.quote(File(homeDir, "tmp").absolutePath)).append('\n')
+      append("      SSL_CERT_FILE: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
+      append("      NODE_EXTRA_CA_CERTS: ").append(JSONObject.quote(File(usrDir, "etc/tls/cert.pem").absolutePath)).append('\n')
+      append("      GIT_CONFIG_SYSTEM: ").append(JSONObject.quote(File(usrDir, "etc/gitconfig").absolutePath)).append('\n')
+      append("      GIT_TERMINAL_PROMPT: \"0\"\n")
       append("    cwd: ").append(JSONObject.quote(server.cwd.ifBlank { homeDir.absolutePath })).append('\n')
     } else {
       append("    url: ").append(JSONObject.quote(server.url)).append('\n')
