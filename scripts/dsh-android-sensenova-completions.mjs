@@ -2,10 +2,8 @@
 //
 // pi-ai's OpenAI Chat Completions adapter accepts a per-request fetch option.
 // Do not alter global fetch, the provider config, TLS verification or the
-// DSH HTTP proxy. Only transport failures of an idempotence-guarded initial
-// POST to the exact SenseNova OpenAI endpoint may use a second connection.
-// The API invocation is retried only when fetch rejected before a Response
-// was received; never retry HTTP 4xx, HTTP 5xx, or an interrupted SSE stream.
+// DSH HTTP proxy. Only requests to the exact SenseNova OpenAI endpoint select the native
+// transport before dispatch. POST is never retried after any network failure.
 
 function androidSenseNovaEligible(input, init) {
   if (process.env.DSH_ANDROID_STANDALONE !== '1') return false
@@ -26,23 +24,20 @@ function androidSenseNovaEligible(input, init) {
 }
 
 export async function androidSenseNovaCompletionsFetch(input, init) {
+  // POST is not idempotent. Decide the transport *before* dispatch, so a
+  // network error can never trigger a second billed completion request.
+  if (!androidSenseNovaEligible(input, init)) return await fetch(input, init)
   try {
-    return await fetch(input, init)
-  } catch (originalError) {
-    if (!androidSenseNovaEligible(input, init) ||
-        originalError?.name === 'AbortError') throw originalError
-    try {
-      const url = new URL(input instanceof Request ? input.url : input)
-      return await androidNativeModelStreamingFetch(url, init)
-    } catch (nativeError) {
-      // Do not expose credentials, request body or URLs in diagnostics.
-      const codes = [nativeError?.code,nativeError?.cause?.code]
-      const code = codes.find(c => typeof c === 'string' && /^[A-Z][A-Z0-9_]{1,48}$/.test(c))
-      throw Object.assign(new TypeError(
-        'SenseNova Android transport failed' + (code ? ': ' + code : '')), {
-        code: code || 'DSH_SENSENOVA_TRANSPORT_FAILED',
-      })
-    }
+    const url = new URL(input instanceof Request ? input.url : input)
+    return await androidNativeModelStreamingFetch(url, init)
+  } catch (nativeError) {
+    // Do not expose credentials, request body or URLs in diagnostics.
+    const codes = [nativeError?.code,nativeError?.cause?.code]
+    const code = codes.find(c => typeof c === 'string' && /^[A-Z][A-Z0-9_]{1,48}$/.test(c))
+    throw Object.assign(new TypeError(
+      'SenseNova Android transport failed' + (code ? ': ' + code : '')), {
+      code: code || 'DSH_SENSENOVA_TRANSPORT_FAILED',
+    })
   }
 }
 
