@@ -25,6 +25,28 @@ for (const [name,entry] of [['toolboxRow','toolboxFile'],['basicToolboxRow','bas
  assert.ok(row.includes(entry+'.absolutePath'),name+' script argv missing')
  assert.match(row,/TERMUX__PREFIX/,name+' must export prefix')
 }
+const external=manager.slice(manager.indexOf('  private fun externalStdioLaunch('),
+ manager.indexOf('  companion object {'))
+assert.match(external,/private fun externalStdioLaunch\(server: McpServerConfig\)/)
+assert.match(external,/File\(usrDir, "bin\/\$command"\)/,
+ 'bare Node/Python executables must resolve to the embedded runtime')
+assert.match(external,/it\.canonicalFile\.toPath\(\)\.startsWith\(privateRoot\)/,
+ 'only app-private binaries may be rewritten to Android shell bridge')
+assert.match(external,/return "\/system\/bin\/sh" to/,
+ 'app-private executables must launch through the system shell')
+assert.match(external,/listOf\(bridge\.absolutePath, local\.absolutePath\) \+ server\.args/,
+ 'preserve every stdio argument boundary without shell interpolation')
+assert.match(external,/val \(launchCommand, launchArgs\) = externalStdioLaunch\(server\)/)
+assert.match(external,/JSONObject\.quote\(launchCommand\)/)
+assert.match(external,/JSONArray\(launchArgs\)/)
+assert.match(external,/append\("      TERMUX__PREFIX: "\)/,
+ 'external stdio MCP must inherit the embedded Android runtime')
+assert.match(external,/append\("      LD_LIBRARY_PATH: "\)/)
+assert.match(external,/append\("      PATH: "\)/)
+assert.match(external,/append\("      TMPDIR: "\)/)
+assert.ok(!external.includes('append("    env: {}\\n")'),
+ 'external stdio must not launch with missing runtime environment')
+assert.match(manager,/embedded Android executable bridge missing/)
 assert.match(host,/"DSH_ANDROID_EXEC_BRIDGE"/)
 assert.match(host,/"DSH_ANDROID_STANDALONE" to "1"/)
 assert.match(mobile,/androidToolLaunch\(toolWrapped\('frida'\),args,process\.env\)/)
