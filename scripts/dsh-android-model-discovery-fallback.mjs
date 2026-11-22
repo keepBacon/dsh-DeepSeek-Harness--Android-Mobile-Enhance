@@ -95,6 +95,25 @@ export async function androidModelDiscoveryFetch(url, options = {}) {
         req.end()
       })
     } catch (nativeError) {
+      // A request may have failed before DNS/TLS/connection. On Android,
+      // Termux curl uses an independent transport stack and can recover a
+      // genuine Node failure. Restrict this *third* option to SenseNova's
+      // idempotent GET /v1/models; never retry a returned HTTP error.
+      const exactSenseNova = target.protocol === 'https:'
+        && target.hostname === 'token.sensenova.cn'
+        && (target.port === '' || target.port === '443')
+        && target.pathname.replace(/\\/+$/, '') === '/v1/models'
+        && !target.username && !target.password
+      if (exactSenseNova && typeof androidCurlRequest === 'function'
+          && await androidCurlAvailable()) {
+        try {
+          return await androidCurlRequest(target, options)
+        } catch (curlError) {
+          const error = new Error('Android model discovery curl transport failed')
+          error.code = typeof curlError?.code === 'string' ? curlError.code : 'DSH_CURL_FAILED'
+          throw error
+        }
+      }
       // Do not serialize url, request headers, API keys or raw error messages.
       const failure = new Error('Android native model discovery transport failed',
         { cause: nativeError })
