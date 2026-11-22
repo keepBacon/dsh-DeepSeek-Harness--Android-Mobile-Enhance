@@ -53,6 +53,9 @@ const moduleRegistration = await bundle('@deepseek-ai/dsh-client-modules')
 const rendererRegistration = await bundle('@deepseek-ai/dsh-client-ui-renderer')
 const { createClientModuleSystem } = materialize('@deepseek-ai/dsh-client-modules', moduleRegistration)
 const { SlotRegistry } = materialize('@deepseek-ai/dsh-client-ui-renderer', rendererRegistration)
+// Both bootstrap libraries were already materialized above; the Host shell
+// consumes their registrations before constructing the live loader table.
+facade.pendingQueue.length = 0
 
 const SHELL = '@deepseek-ai/dsh-client-modules'
 const ID = '@parity-fixture/client-ui'
