@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
 const modulesDir = process.argv[2]
@@ -16,18 +17,42 @@ if (!modulesDir) {
   console.error('usage: test-android-client-plugin-lifecycle.mjs <node_modules-dir>')
   process.exit(2)
 }
-async function clientPackage(name, subpath = './client') {
-  const root = join(resolve(modulesDir), name)
-  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-  const exp = pkg.exports?.[subpath]
+const installed = (name) => join(resolve(modulesDir), name)
+const manifest = (name) => JSON.parse(readFileSync(join(installed(name), 'package.json'), 'utf8'))
+const publishedEntry = (name, subpath) => {
+  const exp = manifest(name).exports?.[subpath]
   const file = typeof exp === 'string' ? exp : exp?.import ?? exp?.default
   assert.equal(typeof file, 'string', name + ' missing published ' + subpath)
-  return import(pathToFileURL(resolve(root, file)).href)
+  return resolve(installed(name), file)
 }
+const { Context } = await import(pathToFileURL(publishedEntry('@deepseek-ai/cordis', '.')).href)
 
-const { Context } = await clientPackage('@deepseek-ai/cordis', '.')
-const { createClientModuleSystem } = await clientPackage('@deepseek-ai/dsh-client-modules')
-const { SlotRegistry } = await clientPackage('@deepseek-ai/dsh-client-ui-renderer')
+// The official ./client bundle is NOT an ES module exporting named symbols.
+// It is a classic script that calls window.__ModuleLoader__.load({id,factory}).
+// Use that exact protocol, and only seed its legitimate imports from the
+// installed Node package tree; do not replace the upstream loader/renderer.
+const facade = {
+  mode: 'queue', pendingQueue: [],
+  load(registration) { this.pendingQueue.push(registration) },
+}
+globalThis.window = { __ModuleLoader__: facade }
+async function bundle(name) {
+  await import(pathToFileURL(publishedEntry(name, './client')).href)
+  const found = facade.pendingQueue.find(item => item.id === name)
+  assert.ok(found, name + ' did not call the official __ModuleLoader__.load protocol')
+  return found
+}
+function materialize(name, registration) {
+  const requireNode = createRequire(join(installed(name), 'package.json'))
+  const requireBundle = (specifier) => requireNode(specifier)
+  requireBundle.async = async (specifier) => import(specifier)
+  requireBundle.asset = (value) => value
+  return registration.factory(requireBundle)
+}
+const moduleRegistration = await bundle('@deepseek-ai/dsh-client-modules')
+const rendererRegistration = await bundle('@deepseek-ai/dsh-client-ui-renderer')
+const { createClientModuleSystem } = materialize('@deepseek-ai/dsh-client-modules', moduleRegistration)
+const { SlotRegistry } = materialize('@deepseek-ai/dsh-client-ui-renderer', rendererRegistration)
 
 const SHELL = '@deepseek-ai/dsh-client-modules'
 const ID = '@parity-fixture/client-ui'
@@ -45,8 +70,6 @@ const wire = {
     { phase: 'application', url: makeUrl(ID, 'v1'), rev: 'v1', entries: [ID] },
   ],
 }
-const facade = { mode: 'queue', pendingQueue: [],
-  load(registration) { this.pendingQueue.push(registration) } }
 let builds = 0
 const registrations = []
 const modules = createClientModuleSystem(
