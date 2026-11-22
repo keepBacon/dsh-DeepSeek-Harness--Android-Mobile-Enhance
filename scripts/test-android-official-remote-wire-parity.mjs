@@ -14,6 +14,8 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -48,10 +50,14 @@ const imports = {
   session: '@deepseek-ai/dsh-session',
   projections: '@deepseek-ai/dsh-session-projection',
   registryHost: '@deepseek-ai/dsh-typert-registry',
+  credentialLocal: '@deepseek-ai/dsh-credentials-local',
+  credentialTypes: '@deepseek-ai/dsh-credentials',
+  settingsController: '@deepseek-ai/dsh-api-settings-controller',
 }
 const [
   cordis, agentModule, connectionHost, gatewayHost, remoteAccessModule,
   goalModule, goalTypert, sessionModule, projectionsModule, registryHostModule,
+  credentialsLocal, credentialNames, settingsController, settingsTypert,
 ] = await Promise.all([
   import(entry(imports.cordis)),
   import(entry(imports.agent)),
@@ -63,11 +69,18 @@ const [
   import(entry(imports.session)),
   import(entry(imports.projections)),
   import(entry(imports.registryHost)),
+  import(entry(imports.credentialLocal)),
+  import(entry(imports.credentialTypes)),
+  import(entry(imports.settingsController)),
+  import(entry(imports.settingsController, './typert')),
 ])
 const { Context } = cordis
 const host = new Context()
 const routes = []
-const credentialRecords = new Map()
+// Isolated per-run official credential store: never use the developer's
+// DSH_HOME, production device user data, or the inherited environment.
+const scratch = await mkdtemp(join(tmpdir(), 'dsh-plugin-credentials-remote-'))
+const credentialsPath = join(scratch, '.credentials.yaml')
 let server
 let client
 let originalDocument
@@ -92,13 +105,10 @@ try {
     tapIndex() { return () => {} },
     port: 0,
   })
-  host.provide('credentials', {
-    readRecord(key) { return Promise.resolve(credentialRecords.get(key)) },
-    async modifyRecord(key, mutate) {
-      const value = await mutate(credentialRecords.get(key))
-      if (value !== undefined) credentialRecords.set(key, value)
-      return value
-    },
+  // Official LocalCredentialProvider handles BOTH the BrowserAuth session
+  // record and plugin references. No fabricated credential store or RPC values.
+  await host.plugin(credentialsLocal.LocalCredentialProvider, {
+    path: credentialsPath, watch: false,
   })
   await host.plugin({ inject: connectionHost.inject, apply: connectionHost.apply })
   await host.plugin(registryHostModule.default)
@@ -107,7 +117,9 @@ try {
   await host.plugin(remoteAccessModule.default)
   await host.plugin(gatewayHost.default)
   await host.plugin(goalModule.default)
+  await host.plugin(settingsController.default)
   host.typert.register(goalTypert.TYPERT)
+  host.typert.register(settingsTypert.TYPERT)
 
   const { Session, SessionId } = sessionModule
   const makeAgent = (name) => {
@@ -230,12 +242,71 @@ try {
   assert.equal(scopedAgent.session.snapshotEvents().length,1,
     'Host did not persist scoped goal event')
 
+  // Real published Browser Remote -> Host CredentialsController -> durable
+  // LocalCredentialProvider file writes. No secret-returning Remote method.
+  const ref = 'DSH_ANDROID_PLUGIN_REMOTE_TEST_KEY'
+  const firstValue = 'synthetic-ci-credential-first'
+  const secondValue = 'synthetic-ci-credential-rotated'
+  const absent = await client.remote.credentials.describe([ref])
+  assert.equal(absent.ok, true)
+  assert.deepEqual(absent.value[ref], { configured:false, writable:true })
+  const invalidCredential = await client.remote.credentials.set('bad ref', firstValue)
+  assert.equal(invalidCredential.ok, false, 'invalid credential name was accepted')
+  assert.equal(invalidCredential.error?.code, 'gateway/bad-request')
+  assert.ok(!JSON.stringify(invalidCredential).includes(firstValue),
+    'credential value leaked into a Remote error')
+  const added = await client.remote.credentials.set(ref, firstValue)
+  assert.equal(added.ok, true, 'real Remote credential set failed')
+  const info = await client.remote.credentials.describe([ref])
+  assert.equal(info.ok, true)
+  assert.equal(info.value[ref].configured, true)
+  assert.equal(info.value[ref].source, 'file')
+  assert.equal(info.value[ref].writable, true)
+  assert.ok(!JSON.stringify(info).includes(firstValue),
+    'credential describe exposed raw secret over Remote')
+  const ownerOnly = (await stat(credentialsPath)).mode & 0o077
+  assert.equal(ownerOnly, 0, 'stored credential document is group/other-readable')
+  const changed = await client.remote.credentials.set(ref, secondValue)
+  assert.equal(changed.ok, true, 'credential rotation over Remote failed')
+  const persisted = await readFile(credentialsPath, 'utf8')
+  assert.ok(persisted.includes(secondValue), 'rotated credential was not durably written')
+  assert.ok(!persisted.includes(firstValue), 'previous secret remained in credential file')
+  assert.deepEqual(
+    await host.credentials.resolve(credentialNames.credentialRef(ref)),
+    {value:secondValue,source:'file'},
+    'Host did not resolve the rotated credential in the next operation'
+  )
+  // A newly mounted official provider must read the same bytes after a Host
+  // restart. No Android-owned credential service or custom migration.
+  const reopened = new Context()
+  try {
+    await reopened.plugin(credentialsLocal.LocalCredentialProvider, {
+      path: credentialsPath, watch:false,
+    })
+    assert.deepEqual(
+      await reopened.credentials.resolve(credentialNames.credentialRef(ref)),
+      {value:secondValue,source:'file'},
+      'fresh Host generation lost stored plugin credentials'
+    )
+  } finally {
+    await reopened.fiber.dispose()
+  }
+  const removed = await client.remote.credentials.unset(ref)
+  assert.equal(removed.ok, true, 'credential removal over Remote failed')
+  const afterRemove = await client.remote.credentials.describe([ref])
+  assert.equal(afterRemove.ok, true)
+  assert.deepEqual(afterRemove.value[ref], {configured:false,writable:true})
+  assert.equal(await host.credentials.resolve(credentialNames.credentialRef(ref)),undefined,
+    'credential value remains after unset')
+  assert.ok(!JSON.stringify(afterRemove).includes(secondValue),
+    'deleted credential leaked through Remote response')
+
   await client.fiber.dispose()
   client = undefined
   // Host-side remote and /api route must clean up with their Cordis fibers.
   await host.fiber.dispose()
   assert.equal(routes.length,0,'Host /api route leaked after disposal')
-  console.log('[DSH] Published Host/Browser Remote: real token-cookie /api RPC + goal state + scoped requests + cleanup OK')
+  console.log('[DSH] Published Host/Browser Remote: real cookie /api RPC + scoped Goal + durable credential set/describe/rotate/unset + provider reload/cleanup OK')
 } finally {
   if (client) await client.fiber.dispose().catch(()=>{})
   await host.fiber.dispose().catch(()=>{})
@@ -247,4 +318,5 @@ try {
   if (originalWindow !== undefined) restore('window',originalWindow)
   if (originalLocation !== undefined) restore('location',originalLocation)
   globalThis.fetch = originalFetch
+  await rm(scratch, { recursive:true, force:true })
 }
