@@ -44,6 +44,9 @@ assert.match(external,/append\("      TERMUX__PREFIX: "\)/,
 assert.match(external,/append\("      LD_LIBRARY_PATH: "\)/)
 assert.match(external,/append\("      PATH: "\)/)
 assert.match(external,/append\("      TMPDIR: "\)/)
+assert.match(external,/append\("      SSL_CERT_FILE: "\)/)
+assert.match(external,/append\("      NODE_EXTRA_CA_CERTS: "\)/)
+assert.match(external,/append\("      GIT_CONFIG_SYSTEM: "\)/)
 assert.ok(!external.includes('append("    env: {}\\n")'),
  'external stdio must not launch with missing runtime environment')
 assert.match(manager,/embedded Android executable bridge missing/)
