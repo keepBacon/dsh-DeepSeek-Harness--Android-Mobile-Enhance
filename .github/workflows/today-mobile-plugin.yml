@@ -1,0 +1,39 @@
+name: Today Mobile Plugin
+on:
+  push:
+    paths:
+      - 'plugins/dsh-today-mobile/**'
+      - '.github/workflows/today-mobile-plugin.yml'
+  pull_request:
+    paths:
+      - 'plugins/dsh-today-mobile/**'
+      - '.github/workflows/today-mobile-plugin.yml'
+  workflow_dispatch:
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: |
+          node --check plugins/dsh-today-mobile/lib/auth.js
+          node --check plugins/dsh-today-mobile/lib/auth-rpc.js
+          node --check plugins/dsh-today-mobile/lib/index.js
+          node --check plugins/dsh-today-mobile/lib/client.js
+          node --check plugins/dsh-today-mobile/lib/adapter.js
+      - name: Run isolated auth tests (no credentials/network)
+        run: node --test plugins/dsh-today-mobile/test/*.test.mjs
+      - name: Prepare standalone plugin artifact
+        run: |
+          mkdir -p dist
+          cd plugins
+          zip -qr ../dist/dsh-today-mobile.zip dsh-today-mobile -x 'dsh-today-mobile/test/*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-today-mobile-plugin
+          path: dist/dsh-today-mobile.zip
