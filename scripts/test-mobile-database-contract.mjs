@@ -65,6 +65,16 @@ assert.match(index,/previousExtensions\.keys\.asSequence\(\)/);
 assert.match(db,/private val HEX =/);
 assert.match(db,/CharArray\(bytes\.size \* 2\)/);
 assert.match(index,/if \(sessions\.second && staleSessions\.isNotEmpty\(\)\)/);
+const extensionsScan=index.slice(index.indexOf('  private fun collectExtensions('));
+assert.match(extensionsScan,/val dependencies = manifest\?\.optJSONObject\("dependencies"\)/);
+assert.match(extensionsScan,/bundles\.isNotEmpty\(\) \|\| dependencies\.length\(\) == 0/);
+assert.match(extensionsScan,/fullKinds \+= "plugin"/);
+assert.ok(extensionsScan.indexOf('if (bundles.isNotEmpty() || dependencies.length() == 0)') <
+ extensionsScan.indexOf('fullKinds += "plugin"'),
+ 'invalid plugin snapshots must not trigger pruning of the old inventory');
+assert.match(index,/An inaccessible public Documents mount is a partial scan/);
+assert.match(index,/catch \(_: Exception\) \{[\s\S]*?false[\s\S]*?\}/);
+
 assert.match(index,/complete = false\s+continue/);
 assert.equal((bridge.match(/fun recordToolObservation\(/g)||[]).length,1,'duplicate Android bridge method');
 assert.equal((bridge.match(/private val onRecordToolObservation:/g)||[]).length,1,'duplicate callback');
