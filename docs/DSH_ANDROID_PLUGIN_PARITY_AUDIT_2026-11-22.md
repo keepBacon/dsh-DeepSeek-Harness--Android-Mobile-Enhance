@@ -116,7 +116,7 @@ Android 仓库：https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobi
 - Android Host 仅提供已打包 `usr/bin/curl` 的绝对路径，调用经现有 noexec system linker bridge 执行；发布构建必须包含并校验 curl ELF/CA 依赖。
 - 对于经过源主机、HTTPS、路径、方法、Proxy、AbortSignal 校验的商汤 **GET `/v1/models`**，原有 `fetch` 与 `node:https` 都失败之后，才尝试 curl；HTTP 4xx/5xx 属于有效响应，不触发切换。
 - 对于 **POST `/v1/chat/completions`**，在发出请求之前一次性选定 curl（不存在时保持已实现的 Node 原生流式路径）；不在网络错误之后重试可能计费的 POST。流式 SSE 不汇聚全量响应。
-- 密钥和 HTTP headers 通过 curl `--config -` 的 stdin 管道传递，POST JSON 经 fd 3 私有管道传递；不在 argv、全局 Fetch、日志、普通配置文件或代码中写入。关闭 curlrc 隐含配置，不绕过证书检查，也不绕过 DSH 显式代理；失败仅报告无凭据的错误码。
+- 密钥和 HTTP headers 通过 curl `--config -` 的 stdin 管道传递，POST JSON 同样经 curl 私有 stdin 配置流传递（不会写入磁盘或 argv）；不在 argv、全局 Fetch、日志、普通配置文件或代码中写入。关闭 curlrc 隐含配置，不绕过证书检查，也不绕过 DSH 显式代理；失败仅报告无凭据的错误码。
 - 新增真实本机 HTTP 服务器 + 系统 curl 的 GET / POST、状态码、SSE、Abort、密钥不出现于进程参数的回归测试；并纳入 PR 静态 CI。运行时 Patch 对未知上游锚点继续 fail-loud。
 
 **明确限制：** 这解决的是可能由 Node HTTP 栈导致的可复现兼容缺口；并未使用用户密钥执行线上商汤调用，也不能确定现有 `glm-5.3` / `deepseek-v4.1-flash` 是否由该商汤账户提供。真机仍须验证移动 VPN/DNS/TLS 路由、`GET /models` 的 HTTP 结果及完整的 Chat Completions 流式调用。不自动改变用户 Provider 配置或实际保存的密钥。
