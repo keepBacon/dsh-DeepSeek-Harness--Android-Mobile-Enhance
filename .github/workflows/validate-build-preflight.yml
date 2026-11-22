@@ -9,7 +9,7 @@ jobs:
   # Mandatory complete upstream dependency resolution when the major DSH
   # family is upgraded. This prevents reusing a 0.1.5 graph under a 0.2 label.
   upstream-upgrade-family:
-    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2') || contains(github.head_ref || github.ref_name, 'ptc-node-linker') || contains(github.head_ref || github.ref_name, 'plugin-parity') || contains(github.head_ref || github.ref_name, 'plugin-client-lifecycle') || contains(github.head_ref || github.ref_name, 'official-mcp-wire')
+    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2') || contains(github.head_ref || github.ref_name, 'ptc-node-linker') || contains(github.head_ref || github.ref_name, 'plugin-parity') || contains(github.head_ref || github.ref_name, 'plugin-client-lifecycle') || contains(github.head_ref || github.ref_name, 'official-mcp-wire') || contains(github.head_ref || github.ref_name, 'sensenova-native-curl')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
