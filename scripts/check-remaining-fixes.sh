@@ -95,8 +95,12 @@ must "$MA" 'showWorkspaceDirectorySelection(root)'
 must "$MA" 'private fun saveToWorkspaceStreamed('
 must "$MA" 'isInsideWorkspace(workspaceRoot, destination)'
 forbid "$MA" 'MediaStore.Downloads.EXTERNAL_CONTENT_URI'
-must "$MA" 'reserveUniqueFile(dir, filename)'
-must "$MA" 'if (candidate.createNewFile()) return candidate'
+# Exports must fully stage/sync content before publishing the final name.
+must "$MA" 'java.io.File(dir, ".dsh-export-${java.util.UUID.randomUUID()}.tmp")'
+must "$MA" 'return publishWorkspaceImport(temp, dir, filename)'
+must "$MA" 'java.nio.channels.FileChannel.open(temp.toPath()'
+forbid "$MA" 'reserveUniqueFile(dir, filename)'
+forbid "$MA" 'if (candidate.createNewFile()) return candidate'
 
 # M-09/M-10 encrypted SSH/Git credentials and exact host-scoped askpass.
 must "$SC" 'AndroidKeyStore'
