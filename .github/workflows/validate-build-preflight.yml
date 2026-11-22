@@ -9,7 +9,7 @@ jobs:
   # Mandatory complete upstream dependency resolution when the major DSH
   # family is upgraded. This prevents reusing a 0.1.5 graph under a 0.2 label.
   upstream-upgrade-family:
-    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2') || contains(github.head_ref || github.ref_name, 'ptc-node-linker') || contains(github.head_ref || github.ref_name, 'plugin-parity')
+    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2') || contains(github.head_ref || github.ref_name, 'ptc-node-linker') || contains(github.head_ref || github.ref_name, 'plugin-parity') || contains(github.head_ref || github.ref_name, 'plugin-client-lifecycle')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -42,6 +42,11 @@ jobs:
           test -f node_modules/@deepseek-ai/dsh/lib/bin.js
           node "$GITHUB_WORKSPACE/scripts/validate-android-plugin-runtime-parity.mjs" node_modules
           node "$GITHUB_WORKSPACE/scripts/test-android-cordis-runtime-parity.mjs" node_modules
+          # React is an official browser singleton, not a Host dependency.
+          # Install it ONLY in the test fixture, never mutate the locked Host graph.
+          npm install --prefix "$RUNNER_TEMP/dsh-browser-platform" --no-audit --no-fund --ignore-scripts react@18.2.0 react-dom@18.2.0 @deepseek-ai/dsh-client-ui-slots@0.2.2-rc.5
+          DSH_TEST_BROWSER_PLATFORM_ROOT="$RUNNER_TEMP/dsh-browser-platform" \
+            node "$GITHUB_WORKSPACE/scripts/test-android-client-plugin-lifecycle.mjs" node_modules
           # Exercise actual 0.2.2 compiled bundles before a costly ARM64
           # runtime rebuild. Keep the 0.1.5-specific contract tests separate.
           mkdir -p "$RUNNER_TEMP/dsh-android-sandbox/usr/lib"
