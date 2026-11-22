@@ -5,6 +5,7 @@
  * require adjustments and must be verified with a real account.
  */
 export const SESSION_REF = 'TODAY_AI_SESSION_COOKIE';
+export const DEVICE_REF = 'TODAY_AI_DEVICE_ID';
 export const WEB_ORIGIN = 'https://todayai.cn';
 export const SESSION_NAME = '__Secure-better-auth.session_token';
 
@@ -81,14 +82,27 @@ export class TodaySession {
     this.credentials = credentials;
     this.fetchImpl = fetchImpl;
     this.cookie = '';
+    this.deviceId = '';
     this.lastSentPhone = '';
     this.lastSentAt = 0;
     this.failedVerifications = 0;
   }
   async init() {
-    const current = await this.credentials.resolve(SESSION_REF);
-    this.cookie = typeof current?.value === 'string' ? current.value : '';
-    // Do not fail startup just because a saved upstream cookie has expired.
+    // A missing optional reference is expected on first install.
+    try {
+      const current = await this.credentials.resolve(SESSION_REF);
+      this.cookie = typeof current?.value === 'string' ? current.value : '';
+    } catch {
+      this.cookie = '';
+    }
+    let existing;
+    try { existing = (await this.credentials.resolve(DEVICE_REF))?.value; } catch {}
+    if (typeof existing === 'string' && /^web_[a-zA-Z0-9-]{8,80}$/.test(existing)) {
+      this.deviceId = existing;
+    } else {
+      this.deviceId = 'web_' + globalThis.crypto.randomUUID();
+      await this.credentials.set(DEVICE_REF, this.deviceId);
+    }
   }
   status() {
     return { loggedIn: this.cookie.length > 0, phone: this.lastSentPhone
