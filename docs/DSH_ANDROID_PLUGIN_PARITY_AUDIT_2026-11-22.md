@@ -67,3 +67,9 @@ Android 仓库：https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobi
 本轮在 Android 管理的 MCP 定义中新增 `envKeys`/`headerKeys`（只保存名称），把值加密保存在已有 Android Keystore 凭据存储中。启动时只把值注入 Host 子进程环境，Cordis patch 只持有 `!!js process.env` 引用，不写入明文；添加 stdio 工作目录输入和自定义 HTTP Headers 输入。删除服务时清除对应的加密字段；凭据缺失时独立跳过该服务并报告原因，不阻止其他服务器或 Web Gateway 启动。
 
 **验收界限：** 新增静态数据流回归，并将 Kotlin 构建与既有运行时检查交由 GitHub Actions 执行。本轮不声称已完成真机 WebView、Remote RPC、MCP 探测及模型实际工具调用验收。配置扩展仅作用于 Android 原生 MCP 管理页面；官方插件可继续使用上游插件管理和公开 API。
+
+## 第四轮：真实上游 MCP wire 与 ToolRuntime 验收（2026-11-22）
+
+新增 `scripts/test-android-official-mcp-wire-parity.mjs` 并接入 `upstream-upgrade-family` CI。使用真实发布的 DSH 0.2.2-rc.5 Cordis、MCP Client、ToolRuntime、NativeToolExecutor 和 Tool Testkit，通过真实 MCP SDK 构造**两个独立**的 stdio 与 Streamable HTTP server（隔离安装于测试目录，不能污染 Host 依赖图）。验证初始服务发现、工具同步、stdio 自定义 env、HTTP Authorization/自定义 Headers、tools/call 响应、`isError` 到模型工具结果的传播、一个服务注销后另一服务继续正常调用，以及停用后的工具清理。
+
+该测试确实执行本地 MCP 服务端逻辑，使用协议传输和官方工具执行器，并非模拟返回值；但在 GitHub Linux CI 运行，不等于 Android app-UID 下的 linker64、原生进程、WebView 或真实在线模型调用已经验证。后者仍属于真机验收项。
