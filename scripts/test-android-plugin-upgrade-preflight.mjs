@@ -42,5 +42,7 @@ const injected=script.slice(from,until)
 assert.match(injected,/androidUnchangedIncompatiblePlugins\(beforeDependencies, installedBefore/)
 assert.match(injected,/namedSpecs\(args\)/)
 assert.match(injected,/incompatible\.push\(incompatiblePlugin\(entry\.issue\)\)/)
+assert.match(injected,/namedSpecs\(args\)\.length > 0/,
+ 'bare dsh plugin install must remain available to restore node_modules')
 assert.match(injected,/requiredIfPresent: true/)
 console.log('[DSH] Android 0.2.2 plugin install preflight: untouched incompatible sidebar blocked, self-upgrade allowed')
