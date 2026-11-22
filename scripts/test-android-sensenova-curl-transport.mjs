@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { androidCurlAvailable, androidCurlRequest } from './dsh-android-curl-transport.mjs'
@@ -13,9 +13,13 @@ import { androidSenseNovaCompletionsFetch } from './dsh-android-sensenova-comple
 const curl = execFileSync('/bin/sh',['-c','command -v curl'],{encoding:'utf8'}).trim()
 assert.ok(curl.startsWith('/'), 'Linux curl executable required for native transport fixture')
 const root = mkdtempSync(join(tmpdir(), 'dsh-sensenova-curl-'))
-const bridge = join(root,'native-linker-bridge.sh')
+const wrappedCurl = join(root,'curl-with-private-argv-audit.sh')
 const argLog = join(root,'argv.log')
-writeFileSync(bridge, '#!/bin/sh\nprintf "%s\\n" "$@" > "$DSH_CURL_TEST_ARGV_LOG"\nexec "$@"\n')
+// Linux has no /system/bin/sh. Exercise the genuine native curl executable
+// through an argv-auditing wrapper. The Android linker route has separate
+// Android source/ABI acceptance gates.
+writeFileSync(wrappedCurl, '#!/bin/sh\nprintf "%s\\n" "$@" > "$DSH_CURL_TEST_ARGV_LOG"\nexec '+JSON.stringify(curl)+' "$@"\n')
+chmodSync(wrappedCurl,0o700)
 const saved = new Map()
 const envNames = ['DSH_ANDROID_STANDALONE','DSH_ANDROID_CURL_BINARY',
   'DSH_ANDROID_EXEC_BRIDGE','DSH_CURL_TEST_ARGV_LOG',
@@ -45,9 +49,8 @@ try {
   })
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
   const base='http://127.0.0.1:'+server.address().port
-  process.env.DSH_ANDROID_STANDALONE='1'
-  process.env.DSH_ANDROID_CURL_BINARY=curl
-  process.env.DSH_ANDROID_EXEC_BRIDGE=bridge
+  process.env.DSH_ANDROID_STANDALONE='0'
+  process.env.DSH_ANDROID_CURL_BINARY=wrappedCurl
   process.env.DSH_CURL_TEST_ARGV_LOG=argLog
   assert.equal(await androidCurlAvailable(),true)
   const secret='test-secret-only-in-pipe-7642'
