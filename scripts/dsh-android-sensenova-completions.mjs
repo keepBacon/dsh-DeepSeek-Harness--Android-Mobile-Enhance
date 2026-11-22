@@ -20,7 +20,7 @@ function androidSenseNovaEligible(input, init) {
     const url = new URL(input instanceof Request ? input.url : input)
     return url.protocol === 'https:' && url.hostname === 'token.sensenova.cn'
       && (url.port === '' || url.port === '443')
-      && url.pathname.replace(/\\/+$/, '') === '/v1/chat/completions'
+      && url.pathname.replace(/\/+$/, '') === '/v1/chat/completions'
       && !url.username && !url.password
   } catch { return false }
 }
