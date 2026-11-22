@@ -188,6 +188,7 @@ jobs:
           node scripts/test-android-model-discovery-inspector.mjs
           node scripts/test-android-model-discovery-transport.mjs
           node scripts/test-android-sensenova-inference.mjs
+          node scripts/test-android-sensenova-curl-transport.mjs
           node scripts/test-android-foundation-bugs.mjs
           python3 scripts/test-android-git-gh-runtime.py
           node scripts/test-android-plugin-git-spawn.mjs
