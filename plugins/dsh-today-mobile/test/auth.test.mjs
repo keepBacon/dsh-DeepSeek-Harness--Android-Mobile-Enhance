@@ -55,6 +55,7 @@ test('OTP -> verified session -> persisted credentials -> logout', async () => {
     '__Secure-better-auth.session_token=session.secret');
   const loaded = new TodaySession(t.credentials, { fetchImpl: t.fetchImpl });
   await loaded.init();
+  assert.equal(loaded.deviceId, session.deviceId);
   assert.equal(loaded.status().loggedIn, true);
   await loaded.logout();
   assert.equal(t.values.has(SESSION_REF), false);
