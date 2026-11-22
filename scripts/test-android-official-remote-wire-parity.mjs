@@ -30,7 +30,7 @@ const packageAt = name => join(root, name)
 const packageJson = name => JSON.parse(readFileSync(join(packageAt(name), 'package.json'), 'utf8'))
 function entry(name, subpath = '.') {
   const manifest = packageJson(name)
-  assert.equal(manifest.version, name === '@deepseek-ai/cordis' ? '4.0.2' : '0.2.2-rc.5',
+  assert.equal(manifest.version, name === '@deepseek-ai/cordis' ? '4.1.0' : '0.2.2-rc.5',
     'cross-release package in actual test graph: ' + name)
   const target = manifest.exports?.[subpath] ?? (subpath === '.' ? manifest.main : undefined)
   const file = typeof target === 'string' ? target : target?.default ?? target?.browser ?? target?.node
