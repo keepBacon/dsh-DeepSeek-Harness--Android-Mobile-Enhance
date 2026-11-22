@@ -80,17 +80,16 @@ assert.ok(source.includes("closeSidebar();\n              return true;"),
  'opening upstream DSH Plugins must dismiss the mobile sidebar')
 const engineSource=readFileSync('app/src/main/java/com/dshmobile/shell/EngineManager.kt','utf8')
 for(const token of [
- 'dsh-zcode-startplan', 'dsh-providers-hub',
  'val requiredClients = client.optJSONArray("inject")',
  'val bundlePatch = root.optJSONObject("dsh")?.optJSONObject("bundle")',
  'findRuntimePackageDir(dependency)',
- 'val priorityPlugins = listOf("dsh-zcode-startplan", "dsh-providers-hub")',
- 'val otherPlugins = try {',
+ 'val declaredPlugins = try {',
  'npmPackageName.matches(it)',
- 'for (name in (priorityPlugins + otherPlugins).distinct())',
- 'if (name in priorityPlugins)',
- 'prepare 构建'
+ 'for (name in declaredPlugins)',
+ '源码安装，请检查 prepare/build 是否生成此产物'
 ]) assert.ok(engineSource.includes(token),'missing community plugin compatibility: '+token)
+assert.ok(!engineSource.includes('val priorityPlugins = listOf('),
+  'community plugin discovery must be package-agnostic')
 
 // Exercise real source parser with a tiny four-sibling DOM fixture.
 const start=source.indexOf('        const findSettingsParts = () => {')
