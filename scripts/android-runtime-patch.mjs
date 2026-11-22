@@ -422,6 +422,47 @@ eachPackage('@deepseek-ai/dsh-llm-pi-ai', 'lib/index.js', (file) => {
   return 'patched'
 }, { requiredIfPresent: versionAtLeast(targetVersion, '0.1.5-rc.2') })
 
+// Upstream 0.2.2's plugin transaction checks direct dependencies *after*
+// pnpm has rebuilt node_modules. An old unchanged sidebar (0.19.x, built
+// for DSH 0.1.5) can then invalidate an unrelated ZCode upgrade; rollback
+// restores manifest/lockfile but may fail to reconstruct the previous tree.
+// Detect unchanged installed incompatibilities before any destructive pnpm
+// mutation. Updating the incompatible plugin itself remains allowed.
+if (versionAtLeast(targetVersion, '0.2.2-rc.5')) {
+  eachPackage('@deepseek-ai/dsh-plugin-manager', 'lib/index.js', file => {
+    let txt = read(file)
+    const marker = 'DSH Android compat: preflight untouched incompatible plugins'
+    if (txt.includes(marker)) return 'already'
+    const anchor = /if\s*\(\s*preflight\.length\s*>\s*0\s*\)\s*return\s+await\s+rejected\(\s*preflight\s*,\s*["']nothing was installed["']\s*\)\s*;?/g
+    const matches = [...txt.matchAll(anchor)]
+    if (matches.length !== 1) throw new Error('plugin preflight anchor changed (' +
+      matches.length + '): ' + file)
+    for (const name of ['beforeDependencies', 'installedBefore', 'namedSpecs',
+      'parseInstallSpec', 'evaluatePluginCompatibility', 'exemptions']) {
+      if (!txt.includes(name)) throw new Error('plugin preflight lacks ' + name + ': ' + file)
+    }
+    const helper = fs.readFileSync(new URL('./dsh-android-plugin-update-preflight.mjs',
+      import.meta.url), 'utf8').replace(/^export function /gm, 'function ')
+    txt = helper + '\n' + txt
+    txt = txt.replace(anchor, match => [
+      'if (process.env.DSH_ANDROID_STANDALONE === "1") {',
+      '  const stale = androidUnchangedIncompatiblePlugins(beforeDependencies, installedBefore,',
+      '    namedSpecs(args), parseInstallSpec, evaluatePluginCompatibility, exemptions);',
+      '  for (const entry of stale) {',
+      '    preflight.push("Installed " + entry.name + "@" + entry.version +',
+      '      " requires a different DSH runtime. Update that plugin to its DSH 0.2.2-compatible',
+      ' release before modifying other plugins; the existing node_modules was not changed.");',
+      '    incompatible.push(incompatiblePlugin(entry.issue));',
+      '  }',
+      '}',
+      match,
+    ].join('\n'))
+    write(file, txt)
+    checkPatchedJavaScript(file)
+    return 'patched'
+  }, { requiredIfPresent: true })
+}
+
 // DSH 0.1.5-rc.2's /plugins/?? combo route is unreliable when the package
 // graph is installed under a non-default prefix (the Android runtime always is).
 // Patch the published HOST artifact, not the browser bundle: npm lib/client.js is
