@@ -94,3 +94,15 @@ Android 仓库：https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobi
 6. 通过 Cordis 卸载验证 Host `/api` 路由清理。
 
 唯一的测试基础设施是宿主 HTTP listener 以及内存凭据持久层；RPC 服务、序列化、Cookie 身份认证、Dispatcher 和业务状态改变都使用已发布官方实现。**Linux CI 成功不等于 Android WebView 或用户安装环境已完成真实验收。** 真机仍须覆盖前端屏幕渲染、WebSocket 生命周期、Remote Credentials 读写、崩溃恢复及用户原数据保留。
+
+## 第七轮：官方 Credentials Remote 与本地持久化验收（2026-11-22）
+
+在第六轮发布版 Host/Browser Remote `/api` 集成测试之上，新增实际发布的 `@deepseek-ai/dsh-api-settings-controller`、`@deepseek-ai/dsh-credentials-local`、`@deepseek-ai/dsh-credentials` 与 Settings Controller Typert 注册。测试在同一真实 HTTP Token/Cookie 通信链路中使用 `ctx.remote.credentials`：
+
+1. 使用实际官方 CredentialsController 验证 `describe`、`set`、`unset`。
+2. 错误 CredentialRef 应收到协议层 `gateway/bad-request`，不返回输入的敏感值。
+3. 新增及轮换 synthetic 测试值后，远程 `describe` 仅返回 configured/source/writable/masked 等官方允许字段，不返回明文。
+4. 验证实际官方 `credentials-local` 把凭据写入临时 `.credentials.yaml`、权限不可被 group/other 读取；新建一个 Cordis Context 并重新挂载官方 Provider，确认轮换后的值可从文件恢复。
+5. 删除凭据后确认远程状态清空、Host 下一次解析无法获取被删值；另保留前轮 Host RPC、GoalService 状态及作用域验证。
+
+**测试边界：** Linux CI 的临时凭据文档不是 Android Keystore，也不能代替覆盖安装、Android 用户数据迁移、真机 WebView 和 WebSocket 恢复。正式 Android 主机继续使用官方 CredentialProvider；该集成测试不会触碰用户 Profile、系统凭据或已保存会话。
