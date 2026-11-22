@@ -48,6 +48,19 @@ assert.ok(hostPicker.includes('workspaceChoicePending || pendingPickCallback != 
 assert.ok(hostPicker.includes('ShellState.rememberWorkspacePath(this, resolved)'))
 assert.ok(externalHost.includes('directoryPicker.launch(null)'))
 assert.ok(externalHost.includes('Environment.isExternalStorageManager()'))
+// When Android 11+ requires All Files Access, OpenDocumentTree is never
+// launched; the DSH Web callback must still settle with null so later
+// workspace choices cannot remain blocked by an unresolved browser request.
+const deniedExternal=externalHost.slice(externalHost.indexOf('    if (android.os.Environment.isExternalStorageManager())'))
+assert.ok(deniedExternal.includes('onDirectoryPicked?.('),
+  'permission denial must settle the original DSH directory callback')
+assert.ok(deniedExternal.includes('jsString(callbackId) + ", null)"'),
+  'permission denial must return null for the same callback ID')
+assert.ok(deniedExternal.includes('onPermissionRequired?.()'),
+  'the UI must still notify the user about missing storage permission')
+assert.ok(deniedExternal.indexOf('onDirectoryPicked?.(') <
+  deniedExternal.indexOf('onPermissionRequired?.()'),
+  'settle the request before prompting for external storage authorization')
 assert.ok(resolveExternal.includes('isExternalFileWorkspace(dir)'))
 assert.ok(!resolveExternal.includes('getExternalFilesDir('),
   'denied external tree must never redirect to app-controlled fallback')
