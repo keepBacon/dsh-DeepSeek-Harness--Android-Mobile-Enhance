@@ -51,6 +51,8 @@ on:
       - 'app/build.gradle.kts'
       - 'gradle.properties'
       - 'scripts/ci-validate-runtime.py'
+      - 'scripts/ci-verify-current-apk.py'
+      - 'scripts/test_dsh_runtime_provenance.py'
       - 'scripts/dsh-release-family-lock.json'
       - 'scripts/ci-generate-dsh-family.py'
       - 'scripts/ci-upgrade-dsh-runtime.py'
@@ -118,7 +120,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock runtime-release-family.json --output runtime-audit.json
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock runtime-release-family.json --output runtime-audit.json --expected-version 0.2.2-rc.5 --expected-commit 9c2670d3bce5275e0d1610272958121af87787bb
       - uses: actions/upload-artifact@v4
         with:
           name: dsh-android-arm64-runtime-${{ github.run_number }}
@@ -148,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock runtime-release-family.json --output runtime-audit.json
+          python3 scripts/ci-validate-runtime.py --snapshot app/src/main/assets/snapshot.tar.xz --lock runtime-release-family.json --output runtime-audit.json --expected-version 0.2.2-rc.5 --expected-commit 9c2670d3bce5275e0d1610272958121af87787bb
           python3 - <<'PY'
           import json, pathlib
           d=json.loads(pathlib.Path('runtime-audit.json').read_text())
@@ -188,7 +190,9 @@ jobs:
             --snapshot app/src/main/assets/snapshot.tar.xz \
             --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
             --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-            --version-code 45
+            --version-code 45 \
+            --family-lock runtime-release-family.json \
+            --expected-dsh-version 0.2.2-rc.5
       - name: Create and verify direct APK / distribution ZIP
         shell: bash
         run: |

@@ -73,3 +73,11 @@ Android 仓库：https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobi
 新增 `scripts/test-android-official-mcp-wire-parity.mjs` 并接入 `upstream-upgrade-family` CI。使用真实发布的 DSH 0.2.2-rc.5 Cordis、MCP Client、ToolRuntime、NativeToolExecutor 和 Tool Testkit，通过真实 MCP SDK 构造**两个独立**的 stdio 与 Streamable HTTP server（隔离安装于测试目录，不能污染 Host 依赖图）。验证初始服务发现、工具同步、stdio 自定义 env、HTTP Authorization/自定义 Headers、tools/call 响应、`isError` 到模型工具结果的传播、一个服务注销后另一服务继续正常调用，以及停用后的工具清理。
 
 该测试确实执行本地 MCP 服务端逻辑，使用协议传输和官方工具执行器，并非模拟返回值；但在 GitHub Linux CI 运行，不等于 Android app-UID 下的 linker64、原生进程、WebView 或真实在线模型调用已经验证。后者仍属于真机验收项。
+
+## 第五轮：正式 APK 与上游发布家族的一致性（2026-11-22）
+
+已确认签名 ARM64 工作流通过 `ci-assemble-github-runtime.py` 调用 `ci-upgrade-dsh-runtime.py`，并以官方 SHA `9c2670d3bce5275e0d1610272958121af87787bb` 的 `0.2.2-rc.5` 完整依赖图替换旧版 Seed。仓库静态的 `scripts/dsh-release-family-lock.json` 为 **0.1.5-rc.2 旧版回归测试输入**，并不是实际生产 APK 版本锁。生产的 `runtime-release-family.json` 在 ARM64 构建过程中根据固定上游 commit 重新生成。
+
+本轮将版本声明检查推进到**归档及签名 APK 内容验真**：`ci-validate-runtime.py` 读取快照里的 `dsh-release-family.json`、`dsh-release-install-lock.json`、`dsh-android-compat.json` 和已打包 DSH/Cordis/MCP/UI 的 package.json；逐项核对版本族、所需插件入口、已安装包的版本、构建目标和上游 commit，并用实际归档内 npm install lock 的 SHA-256 与 Android metadata 交叉检查。最终 APK 校验还要核对运行时标记中的 `app`、`dsh` 与 `sha256`，拒绝旧版本、重复标记、错误家族锁和摘要错配。新增独立回归覆盖版本漂移、缺失 UI/MCP 包、依赖缺口、锁摘要不一致与签名 APK 标记错误。
+
+**限制：** 这些检查证明构建可审计性，而非真机 app-UID 下的 Node ELF、WebView 插件 UI、MCP 工具调用与用户数据迁移。正式版本升级仍保留原签名、安装包 ID 和用户数据。
