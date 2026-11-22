@@ -81,3 +81,16 @@ Android 仓库：https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobi
 本轮将版本声明检查推进到**归档及签名 APK 内容验真**：`ci-validate-runtime.py` 读取快照里的 `dsh-release-family.json`、`dsh-release-install-lock.json`、`dsh-android-compat.json` 和已打包 DSH/Cordis/MCP/UI 的 package.json；逐项核对版本族、所需插件入口、已安装包的版本、构建目标和上游 commit，并用实际归档内 npm install lock 的 SHA-256 与 Android metadata 交叉检查。最终 APK 校验还要核对运行时标记中的 `app`、`dsh` 与 `sha256`，拒绝旧版本、重复标记、错误家族锁和摘要错配。新增独立回归覆盖版本漂移、缺失 UI/MCP 包、依赖缺口、锁摘要不一致与签名 APK 标记错误。
 
 **限制：** 这些检查证明构建可审计性，而非真机 app-UID 下的 Node ELF、WebView 插件 UI、MCP 工具调用与用户数据迁移。正式版本升级仍保留原签名、安装包 ID 和用户数据。
+
+## 第六轮：正式 Host / Browser Remote RPC 数据面验收（2026-11-22）
+
+新增 `scripts/test-android-official-remote-wire-parity.mjs`，以正式发布的 DSH 0.2.2-rc.5 Cordis、Client Connection、API Gateway、API Remotes、Remote Access、Typert Registry、GoalService 和 Session/Projection 运行真实服务链：
+
+1. 启动本机 `/api` HTTP 路由，验证**匿名客户端 401**。
+2. 调用真实 Host 浏览器启动 Token 兑换，检查 303 和 `HttpOnly` Cookie；将 Cookie 附加到测试浏览器请求。
+3. 加载发布版 `./client` 模块的 `__ModuleLoader__` handoff，并装入原生 Cordis Client 容器。
+4. 实际调用 `ctx.remote.goals.create/edit`，验证非法参数返回真实 `gateway/input-invalid`，并通过 Host GoalService 和 Session 事件确认真实状态修改。
+5. 创建 Agent scoped Client Context，验证 scoped Remote 调用不会串入其他 Agent。
+6. 通过 Cordis 卸载验证 Host `/api` 路由清理。
+
+唯一的测试基础设施是宿主 HTTP listener 以及内存凭据持久层；RPC 服务、序列化、Cookie 身份认证、Dispatcher 和业务状态改变都使用已发布官方实现。**Linux CI 成功不等于 Android WebView 或用户安装环境已完成真实验收。** 真机仍须覆盖前端屏幕渲染、WebSocket 生命周期、Remote Credentials 读写、崩溃恢复及用户原数据保留。
