@@ -140,6 +140,7 @@ jobs:
           node scripts/test-android-ptc-node-launch.mjs
           node scripts/test-mobile-database-contract.mjs
           node scripts/test-android-mcp-registration-contract.mjs
+          node scripts/test-android-mcp-transport-parity.mjs
           node scripts/test-android-mcp-startup-deadline.mjs
           node scripts/test-android-boot-timeout-recovery.mjs
           node scripts/test-android-offline-safe-mode.mjs

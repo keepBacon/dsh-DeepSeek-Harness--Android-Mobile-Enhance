@@ -202,14 +202,32 @@ class EngineManager(private val context: Context, private val pickToken: String?
     PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
   }
 
-  fun saveMcpServer(server: McpServerConfig, bearerToken: String? = null): PluginCommandResult = try {
-    if (!bearerToken.isNullOrBlank()) SecureCredentialStore.saveMcpBearerToken(context, server.id, bearerToken)
-    mcpConfigManager.upsert(server)
-    if (!server.bearerAuth) SecureCredentialStore.clearMcpBearerToken(context, server.id)
-    mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
-    PluginCommandResult(true, 0, "已保存 MCP：" + server.serverName)
-  } catch (t: Throwable) {
-    PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
+  fun saveMcpServer(
+    server: McpServerConfig, bearerToken: String? = null,
+    envValues: Map<String, String> = emptyMap(), headerValues: Map<String, String> = emptyMap(),
+  ): PluginCommandResult {
+    val isNew = mcpConfigManager.listServers().none { it.id == server.id }
+    var persisted = false
+    return try {
+      require(server.envKeys.toSet() == envValues.keys &&
+        server.headerKeys.toSet() == headerValues.keys) { "MCP credential key mismatch" }
+      if (!bearerToken.isNullOrBlank()) SecureCredentialStore.saveMcpBearerToken(context, server.id, bearerToken)
+      for ((name, value) in envValues) SecureCredentialStore.saveMcpField(context, server.id, "env", name, value)
+      for ((name, value) in headerValues) SecureCredentialStore.saveMcpField(context, server.id, "header", name, value)
+      mcpConfigManager.upsert(server)
+      persisted = true
+      if (!server.bearerAuth) SecureCredentialStore.clearMcpBearerToken(context, server.id)
+      mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
+      PluginCommandResult(true, 0, "已保存 MCP：" + server.serverName)
+    } catch (t: Throwable) {
+      // A rejected new definition must not leave unreferenced credentials.
+      // Never clear credentials for an already installed definition.
+      if (isNew && !persisted) {
+        SecureCredentialStore.clearMcpFields(context, server.id)
+        SecureCredentialStore.clearMcpBearerToken(context, server.id)
+      }
+      PluginCommandResult(false, -3, t.message ?: t.javaClass.simpleName)
+    }
   }
 
   fun setMcpServerEnabled(id: String, enabled: Boolean): PluginCommandResult = try {
@@ -223,6 +241,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
   fun removeMcpServer(id: String): PluginCommandResult = try {
     mcpConfigManager.remove(id)
     SecureCredentialStore.clearMcpBearerToken(context, id)
+    SecureCredentialStore.clearMcpFields(context, id)
     mcpConfigManager.ensureRuntimePatch(ShellState.safeModeEnabled(context))
     PluginCommandResult(true, 0, "MCP 已删除")
   } catch (t: Throwable) {

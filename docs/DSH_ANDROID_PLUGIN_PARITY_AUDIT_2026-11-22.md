@@ -58,3 +58,12 @@
 官方源码基准：https://github.com/deepseek-ai/deepseek-harness/tree/9c2670d3bce5275e0d1610272958121af87787bb
 
 Android 仓库：https://github.com/keepBacon/dsh-DeepSeek-Harness--Android-Mobile-Enhance
+
+
+## 第三轮：MCP 传输配置与凭据兼容性（2026-11-22）
+
+官方 `0.2.2-rc.5` 的 `packages/mcp/mcp-client/src/index.ts` 在 stdio 下支持 `env` 与 `cwd`，Streamable HTTP 下支持任意 `headers`，`transport.ts` 会将 stdio env 合入已清理的父进程环境。Android 原生 MCP 管理器此前仅暴露命令、参数、URL、Bearer，导致需要环境变量和自定义 HTTP 请求头的通用第三方 MCP Server 无法配置。
+
+本轮在 Android 管理的 MCP 定义中新增 `envKeys`/`headerKeys`（只保存名称），把值加密保存在已有 Android Keystore 凭据存储中。启动时只把值注入 Host 子进程环境，Cordis patch 只持有 `!!js process.env` 引用，不写入明文；添加 stdio 工作目录输入和自定义 HTTP Headers 输入。删除服务时清除对应的加密字段；凭据缺失时独立跳过该服务并报告原因，不阻止其他服务器或 Web Gateway 启动。
+
+**验收界限：** 新增静态数据流回归，并将 Kotlin 构建与既有运行时检查交由 GitHub Actions 执行。本轮不声称已完成真机 WebView、Remote RPC、MCP 探测及模型实际工具调用验收。配置扩展仅作用于 Android 原生 MCP 管理页面；官方插件可继续使用上游插件管理和公开 API。
