@@ -7,6 +7,7 @@ gets uploaded if any check fails. Does not touch the user's phone/data.
 """
 import argparse
 import hashlib
+import json
 import pathlib
 import re
 import subprocess
@@ -25,7 +26,27 @@ def command(args):
     return proc.stdout
 
 
-def verify(apk, snapshot, aapt, apksigner, version_code):
+def verify_version_marker(marker, expected_sha, expected_dsh_version, app_version):
+    """Reject missing, duplicated or inconsistent APK provenance fields."""
+    rows = {}
+    for line in marker.splitlines():
+        if "=" not in line:
+            raise ValueError("malformed runtime identity marker")
+        key, value = line.split("=", 1)
+        if key not in ("app", "dsh", "sha256") or key in rows or not value:
+            raise ValueError("unexpected or duplicate runtime marker field: " + key)
+        rows[key] = value
+    if set(rows) != {"app", "dsh", "sha256"}:
+        raise ValueError("runtime identity marker has missing fields")
+    if rows["dsh"] != expected_dsh_version:
+        raise ValueError("APK runtime DSH version mismatch: " + rows["dsh"])
+    if rows["sha256"] != expected_sha:
+        raise ValueError("APK runtime SHA256 marker mismatch")
+    if rows["app"] != app_version:
+        raise ValueError("APK runtime marker app version differs from Android package")
+
+
+def verify(apk, snapshot, aapt, apksigner, version_code, family_lock, expected_dsh_version):
     if not apk.is_file() or apk.stat().st_size < 1024 * 1024:
         raise ValueError("APK missing or unexpectedly small")
     output = command([str(apksigner), "verify", "--verbose", "--print-certs", str(apk)])
@@ -51,7 +72,8 @@ def verify(apk, snapshot, aapt, apksigner, version_code):
     package_line = next((line for line in badging.splitlines() if line.startswith("package: ")), "")
     package = re.search(r"\bname='([^']+)'", package_line)
     code = re.search(r"\bversionCode='(\d+)'", package_line)
-    if not package or not code:
+    app_version = re.search(r"\bversionName='([^']+)'", package_line)
+    if not package or not code or not app_version:
         raise ValueError(f"aapt could not parse APK package line: {package_line[:300]}")
     print("Verified Android identity:", package.group(1), "versionCode:", code.group(1), flush=True)
     if package.group(1) != EXPECTED_PACKAGE or int(code.group(1)) != version_code:
@@ -60,6 +82,9 @@ def verify(apk, snapshot, aapt, apksigner, version_code):
             f"expected {EXPECTED_PACKAGE} / {version_code}"
         )
 
+    family = json.loads(family_lock.read_text())
+    if family.get("version") != expected_dsh_version or family.get("schema") != 2:
+        raise ValueError("release family lock differs from expected APK DSH version")
     if not snapshot.is_file() or snapshot.stat().st_size < 1024 * 1024:
         raise ValueError("missing full native runtime input")
     sha = hashlib.sha256()
@@ -76,9 +101,8 @@ def verify(apk, snapshot, aapt, apksigner, version_code):
     print("Verified embedded runtime SHA256:", archive_sha.hexdigest(), flush=True)
     if archive_sha.hexdigest() != expected_sha:
         raise ValueError("embedded APK runtime differs from verified ARM64 archive")
-    if f"sha256={expected_sha}" not in marker.splitlines():
-        raise ValueError("embedded runtime identity marker missing/mismatched")
-    print("DSH APK CERT / PACKAGE / VERSION / RUNTIME: PASS", flush=True)
+    verify_version_marker(marker, expected_sha, expected_dsh_version, app_version.group(1))
+    print("DSH APK CERT / PACKAGE / VERSION / RUNTIME / RELEASE FAMILY: PASS", flush=True)
 
 
 def main():
@@ -88,9 +112,12 @@ def main():
     p.add_argument("--aapt", type=pathlib.Path, required=True)
     p.add_argument("--apksigner", type=pathlib.Path, required=True)
     p.add_argument("--version-code", type=int, required=True)
+    p.add_argument("--family-lock", type=pathlib.Path, required=True)
+    p.add_argument("--expected-dsh-version", required=True)
     args = p.parse_args()
     try:
-        verify(args.apk, args.snapshot, args.aapt, args.apksigner, args.version_code)
+        verify(args.apk, args.snapshot, args.aapt, args.apksigner, args.version_code,
+               args.family_lock, args.expected_dsh_version)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         print("DSH APK verification FAIL:", error, file=sys.stderr)
         return 2
