@@ -2953,30 +2953,33 @@ class EngineManager(private val context: Context, private val pickToken: String?
         }
         val exports = root.optJSONObject("exports")
         val clientExport = exports?.opt("./client")
-        // Published ESM plugins may use either a direct export or a
-        // conditional import/default export. The DSH browser client resolves
-        // the import condition; validating default alone rejects valid builds.
-        val clientEntry = when (clientExport) {
-          is String -> clientExport
-          is JSONObject -> clientExport.optString("import", "")
-            .ifBlank { clientExport.optString("default", "") }
-          else -> ""
-        }
-        if (clientEntry.isBlank()) {
-          warnings += "$name: 缺少 ./client 导出，DSH 官方插件页面无法加载配置"
-          continue
-        }
         val rootPath = parent.canonicalPath + File.separator
         fun packagedFile(path: String): File? {
-          // npm "main" and Cordis patch paths commonly omit "./", while
-          // package exports often include it. Both forms are package-local.
-          // Canonical containment prevents absolute or ../ escapes.
+          // Package exports and entry points must remain inside the package.
           if (path.isBlank() || path.startsWith("/") || path.contains('\\')) return null
           val file = File(parent, path).canonicalFile
           return file.takeIf { it.path.startsWith(rootPath) && it.isFile }
         }
-        if (packagedFile(clientEntry) == null) {
-          warnings += "$name: Web 客户端文件缺失 ($clientEntry)；请安装完整发布包" +
+        // Nested Node conditional exports may use browser/import/default.
+        // Exclude declaration-only "types" and never execute plugin scripts.
+        fun clientExportPaths(value: Any?, depth: Int = 0): List<String> {
+          if (depth > 4) return emptyList()
+          return when (value) {
+            is String -> listOf(value)
+            is JSONObject -> value.keys().asSequence()
+              .filter { it != "types" }.take(24)
+              .flatMap { clientExportPaths(value.opt(it), depth + 1).asSequence() }
+              .toList()
+            else -> emptyList()
+          }
+        }
+        val clientPaths = clientExportPaths(clientExport).distinct()
+        if (clientPaths.isEmpty()) {
+          warnings += "$name: 缺少可执行的 ./client 导出，DSH 官方插件页面无法加载配置"
+          continue
+        }
+        if (clientPaths.none { packagedFile(it) != null }) {
+          warnings += "$name: Web 客户端导出目标均不存在 (${clientPaths.take(4).joinToString(", ")})；请安装完整发布包" +
             "；若由源码安装，请检查 prepare/build 是否生成此产物"
         }
         val bundlePatch = root.optJSONObject("dsh")?.optJSONObject("bundle")
