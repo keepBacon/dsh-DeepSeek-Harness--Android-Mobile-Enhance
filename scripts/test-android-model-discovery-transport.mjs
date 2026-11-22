@@ -25,6 +25,7 @@ try {
  mkdirSync(join(fixture,'lib'),{recursive:true})
  writeFileSync(join(fixture,'package.json'),JSON.stringify({name:'@deepseek-ai/dsh-llm-pi-ai'}))
  writeFileSync(join(fixture,'lib/index.js'),[
+  'function mapStopReason(message, contextWindow) { return { kind: "stop" }; }',
   'async function discoverModels(url) {',
   '  let response;',
   '  try { response = await fetch(url, { method: "GET", headers: {} }); }',
