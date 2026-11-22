@@ -14,7 +14,7 @@ assert.ok(pluginSection.includes('it.path.startsWith(rootPath) && it.isFile'),
  'plugin path must be canonical and confined to installed package')
 assert.ok(!pluginSection.includes('if (!path.startsWith("./")'),
  'npm main and Cordis patch accept legitimate package-local paths without ./')
-assert.ok(pluginSection.includes('packagedFile(clientEntry)') &&
+assert.ok(pluginSection.includes('clientPaths.none { packagedFile(it) != null }') &&
  pluginSection.includes('packagedFile(bundlePatch)') &&
  pluginSection.includes('packagedFile(main)'),
  'client, bundle and host entries must all use canonical containment')

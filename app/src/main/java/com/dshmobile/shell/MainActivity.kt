@@ -3353,7 +3353,12 @@ class MainActivity : ComponentActivity() {
         };
 
         const findSettingsParts = () => {
-          for (const modal of document.querySelectorAll('[role="dialog"][aria-modal="true"], [aria-modal="true"][role="dialog"]')) {
+          // DSH 0.2.2 SettingsRoot owns only this modal. A third-party plugin
+          // may legitimately render its own dialog with "Models"/"Plugins"
+          // tabs; never tag, restyle or insert a native Skills row into it.
+          // This is an upstream structural marker, not a locale-dependent
+          // guess based on the plugin's labels.
+          for (const modal of document.querySelectorAll('[data-shortcut-modal="settings"][role="dialog"][aria-modal="true"]')) {
             const nav = modal.querySelector('nav');
             if (!nav) continue;
             const navButtons = Array.from(nav.querySelectorAll('button')).filter((button) => {

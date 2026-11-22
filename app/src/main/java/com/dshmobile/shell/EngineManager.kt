@@ -2924,20 +2924,18 @@ class EngineManager(private val context: Context, private val pickToken: String?
     // Resolve the release-family tree once for all plugin dependencies.
     // Repeated walkTopDown() scans would delay Android Web Host startup.
     val runtimeClientPresence = mutableMapOf<String, Boolean>()
-    val priorityPlugins = listOf("dsh-zcode-startplan", "dsh-providers-hub")
-    // Inspect installed Web-profile dependencies, not just two known plugin
-    // names. Backend-only libraries do not need a Web client and are skipped.
+    // Inspect every installed Web-profile dependency generically. A headless
+    // dependency is valid; it must not be judged against a named UI plugin.
     // Bound the metadata scan so an oversized manifest cannot stall boot.
-    val otherPlugins = try {
+    val declaredPlugins = try {
       val manifest = profileManifest(profile)
       val dependencies = JSONObject(manifest.readText()).optJSONObject("dependencies")
       val npmPackageName = Regex("""^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$""")
       dependencies?.keys()?.asSequence()
-        ?.filter { it !in priorityPlugins && !it.startsWith("@deepseek-ai/") &&
-          npmPackageName.matches(it) }
+        ?.filter { !it.startsWith("@deepseek-ai/") && npmPackageName.matches(it) }
         ?.take(96)?.toList().orEmpty()
     } catch (_: Throwable) { emptyList() }
-    for (name in (priorityPlugins + otherPlugins).distinct()) {
+    for (name in declaredPlugins) {
       val packageFile = installedPackageManifest(name, profile)
       if (!packageFile.isFile) continue
       try {
@@ -2945,11 +2943,8 @@ class EngineManager(private val context: Context, private val pickToken: String?
         val parent = packageFile.parentFile ?: continue
         val client = root.optJSONObject("dsh")?.optJSONObject("client")
         if (client == null) {
-          // Most libraries and headless bundles intentionally do not ship a
-          // browser half. ZCode/Providers Hub are explicitly expected to
-          // expose account configuration in the official Plugins panel.
-          if (name in priorityPlugins)
-            warnings += "$name: 未声明 DSH Web client，插件配置页面无法注册"
+          // A server-only bundle or library has no UI by design. The Host
+          // plugin manager, not this metadata observer, owns activation.
           continue
         }
         if (client.optString("platform") != "web") {
@@ -2958,31 +2953,34 @@ class EngineManager(private val context: Context, private val pickToken: String?
         }
         val exports = root.optJSONObject("exports")
         val clientExport = exports?.opt("./client")
-        // Published ESM plugins may use either a direct export or a
-        // conditional import/default export. The DSH browser client resolves
-        // the import condition; validating default alone rejects valid builds.
-        val clientEntry = when (clientExport) {
-          is String -> clientExport
-          is JSONObject -> clientExport.optString("import", "")
-            .ifBlank { clientExport.optString("default", "") }
-          else -> ""
-        }
-        if (clientEntry.isBlank()) {
-          warnings += "$name: 缺少 ./client 导出，DSH 官方插件页面无法加载配置"
-          continue
-        }
         val rootPath = parent.canonicalPath + File.separator
         fun packagedFile(path: String): File? {
-          // npm "main" and Cordis patch paths commonly omit "./", while
-          // package exports often include it. Both forms are package-local.
-          // Canonical containment prevents absolute or ../ escapes.
+          // Package exports and entry points must remain inside the package.
           if (path.isBlank() || path.startsWith("/") || path.contains('\\')) return null
           val file = File(parent, path).canonicalFile
           return file.takeIf { it.path.startsWith(rootPath) && it.isFile }
         }
-        if (packagedFile(clientEntry) == null) {
-          warnings += "$name: Web 客户端文件缺失 ($clientEntry)；请安装完整发布包" +
-            if (name == "dsh-providers-hub") "，Git 安装须完成 prepare 构建" else ""
+        // Nested Node conditional exports may use browser/import/default.
+        // Exclude declaration-only "types" and never execute plugin scripts.
+        fun clientExportPaths(value: Any?, depth: Int = 0): List<String> {
+          if (depth > 4) return emptyList()
+          return when (value) {
+            is String -> listOf(value)
+            is JSONObject -> value.keys().asSequence()
+              .filter { it != "types" }.take(24)
+              .flatMap { clientExportPaths(value.opt(it), depth + 1).asSequence() }
+              .toList()
+            else -> emptyList()
+          }
+        }
+        val clientPaths = clientExportPaths(clientExport).distinct()
+        if (clientPaths.isEmpty()) {
+          warnings += "$name: 缺少可执行的 ./client 导出，DSH 官方插件页面无法加载配置"
+          continue
+        }
+        if (clientPaths.none { packagedFile(it) != null }) {
+          warnings += "$name: Web 客户端导出目标均不存在 (${clientPaths.take(4).joinToString(", ")})；请安装完整发布包" +
+            "；若由源码安装，请检查 prepare/build 是否生成此产物"
         }
         val bundlePatch = root.optJSONObject("dsh")?.optJSONObject("bundle")
           ?.optString("patch", "").orEmpty()

@@ -9,7 +9,7 @@ jobs:
   # Mandatory complete upstream dependency resolution when the major DSH
   # family is upgraded. This prevents reusing a 0.1.5 graph under a 0.2 label.
   upstream-upgrade-family:
-    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2') || contains(github.head_ref || github.ref_name, 'ptc-node-linker')
+    if: contains(github.head_ref || github.ref_name, 'upgrade-dsh-v0.2.2') || contains(github.head_ref || github.ref_name, 'ptc-node-linker') || contains(github.head_ref || github.ref_name, 'plugin-parity')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -40,6 +40,8 @@ jobs:
           node "$GITHUB_WORKSPACE/scripts/dsh-runtime-family.mjs" verify-installed "$RUNNER_TEMP/dsh-family.json" node_modules 0.2.2-rc.5
           test -f node_modules/@deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js
           test -f node_modules/@deepseek-ai/dsh/lib/bin.js
+          node "$GITHUB_WORKSPACE/scripts/validate-android-plugin-runtime-parity.mjs" node_modules
+          node "$GITHUB_WORKSPACE/scripts/test-android-cordis-runtime-parity.mjs" node_modules
           # Exercise actual 0.2.2 compiled bundles before a costly ARM64
           # runtime rebuild. Keep the 0.1.5-specific contract tests separate.
           mkdir -p "$RUNNER_TEMP/dsh-android-sandbox/usr/lib"
@@ -128,6 +130,8 @@ jobs:
           done < <(find scripts -maxdepth 1 -type f -name '*.mjs' -print0)
           node scripts/validate-desktop-web-parity.mjs --self-test
           node scripts/validate-agent-preset-parity.mjs --self-test
+          node scripts/validate-android-plugin-runtime-parity.mjs --self-test
+          node scripts/test-android-plugin-ui-isolation.mjs
           node scripts/test-android-ptc-node-launch.mjs
           node scripts/test-mobile-database-contract.mjs
           node scripts/test-android-mcp-registration-contract.mjs
