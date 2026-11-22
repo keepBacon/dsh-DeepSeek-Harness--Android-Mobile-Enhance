@@ -5487,6 +5487,13 @@ class MainActivity : ComponentActivity() {
       directoryPicker.launch(null)
       return
     }
+    // Android 11+ has no directory picker result when All Files Access is
+    // absent. Settle the original DSH pick request now: merely notifying the
+    // Web page about permission leaves that request waiting indefinitely,
+    // and a later picker attempt can stack on the stale callback.
+    webView.evaluateJavascript(
+      "window.__dshBridge?.onDirectoryPicked?.(" + jsString(callbackId) + ", null)", null,
+    )
     openAllFilesAccessSettings()
     webView.evaluateJavascript(
       "window.__dshBridge?.onPermissionRequired?.()", null,
