@@ -51,7 +51,7 @@ assert.ok(externalHost.includes('Environment.isExternalStorageManager()'))
 // When Android 11+ requires All Files Access, OpenDocumentTree is never
 // launched; the DSH Web callback must still settle with null so later
 // workspace choices cannot remain blocked by an unresolved browser request.
-const deniedExternal=externalHost.slice(externalHost.indexOf('    openAllFilesAccessSettings()'))
+const deniedExternal=externalHost.slice(externalHost.indexOf('    if (android.os.Environment.isExternalStorageManager())'))
 assert.ok(deniedExternal.includes('onDirectoryPicked?.('),
   'permission denial must settle the original DSH directory callback')
 assert.ok(deniedExternal.includes('jsString(callbackId) + ", null)"'),
