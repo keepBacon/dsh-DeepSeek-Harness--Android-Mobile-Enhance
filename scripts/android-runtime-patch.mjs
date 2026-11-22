@@ -159,6 +159,7 @@ const androidPermissionPresetGuardMandatory = versionAtLeast(targetVersion, '0.1
 const androidLegacyToolOutputSchemaCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2')
 const androidDuplicateLoaderCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2') && !versionAtLeast(targetVersion, '0.1.6-alpha.0')
 const androidCodeModeCompatMandatory = versionAtLeast(targetVersion, '0.1.5-rc.2') && !versionAtLeast(targetVersion, '0.1.6-alpha.0')
+const androidPtcNodeLaunchMandatory = versionAtLeast(targetVersion, '0.2.2-rc.5')
 const warn = (msg) => console.error(`[DSH Android compat] WARN: ${msg}`)
 const info = (name, status, file = '') => report.push({ name, status, file: file ? path.relative(prefix, file) : '' })
 
@@ -202,6 +203,7 @@ const wanted = new Set([
   '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-client-modules',
   '@deepseek-ai/dsh-code-runtime-worker-thread',
+  '@deepseek-ai/dsh-ptc-runtime-node',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/cordis-plugin-loader',
   '@deepseek-ai/dsh-sandbox-local',
@@ -319,6 +321,55 @@ function patchCodeModeGuidance(indexFile) {
   warn(`dsh-tools Code Mode guidance anchor changed under: ${packageDir}`)
   return 'anchor-missing'
 }
+
+
+// Android's linker64 is process.execPath when Node is loaded through the
+// system linker. The PTC subprocess runtime must launch the *actual* Node
+// executable, otherwise linker64 interprets --max-old-space-size=512 as an
+// executable path and fails before run_code can start.
+eachPackage('@deepseek-ai/dsh-ptc-runtime-node', 'lib/index.js', file => {
+  let txt = read(file)
+  const marker = 'DSH Android compat: PTC embedded Node launch and startup env'
+  if (txt.includes(marker)) return 'already'
+  const launchSeam = /(\bconst\s+launch\s*=\s*config\s*\?\?\s*\{[\s\S]{0,240}?\bexecutable:\s*)process\.execPath(?=\s*[,}])/g
+  const launchMatches = [...txt.matchAll(launchSeam)]
+  if (launchMatches.length !== 1 || !/kind:\s*["']pkg["']\s+in\s+process/.test(launchMatches[0][0])) {
+    throw new Error('PTC 0.2.2 resolveLaunch default executable seam changed (' + launchMatches.length + '): ' + file)
+  }
+  txt = txt.replace(launchSeam, (_match, before) => before + [
+    '(process.env.DSH_ANDROID_STANDALONE === "1" ? (() => {',
+    '  const prefix = process.env.TERMUX__PREFIX || process.env.PREFIX;',
+    '  if (!prefix || !prefix.startsWith("/") || prefix.split("/").includes(".."))',
+    '    throw new Error("Android PTC launch: embedded Node prefix unavailable");',
+    '  return prefix.replace(/\\/+$/, "") + "/bin/node";',
+    '})() : process.execPath)',
+  ].join('\n'))
+  // The upstream PTC worker intentionally strips inherited credentials.
+  // Retain only the non-secret Android bootstrap paths required by the
+  // system-shell ELF bridge and dynamic linker, and never forward tokens.
+  // The worker still calls clearProgramEnvironment before evaluating code.
+  const spawnSeam = /(\bconst\s+handle\s*=\s*this\.ctx\.subprocess\.spawn\s*\(\s*\{\s*argv:\s*this\.confined\?\.argv\s*\?\?\s*argv)/g
+  const spawnMatches = [...txt.matchAll(spawnSeam)]
+  if (spawnMatches.length !== 1) {
+    throw new Error('PTC 0.2.2 worker spawn env seam changed (' + spawnMatches.length + '): ' + file)
+  }
+  const setup = [
+    '// ' + marker,
+    'if (process.env.DSH_ANDROID_STANDALONE === "1") {',
+    '  const prefix = process.env.TERMUX__PREFIX || process.env.PREFIX;',
+    '  if (!prefix || !prefix.startsWith("/") || prefix.split("/").includes(".."))',
+    '    throw new Error("Android PTC worker: embedded Node prefix unavailable");',
+    '  env.TERMUX__PREFIX = prefix;',
+    '  env.PREFIX = prefix;',
+    '  if (process.env.LD_LIBRARY_PATH) env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH;',
+    '  if (process.env.TMPDIR) env.TMPDIR = process.env.TMPDIR;',
+    '}',
+  ].join('\n') + '\n'
+  txt = txt.replace(spawnSeam, (_match, before) => setup + before)
+  write(file, txt)
+  checkPatchedJavaScript(file)
+  return 'patched'
+}, { mandatory: androidPtcNodeLaunchMandatory })
 
 // PTC snapshots model-visible tool functions at the instant run_code starts.
 // MCP reconnection may publish a newly ready generation just after that
