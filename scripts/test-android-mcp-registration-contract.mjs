@@ -12,6 +12,16 @@ assert.match(execBridge,/exec "\$linker" "\$target" "\$@"/)
 assert.match(manager,/private fun missingToolboxModules\(\)/)
 assert.match(manager,/pending\.add\(toolboxFile\)/)
 assert.match(manager,/pending\.add\(basicToolboxFile\)/)
+assert.match(manager,/import\\s\+\)\['"\]/,
+ 'side-effect import dependencies must be included in closure verification')
+const patch=manager.slice(manager.indexOf('  @Synchronized fun ensureRuntimePatch('),
+ manager.indexOf('  private fun externalStdioLaunchIssue('))
+assert.match(patch,/if \(missing\.isEmpty\(\)\)/,
+ 'do not abort Web Gateway startup when a bundled MCP dependency is unavailable')
+assert.match(patch,/Log\.e\(tag, "Skipping unavailable built-in MCP toolboxes:/)
+assert.ok(!patch.includes('throw java.io.IOException("内置 MCP'),
+ 'missing built-in tools must not block unrelated Host and external MCP services')
+
 assert.match(manager,/pending\.add\(File\(entry\.parentFile, match\.groupValues\[1\]\)\)/)
 assert.match(manager,/if \(!bridge\.isFile\) missing \+= bridge\.name/)
 for (const [name,entry] of [['toolboxRow','toolboxFile'],['basicToolboxRow','basicToolboxFile']]) {
@@ -28,6 +38,8 @@ for (const [name,entry] of [['toolboxRow','toolboxFile'],['basicToolboxRow','bas
 const external=manager.slice(manager.indexOf('  private fun externalStdioLaunch('),
  manager.indexOf('  companion object {'))
 assert.match(external,/private fun externalStdioLaunch\(server: McpServerConfig\)/)
+assert.match(external,/command\.contains\('\/'\) -> File\(server\.cwd\.ifBlank \{ homeDir\.absolutePath \}, command\)/,
+ 'relative app-private MCP commands must resolve against their configured cwd')
 assert.match(external,/File\(usrDir, "bin\/\$command"\)/,
  'bare Node/Python executables must resolve to the embedded runtime')
 assert.match(external,/it\.canonicalFile\.toPath\(\)\.startsWith\(privateRoot\)/,
