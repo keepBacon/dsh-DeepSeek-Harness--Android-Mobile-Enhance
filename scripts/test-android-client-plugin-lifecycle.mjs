@@ -26,6 +26,9 @@ const publishedEntry = (name, subpath) => {
   return resolve(installed(name), file)
 }
 const { Context } = await import(pathToFileURL(publishedEntry('@deepseek-ai/cordis', '.')).href)
+const platformRoot = process.env.DSH_TEST_BROWSER_PLATFORM_ROOT
+assert.ok(platformRoot, 'test requires a separately installed real React browser platform')
+const requirePlatform = createRequire(join(resolve(platformRoot), 'package.json'))
 
 // The official ./client bundle is NOT an ES module exporting named symbols.
 // It is a classic script that calls window.__ModuleLoader__.load({id,factory}).
@@ -44,7 +47,9 @@ async function bundle(name) {
 }
 function materialize(name, registration) {
   const requireNode = createRequire(join(installed(name), 'package.json'))
-  const requireBundle = (specifier) => requireNode(specifier)
+  const requireBundle = (specifier) => specifier === 'react' || specifier.startsWith('react/') ||
+    specifier === 'react-dom' || specifier.startsWith('react-dom/')
+    ? requirePlatform(specifier) : requireNode(specifier)
   requireBundle.async = async (specifier) => import(specifier)
   requireBundle.asset = (value) => value
   return registration.factory(requireBundle)
