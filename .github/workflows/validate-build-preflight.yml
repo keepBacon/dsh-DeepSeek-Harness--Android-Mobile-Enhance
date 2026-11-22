@@ -53,6 +53,9 @@ jobs:
             @modelcontextprotocol/server@2.2.0 @modelcontextprotocol/node@2.0.0 zod@4.6.6
           DSH_MCP_WIRE_FIXTURE_ROOT="$RUNNER_TEMP/dsh-mcp-wire-fixture" \
             node "$GITHUB_WORKSPACE/scripts/test-android-official-mcp-wire-parity.mjs" node_modules
+          # Real published Browser/Host Remote graph: authenticated loopback
+          # RPC, durable Host state changes and Cordis cleanup.
+          node "$GITHUB_WORKSPACE/scripts/test-android-official-remote-wire-parity.mjs" node_modules
           # Exercise actual 0.2.2 compiled bundles before a costly ARM64
           # runtime rebuild. Keep the 0.1.5-specific contract tests separate.
           mkdir -p "$RUNNER_TEMP/dsh-android-sandbox/usr/lib"
