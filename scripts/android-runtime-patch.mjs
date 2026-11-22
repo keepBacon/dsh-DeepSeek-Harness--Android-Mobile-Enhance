@@ -397,11 +397,11 @@ if (versionAtLeast(targetVersion, '0.2.2-rc.5')) {
     let txt = read(file)
     const marker = 'DSH Android compat: SenseNova scoped streaming transport'
     if (txt.includes(marker)) return 'already'
-    const fn = /function\\s+profileOptions\\s*\\(/g
+    const fn = /function\s+profileOptions\s*\(/g
     const funcs = [...txt.matchAll(fn)]
     if (funcs.length !== 1) throw new Error('SenseNova profileOptions seam changed ('+
       funcs.length+'): '+file)
-    const seam = /maxRetries:\\s*0\\s*,/g
+    const seam = /maxRetries:\s*0\s*,/g
     const matches = [...txt.matchAll(seam)]
     if (matches.length !== 1) throw new Error('SenseNova model request options seam changed ('+
       matches.length+'): '+file)
@@ -409,9 +409,9 @@ if (versionAtLeast(targetVersion, '0.2.2-rc.5')) {
       new URL('./dsh-android-sensenova-completions.mjs', import.meta.url),
       'utf8').replace(/^export async function /gm, 'async function ')
       .replace(/^export function /gm, 'function ')
-    txt = txt.replace(fn, '// '+marker+'\\n'+helper+'\\nfunction profileOptions(')
-    txt = txt.replace(seam, match => match+'\\n    ...process.env.DSH_ANDROID_STANDALONE === "1"'+
-      ' && /^https:\\\\/\\\\/token\\\\.sensenova\\\\.cn\\\\/v1\\\\/?$/.test(String(profile.baseURL || ""))'+
+    txt = txt.replace(fn, '// '+marker+'\n'+helper+'\nfunction profileOptions(')
+    txt = txt.replace(seam, match => match+'\n    ...process.env.DSH_ANDROID_STANDALONE === "1"'+
+      ' && /^https:\\/\\/token\\.sensenova\\.cn\\/v1\\/?$/.test(String(profile.baseURL || ""))'+
       ' ? { fetch: androidSenseNovaCompletionsFetch } : {},')
     write(file, txt)
     checkPatchedJavaScript(file)
