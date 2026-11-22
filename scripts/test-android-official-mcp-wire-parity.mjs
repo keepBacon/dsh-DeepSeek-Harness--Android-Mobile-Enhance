@@ -34,7 +34,7 @@ const fixtureRequire = createRequire(join(resolve(fixtureRoot), 'package.json'))
 const fixtureImport = name => import(pathToFileURL(fixtureRequire.resolve(name)).href)
 const [
   { Context }, SystemPrompt, ToolRuntime, NativeToolExecutor,
-  { ToolCallId }, { executeToolFixture }, MCP,
+  { ToolCallId }, { ToolExecutionPipeline }, MCP,
   { McpServer, createMcpHandler }, { serveStdio }, { toNodeHandler }, { z },
 ] = await Promise.all([
   import(entry('@deepseek-ai/cordis')),
@@ -42,7 +42,7 @@ const [
   import(entry('@deepseek-ai/dsh-tools')).then(m => m.default),
   import(entry('@deepseek-ai/dsh-tool-executor-native')),
   import(entry('@deepseek-ai/dsh-llm')),
-  import(entry('@deepseek-ai/dsh-tool-testkit')),
+  import(pathToFileURL(resolve(installed('@deepseek-ai/dsh-tools'), 'lib/pipeline.js')).href),
   import(entry('@deepseek-ai/dsh-mcp-client')),
   fixtureImport('@modelcontextprotocol/server'),
   fixtureImport('@modelcontextprotocol/server/stdio').then(m => ({ serveStdio: m.serveStdio })),
@@ -134,9 +134,18 @@ try {
   assert.equal(new Set(names).size, names.length, 'duplicate model-facing tool registration')
 
   let seq = 0
-  const execute = (name, args) => executeToolFixture(ctx, {
-    name, arguments:args, signal:new AbortController().signal, callId:ToolCallId('android-wire-' + ++seq),
-  })
+  const execute = async (name, args) => {
+    // Published, production ToolExecutionPipeline; no test-only package and
+    // no mock/model-bypassing MCP transport implementation.
+    const pipeline = new ToolExecutionPipeline(ctx)
+    const prepared = await pipeline.prepare({
+      name, arguments:args, signal:new AbortController().signal,
+      callId:ToolCallId('android-wire-' + ++seq),
+    })
+    const outcome = prepared.kind === 'dispatch'
+      ? await pipeline.dispatch(prepared.exec) : prepared
+    return pipeline.complete(prepared.exec, outcome)
+  }
   const sum = await execute('mcp__android_stdio__sum', { a:2, b:5 })
   assert.equal(sum.isError,false)
   assert.deepEqual(sum.content[0], {type:'text',text:'24'})
