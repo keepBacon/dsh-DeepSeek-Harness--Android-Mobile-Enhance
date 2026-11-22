@@ -445,7 +445,7 @@ if (versionAtLeast(targetVersion, '0.2.2-rc.5')) {
       import.meta.url), 'utf8').replace(/^export function /gm, 'function ')
     txt = helper + '\n' + txt
     txt = txt.replace(anchor, match => [
-      'if (process.env.DSH_ANDROID_STANDALONE === "1") {',
+      'if (process.env.DSH_ANDROID_STANDALONE === "1" && namedSpecs(args).length > 0) {',
       '  const stale = androidUnchangedIncompatiblePlugins(beforeDependencies, installedBefore,',
       '    namedSpecs(args), parseInstallSpec, evaluatePluginCompatibility, exemptions);',
       '  for (const entry of stale) {',
