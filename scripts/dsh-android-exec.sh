@@ -14,7 +14,17 @@ prefix="${TERMUX__PREFIX:-${PREFIX:-}}"
 case "$program" in
   /*) target="$program" ;;
   */*) target="$PWD/$program" ;;
-  *) target="$(command -v "$program" 2>/dev/null || true)" ;;
+  *)
+    # PATH is deliberately restricted to Android system executables above.
+    # Resolve the embedded CLI first: an unqualified python3/node/git from
+    # DSH MCP tools must not disappear just because the app-private usr/bin
+    # cannot be placed on execve's search path (Android noexec).
+    if [ -f "$prefix/bin/$program" ]; then
+      target="$prefix/bin/$program"
+    else
+      target="$(command -v "$program" 2>/dev/null || true)"
+    fi
+    ;;
 esac
 [ -n "$target" ] && [ -f "$target" ] || { echo "DSH_ANDROID_EXEC_NOT_FOUND: $program" >&2; exit 127; }
 case "$target" in
