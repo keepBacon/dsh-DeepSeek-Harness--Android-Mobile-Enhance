@@ -47,9 +47,17 @@ async function bundle(name) {
 }
 function materialize(name, registration) {
   const requireNode = createRequire(join(installed(name), 'package.json'))
-  const requireBundle = (specifier) => specifier === 'react' || specifier.startsWith('react/') ||
-    specifier === 'react-dom' || specifier.startsWith('react-dom/')
-    ? requirePlatform(specifier) : requireNode(specifier)
+  const requireBundle = (specifier) => {
+    try { return requireNode(specifier) }
+    catch (error) {
+      // The official Web kernel supplies browser-only module seeds. These
+      // are intentionally absent from the Host's locked Node dependency graph.
+      // Fall back ONLY for a missing direct package, not for broken internals.
+      if (error?.code !== 'MODULE_NOT_FOUND' ||
+          !error.message.startsWith("Cannot find module '" + specifier + "'")) throw error
+      return requirePlatform(specifier)
+    }
+  }
   requireBundle.async = async (specifier) => import(specifier)
   requireBundle.asset = (value) => value
   return registration.factory(requireBundle)
