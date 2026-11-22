@@ -580,6 +580,42 @@ eachPackage('@deepseek-ai/dsh-subprocess-local', 'lib/index.js', (file) => {
 }, { mandatory: androidPermissionPresetGuardMandatory })
 
 
+// Model discovery in published DSH 0.2.2 uses Node's fetch() from the
+// llm-pi-ai server bundle. Android's embedded Node HTTP stack may fail before
+// reaching the service even when Termux curl succeeds. Keep the upstream
+// request as primary; only its idempotent GET /models may try a bounded native
+// HTTP(S) fallback, with explicit proxy policies still taking precedence.
+// Fail loudly if upstream changes the seam: never ship an unpatched APK.
+if (versionAtLeast(targetVersion, '0.2.2-rc.5')) {
+  eachPackage('@deepseek-ai/dsh-llm-pi-ai', 'lib/index.js', (file) => {
+    let txt = read(file)
+    const marker = 'DSH Android compat: model discovery native transport fallback'
+    if (txt.includes(marker)) return 'already'
+    const discovery = /async function discoverModels\s*\(/g
+    const starts = [...txt.matchAll(discovery)]
+    if (starts.length !== 1) throw new Error('model discovery function anchor changed (' +
+      starts.length + '): ' + file)
+    const call = /response\s*=\s*await\s+fetch\s*\(\s*url\s*,\s*\{/g
+    const calls = [...txt.matchAll(call)]
+    if (calls.length !== 1) throw new Error('model discovery fetch anchor changed (' +
+      calls.length + '): ' + file)
+    const error = /`could not reach \$\{url\}`/g
+    const messages = [...txt.matchAll(error)]
+    if (messages.length !== 1) throw new Error('model discovery error anchor changed (' +
+      messages.length + '): ' + file)
+    const helperFile = new URL('./dsh-android-model-discovery-fallback.mjs', import.meta.url)
+    const helper = fs.readFileSync(helperFile, 'utf8')
+      .replace(/^export (async function|function) /gm, '$1 ')
+    txt = txt.replace(discovery, '// ' + marker + '\n' + helper +
+      '\nasync function discoverModels(')
+    txt = txt.replace(call, 'response = await androidModelDiscoveryFetch(url, {')
+    txt = txt.replace(error, '`could not reach ${url} (${androidModelDiscoveryFailureHint(error)})`')
+    write(file, txt)
+    checkPatchedJavaScript(file)
+    return 'patched'
+  }, { requiredIfPresent: true })
+}
+
 // The model-facing one-shot bash executor (dsh-bash-local) is independent
 // of the sidebar PTY and the Android MCP toolboxes. The model invokes
 // "bash -c" through subprocess-local; Android does not permit direct execve
