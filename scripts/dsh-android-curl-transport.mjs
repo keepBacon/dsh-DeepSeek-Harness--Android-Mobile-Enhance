@@ -68,8 +68,8 @@ export async function androidCurlRequest(input, options = {}) {
   const binary = process.env.DSH_ANDROID_CURL_BINARY
   const command = standalone ? '/system/bin/sh' : binary
   const argv = standalone
-    ? [process.env.DSH_ANDROID_EXEC_BRIDGE, binary, '--config', '-']
-    : ['--config', '-']
+    ? [process.env.DSH_ANDROID_EXEC_BRIDGE, binary, '-q', '--config', '-']
+    : ['-q', '--config', '-']
   // The native process inherits only the explicit environment, not a
   // per-request proxy override or a shell with the secret in its arguments.
   const child = spawn(command, argv, {
