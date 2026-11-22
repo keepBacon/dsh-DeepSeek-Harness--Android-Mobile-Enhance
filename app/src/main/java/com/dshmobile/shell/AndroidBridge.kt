@@ -33,7 +33,6 @@ class AndroidBridge(
     JSONObject().put("ok", false).put("error", "Mobile tools unavailable").toString()
   },
   private val onOpenLocalUrl: (String) -> Boolean = { false },
-  private val onRecordToolObservation: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
   private val onHostSessionDiagnostic: (String) -> Unit = {},
   private val onSessionUiMismatch: (Int) -> Unit = {},
   private val onWorkspaceStreamDiagnostic: (String) -> Unit = {},
@@ -135,21 +134,6 @@ class AndroidBridge(
   @JavascriptInterface
   fun openLocalUrl(capability: String, url: String): Boolean =
     authorized(capability) && onOpenLocalUrl(url)
-
-  /** Passive metadata-only tool observation; no tool arguments or results. */
-  @JavascriptInterface
-  fun recordToolObservation(
-    capability: String, sessionKey: String, callId: String,
-    toolName: String, status: String, errorCode: String,
-  ): Boolean {
-    if (!authorized(capability) || sessionKey.length !in 1..2048 ||
-      callId.length !in 1..160 || toolName.length !in 1..160 ||
-      errorCode.length > 80 || status !in setOf("running", "success", "failure")) return false
-    return runCatching {
-      onRecordToolObservation(sessionKey, callId, toolName, status, errorCode)
-      true
-    }.getOrDefault(false)
-  }
 
   /** Counts/status only; the browser sends no session IDs, prompts, tokens or bodies. */
   @JavascriptInterface

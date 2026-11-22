@@ -58,13 +58,6 @@ class MainActivity : ComponentActivity() {
   private lateinit var progressText: TextView
   private val engineManager by lazy { EngineManager(this, pickToken) }
   private val skillManager by lazy { SkillManager(this, engineManager) }
-  private val databaseWriterDelegate = lazy {
-    com.dshmobile.shell.database.ToolObservationDispatcher(
-      store = { com.dshmobile.shell.database.MobileDatabase.get(applicationContext) },
-      onError = { Log.w("DSH-Database", "Tool metadata write failed", it) },
-    )
-  }
-  private val databaseWriter get() = databaseWriterDelegate.value
   private val engineFlowRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   private val authRecoveryRunning = java.util.concurrent.atomic.AtomicBoolean(false)
   // A recovery belongs to one main-frame navigation, not to the Activity forever.
@@ -368,7 +361,6 @@ class MainActivity : ComponentActivity() {
     pendingExternalChooserMultiple = false
     pendingPickCallback = null
     workspaceChoicePending = false
-    if (databaseWriterDelegate.isInitialized()) databaseWriter.close()
     webViewInspector.stop()
     // The foreground EngineService owns the embedded Host lifetime. Activity
     // recreation/backgrounding must not kill long-running agent tasks.
@@ -559,7 +551,6 @@ class MainActivity : ComponentActivity() {
         authRecoveryRunning.set(false)
         pushSystemDark(view)
         installMobileUiBridge(view)
-        installPassiveToolCallMonitor(view)
         installSessionUiRecoveryWatch(view)
       }
     }
@@ -738,9 +729,6 @@ class MainActivity : ComponentActivity() {
           runOnUiThread {
             if (!isFinishing && !isDestroyed) showSimpleMessage("工作区数据流诊断", report)
           }
-        },
-        onRecordToolObservation = { session, call, tool, status, code ->
-          databaseWriter.offer(session, call, tool, status, code)
         },
         pickToken = pickToken,
       ),
@@ -3907,26 +3895,6 @@ class MainActivity : ComponentActivity() {
     if (!code.contains(marker)) return
     val script = code.replace(marker, jsString(bridgeCapability))
     view.evaluateJavascript(script, null)
-  }
-
-  /** Side-channel UI observation only: does not send model requests or mutate DSH prompts. */
-  private fun installPassiveToolCallMonitor(view: WebView) {
-    if (!isEngineSource(view.url ?: "")) return
-    val script = try {
-      assets.open("dsh-tool-call-monitor.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
-    } catch (t: Throwable) {
-      Log.w("DSH", "Passive tool monitor asset unavailable", t)
-      return
-    }
-    val marker = "/*__DSH_MONITOR_CAP__*/"
-    if (!script.contains(marker)) {
-      Log.w("DSH", "Passive tool monitor capability marker missing")
-      return
-    }
-    val prepared = script.replace(marker, "const MONITOR_CAP = " + jsString(bridgeCapability) + ";")
-    try { view.evaluateJavascript(prepared, null) } catch (t: Throwable) {
-      Log.w("DSH", "Passive tool monitor injection failed", t)
-    }
   }
 
   /**
