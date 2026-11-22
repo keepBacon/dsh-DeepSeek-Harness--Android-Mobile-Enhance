@@ -68,6 +68,9 @@ try {
     "  async ({ a, b }) => ({ content: [{ type:'text', text: String(a+b+Number(process.env.DSH_PARITY_OFFSET || '0')) }] }))",
     "server.registerTool('broken', { description: 'Reports MCP isError', inputSchema: z.object({}) },",
     "  async () => ({ isError: true, content: [{ type:'text', text:'actual upstream server error' }] }))",
+    "server.onerror = error => console.error('[mcp-stdio-fixture] server:', error?.stack ?? error)",
+    "process.on('uncaughtException', error => console.error('[mcp-stdio-fixture] uncaught:', error?.stack ?? error))",
+    "process.on('unhandledRejection', error => console.error('[mcp-stdio-fixture] rejection:', error?.stack ?? error))",
     "serveStdio(server)",
   ].join('\n') + '\n'
   await writeFile(serverPath, serverSource, { flag: 'wx' })
@@ -126,7 +129,13 @@ try {
   })
   const stdioFiber = ctx.plugin({ name:'android-stdio-fixture', inject:['tools'], apply:MCP.apply }, stdio)
   const httpFiber = ctx.plugin({ name:'android-http-fixture', inject:['tools'], apply:MCP.apply }, streamable)
-  await Promise.all([stdioFiber.await(), httpFiber.await()])
+  try {
+    await Promise.all([stdioFiber.await(), httpFiber.await()])
+  } catch (error) {
+    console.error('[DSH] real MCP startup error:', error?.stack ?? error)
+    console.error('[DSH] server handshake cause:', error?.cause?.stack ?? error?.cause)
+    throw error
+  }
   const names = ctx.tools.schemas().map(item => item.name)
   for (const name of ['mcp__android_stdio__sum', 'mcp__android_stdio__broken', 'mcp__android_http__echo']) {
     assert.ok(names.includes(name), 'tool not discovered: ' + name)
