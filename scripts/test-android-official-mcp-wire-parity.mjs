@@ -63,18 +63,12 @@ try {
     "import { McpServer } from '@modelcontextprotocol/server'",
     "import { serveStdio } from '@modelcontextprotocol/server/stdio'",
     "import { z } from 'zod'",
-    "process.stdin.on('data', chunk => console.error('[mcp-stdio-fixture] received:', String(chunk).slice(0,1000)))",
-    "const originalWrite = process.stdout.write.bind(process.stdout)",
-    "process.stdout.write = (data, ...args) => { console.error('[mcp-stdio-fixture] sent:', String(data).slice(0,1000)); return originalWrite(data,...args) }",
     "const server = new McpServer({ name: 'android-parity-stdio', version: '1.0.0' }, { capabilities: { tools: {} } })",
     "server.registerTool('sum', { description: 'Sum with explicit environment offset', inputSchema: z.object({ a:z.number(), b:z.number() }) },",
     "  async ({ a, b }) => ({ content: [{ type:'text', text: String(a+b+Number(process.env.DSH_PARITY_OFFSET || '0')) }] }))",
     "server.registerTool('broken', { description: 'Reports MCP isError', inputSchema: z.object({}) },",
     "  async () => ({ isError: true, content: [{ type:'text', text:'actual upstream server error' }] }))",
-    "server.onerror = error => console.error('[mcp-stdio-fixture] server:', error?.stack ?? error)",
-    "process.on('uncaughtException', error => console.error('[mcp-stdio-fixture] uncaught:', error?.stack ?? error))",
-    "process.on('unhandledRejection', error => console.error('[mcp-stdio-fixture] rejection:', error?.stack ?? error))",
-    "serveStdio(server)",
+    "serveStdio(() => server)",
   ].join('\n') + '\n'
   await writeFile(serverPath, serverSource, { flag: 'wx' })
 
