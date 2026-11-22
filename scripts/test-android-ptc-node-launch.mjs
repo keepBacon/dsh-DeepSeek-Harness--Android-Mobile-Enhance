@@ -93,11 +93,11 @@ try {
   const drift = patch()
   assert.notEqual(drift.status, 0, 'unknown upstream seam must fail build')
   assert.match(drift.stderr, /resolveLaunch default executable seam changed/)
-  assert.ok(!existsSync(new URL('../app/src/main/assets/dsh-tool-call-monitor.js', root)),
+  assert.ok(!existsSync(new URL('app/src/main/assets/dsh-tool-call-monitor.js', root)),
     'removed UI monitor must not be packaged')
-  const activity = readFileSync(new URL('../app/src/main/java/com/dshmobile/shell/MainActivity.kt', root), 'utf8')
+  const activity = readFileSync(new URL('app/src/main/java/com/dshmobile/shell/MainActivity.kt', root), 'utf8')
   assert.doesNotMatch(activity, /installPassiveToolCallMonitor|dsh-tool-call-monitor/)
-  const bridge = readFileSync(new URL('../app/src/main/java/com/dshmobile/shell/AndroidBridge.kt', root), 'utf8')
+  const bridge = readFileSync(new URL('app/src/main/java/com/dshmobile/shell/AndroidBridge.kt', root), 'utf8')
   assert.doesNotMatch(bridge, /recordToolObservation/)
   console.log('[DSH] Android PTC Node launch, worker startup env and removed tool UI: OK')
 } finally {
