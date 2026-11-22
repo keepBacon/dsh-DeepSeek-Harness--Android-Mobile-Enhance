@@ -386,6 +386,39 @@ eachPackage('@deepseek-ai/dsh-code-runtime-worker-thread', 'lib/index.js', patch
 })
 eachPackage('@deepseek-ai/dsh-tools', 'lib/index.js', patchCodeModeGuidance)
 
+// DSH 0.2.2's pi-ai adapter supports per-request fetch options, but does
+// not explicitly supply one to the OpenAI SDK. In the embedded Android Node,
+// model discovery and inference can both hit transport failures even when
+// Termux curl works. Retry only the *initial transport failure* for the exact
+// SenseNova HTTPS Chat Completions endpoint. Never change other providers,
+// global fetch, proxy routing, certificate checks, or user config.
+if (versionAtLeast(targetVersion, '0.2.2-rc.5')) {
+  eachPackage('@deepseek-ai/dsh-llm-pi-ai', 'lib/index.js', file => {
+    let txt = read(file)
+    const marker = 'DSH Android compat: SenseNova scoped streaming transport'
+    if (txt.includes(marker)) return 'already'
+    const fn = /function\s+profileOptions\s*\(/g
+    const funcs = [...txt.matchAll(fn)]
+    if (funcs.length !== 1) throw new Error('SenseNova profileOptions seam changed ('+
+      funcs.length+'): '+file)
+    const seam = /maxRetries:\s*0\s*,/g
+    const matches = [...txt.matchAll(seam)]
+    if (matches.length !== 1) throw new Error('SenseNova model request options seam changed ('+
+      matches.length+'): '+file)
+    const helper = fs.readFileSync(
+      new URL('./dsh-android-sensenova-completions.mjs', import.meta.url),
+      'utf8').replace(/^export async function /gm, 'async function ')
+      .replace(/^export function /gm, 'function ')
+    txt = txt.replace(fn, '// '+marker+'\n'+helper+'\nfunction profileOptions(')
+    txt = txt.replace(seam, match => match+'\n    ...process.env.DSH_ANDROID_STANDALONE === "1"'+
+      ' && /^https:\\/\\/token\\.sensenova\\.cn\\/v1\\/?$/.test(String(profile.baseURL || ""))'+
+      ' ? { fetch: androidSenseNovaCompletionsFetch } : {},')
+    write(file, txt)
+    checkPatchedJavaScript(file)
+    return 'patched'
+  }, { requiredIfPresent: true })
+}
+
 // StepFun Plan can emit an in-band EOF diagnostic after already streaming
 // usable assistant content. DSH 0.1.5-rc.2 classifies every such pi-ai error as
 // TRANSPORT, so llm-retry repeats the entire request up to its retry budget.
