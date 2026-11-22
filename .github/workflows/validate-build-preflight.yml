@@ -143,6 +143,7 @@ jobs:
           node scripts/test-android-stale-host-mode-recovery.mjs
           node scripts/test-android-engine-stop-contract.mjs
           node scripts/test-android-engine-service-threading.mjs
+          node scripts/test-android-upgrade-recovery-022.mjs
           node scripts/test-android-session-hardlink-022.mjs
           node scripts/test-android-fs-local-022.mjs
           node scripts/test-android-attachment-hardlink-022.mjs
