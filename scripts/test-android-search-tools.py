@@ -30,7 +30,8 @@ for resource in ("usr/share/fzf/key-bindings.bash","usr/share/fzf/completion.bas
     assert resource in validator and resource in builder, "missing fzf resource "+resource
 assert 'DSH_ANDROID_STANDALONE:-' in bash_env
 assert 'command_not_found_handle()' in bash_env
-assert 'DSH_WRAPPER_COMMAND="$_dsh_cmd"' in bash_env
+assert 'DSH_WRAPPER_COMMAND="$_dsh_name"' in bash_env
+assert '_dsh_mobile_dispatch "$_dsh_cmd" "$@"' in bash_env
 assert 'PATH=/system/bin:/system/xbin' in bridge
 assert "androidToolLaunch(" in mobile
 assert "['rg','fd','fzf'].includes(command)" in mobile

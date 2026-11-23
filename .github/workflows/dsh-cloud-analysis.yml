@@ -1,0 +1,95 @@
+name: DSH Cloud Analysis (JADX, Ghidra, x64, Windows PE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Cloud analysis backend (run only on files you are authorized to analyze)"
+        required: true
+        type: choice
+        options:
+          - jadx
+          - ghidra
+          - linux-x64
+          - windows-pe
+      input_path:
+        description: "Existing repository-relative path under cloud-inputs/ (no arbitrary URL or shell commands)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Real Linux x64 analysis
+    if: github.event.inputs.task != 'windows-pe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      DSH_TASK: ${{ github.event.inputs.task }}
+      DSH_INPUT_PATH: ${{ github.event.inputs.input_path }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate bounded input
+        run: python3 scripts/ci-dsh-cloud-analysis.py validate --root "$GITHUB_WORKSPACE" --input-path "$DSH_INPUT_PATH"
+      - name: Install supported Java runtime for JADX or Ghidra
+        if: github.event.inputs.task == 'jadx' || github.event.inputs.task == 'ghidra'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Run real analysis with pinned tool SHA-256
+        run: python3 scripts/ci-dsh-cloud-analysis.py analyze --root "$GITHUB_WORKSPACE" --input-path "$DSH_INPUT_PATH" --task "$DSH_TASK" --output dsh-cloud-output
+      - name: Publish actual reports and output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-cloud-linux-${{ github.run_id }}
+          path: dsh-cloud-output/
+          if-no-files-found: warn
+          retention-days: 7
+
+  windows:
+    name: Real Windows x64 PE static analysis
+    if: github.event.inputs.task == 'windows-pe'
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      DSH_INPUT_PATH: ${{ github.event.inputs.input_path }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate bounded input
+        shell: pwsh
+        run: |
+          python scripts/ci-dsh-cloud-analysis.py validate --root "$env:GITHUB_WORKSPACE" --input-path "$env:DSH_INPUT_PATH"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Inspect PE file without executing it
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dsh-cloud-output | Out-Null
+          $target = $env:DSH_VALID_TARGET
+          if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "Validated input unavailable" }
+          $digest = Get-FileHash -LiteralPath $target -Algorithm SHA256
+          $signature = Get-AuthenticodeSignature -LiteralPath $target
+          $info = [ordered]@{
+            task = "windows-pe"
+            input = [System.IO.Path]::GetFileName($target)
+            bytes = (Get-Item -LiteralPath $target).Length
+            sha256 = $digest.Hash
+            signatureStatus = [string]$signature.Status
+            signatureMessage = [string]$signature.StatusMessage
+            architecture = $env:PROCESSOR_ARCHITECTURE
+            realExecution = $true
+            executableLaunched = $false
+          }
+          $info | ConvertTo-Json -Depth 4 | Set-Content -Path dsh-cloud-output/report.json -Encoding UTF8
+          Write-Host "DSH_CLOUD_WINDOWS_PE_STATIC_ANALYSIS_OK"
+      - name: Publish actual Windows report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-cloud-windows-${{ github.run_id }}
+          path: dsh-cloud-output/
+          if-no-files-found: warn
+          retention-days: 7

@@ -2241,6 +2241,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // while fs-sandbox remains the workspace write-containment authority.
       "DSH_ANDROID_SANDBOX_RUNNER" to File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh").absolutePath,
       "DSH_ANDROID_EXEC_BRIDGE" to File(usrDir, "libexec/dsh-mobile/android-exec.sh").absolutePath,
+      // Non-interactive Bash invocations must load the W^X-safe shell command
+      // dispatcher. PATH itself cannot make app-data ELF executable.
+      "BASH_ENV" to File(usrDir, "libexec/dsh-mobile/android-bash-env.sh").absolutePath,
       "DSH_ANDROID_TERMUX_RUN" to File(usrDir, "libexec/dsh/termux-run").absolutePath,
       "DSH_PICK_TOKEN" to (pickToken ?: ""),
       // DSH's in-Web plugin manager launches pnpm as a child of this Host.
@@ -3819,6 +3822,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh-mobile/dsh-dev-process.mjs") to "usr/libexec/dsh-mobile/dsh-dev-process.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-dev-tasks.mjs") to "usr/libexec/dsh-mobile/dsh-dev-tasks.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-toolchain-probe.mjs") to "usr/libexec/dsh-mobile/dsh-toolchain-probe.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
       File(usrDir, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js") to "usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",

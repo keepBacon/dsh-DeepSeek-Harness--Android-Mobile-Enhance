@@ -66,6 +66,44 @@ if [ "${DSH_ANDROID_STANDALONE:-}" = "1" ]; then
     }
     pnpx() { pnpm dlx "$@"; }
 
+    # Shell command lookup cannot use app-private usr/bin: execve there is
+    # denied by Android W^X even when chmod +x succeeds. Expose names as Bash
+    # functions so command -v/type and ordinary scripts see the same commands
+    # that the shared linker bridge can dispatch, while PATH stays executable
+    # system-only. This is registration, NOT proof that the ELF can load.
+    _dsh_mobile_dispatch() {
+      local _dsh_name="${1:-}"
+      [ "$#" -gt 0 ] && shift
+      case "$_dsh_name" in ''|*[!A-Za-z0-9._+-]*)
+        printf 'dsh: invalid embedded command name: %s\n' "$_dsh_name" >&2; return 127 ;;
+      esac
+      if [ -L "$_dsh_mobile_prefix/libexec/dsh/wrappers/$_dsh_name" ]; then
+        DSH_WRAPPER_COMMAND="$_dsh_name" DSH_TERMUX_INNER=1 \
+          /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh/termux-wrapper" "$@"
+      elif [ -f "$_dsh_mobile_prefix/bin/$_dsh_name" ]; then
+        /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" \
+          "$_dsh_mobile_prefix/bin/$_dsh_name" "$@"
+      else
+        printf 'dsh: embedded command absent: %s\n' "$_dsh_name" >&2
+        return 127
+      fi
+    }
+    # This function list is built at shell startup (after pkg install as
+    # well), not shipped as a stale hardcoded list of ~714 binaries. Do not
+    # override existing Bash builtins, keywords or Android system commands.
+    # Expand aliases only after validating each literal binary filename.
+    # Alias values contain no shell expression or user-supplied arguments.
+    shopt -s expand_aliases
+    for _dsh_file in "$_dsh_mobile_prefix/bin/"*; do
+      [ -f "$_dsh_file" ] || continue
+      _dsh_name="${_dsh_file##*/}"
+      [[ "$_dsh_name" =~ ^[A-Za-z_][A-Za-z0-9_.+-]*$ ]] || continue
+      if ! type -t "$_dsh_name" >/dev/null 2>&1; then
+        alias "$_dsh_name=_dsh_mobile_dispatch $_dsh_name"
+      fi
+    done
+    unset _dsh_file _dsh_name
+
     command_not_found_handle() {
       local _dsh_cmd="${1:-}"
       [ "$#" -gt 0 ] && shift
@@ -85,9 +123,9 @@ if [ "${DSH_ANDROID_STANDALONE:-}" = "1" ]; then
           return 127
         fi
         /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh-mobile/android-exec.sh" "$_dsh_mobile_prefix/bin/node" "$@"
-      elif [ -L "$_dsh_mobile_prefix/libexec/dsh/wrappers/$_dsh_cmd" ]; then
-        DSH_WRAPPER_COMMAND="$_dsh_cmd" DSH_TERMUX_INNER=1 \
-          /system/bin/sh "$_dsh_mobile_prefix/libexec/dsh/termux-wrapper" "$@"
+      elif [ -L "$_dsh_mobile_prefix/libexec/dsh/wrappers/$_dsh_cmd" ] ||
+           [ -f "$_dsh_mobile_prefix/bin/$_dsh_cmd" ]; then
+        _dsh_mobile_dispatch "$_dsh_cmd" "$@"
       else
         printf 'dsh: command not found: %s\n' "$_dsh_cmd" >&2
         return 127
