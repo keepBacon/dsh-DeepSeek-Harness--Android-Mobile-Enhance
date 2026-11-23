@@ -460,7 +460,7 @@ def overlay_sources(stage, source):
         shutil.copy2(mobile / "dsh-android-python-subprocess.py",
                      site / "dsh_android_subprocess.py")
         (site / "dsh_android_noexec.pth").write_text(
-            "import dsh_android_subprocess; dsh_android_subprocess.install()\\n"
+            "import dsh_android_subprocess; dsh_android_subprocess.install()\n"
         )
     print("[native] embedded Python .pth W^X subprocess adapter installed in",
           len(python_sites), "site-packages directories")
