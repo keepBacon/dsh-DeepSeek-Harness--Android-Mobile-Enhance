@@ -73,6 +73,7 @@ SCRIPT_MAP = {
     "dsh-web-page-reader.mjs": "dsh-web-page-reader.mjs",
     "dsh-basic-toolbox-mcp.mjs": "basic-toolbox-mcp.mjs",
     "dsh-android-tool-spawn.mjs": "dsh-android-tool-spawn.mjs",
+    "dsh-toolchain-probe.mjs": "dsh-toolchain-probe.mjs",
     "dsh-bounded-spawn.mjs": "dsh-bounded-spawn.mjs",
     "dsh-dev-process.mjs": "dsh-dev-process.mjs",
     "dsh-dev-tasks.mjs": "dsh-dev-tasks.mjs",
