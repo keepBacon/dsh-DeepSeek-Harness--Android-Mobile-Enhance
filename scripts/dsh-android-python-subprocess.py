@@ -156,6 +156,18 @@ def install(*, prefix=None, shell="/system/bin/sh", bridge=None, force=False):
                     environment.setdefault("TERMUX__PREFIX", base)
                     environment.setdefault("PREFIX", base)
                     environment.setdefault("DSH_ANDROID_STANDALONE", "1")
+                    # PEP517 hooks may provide a replacement env without
+                    # Termux's relocation variables. Only restore the child
+                    # loader path when absent; don't override caller values,
+                    # credentials, or deliberately changed PYTHONPATH.
+                    environment.setdefault(
+                        "LD_LIBRARY_PATH",
+                        os.environ.get("LD_LIBRARY_PATH") or base + "/lib")
+                    for key in ("HOME", "TMPDIR", "BASH_ENV",
+                                "TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE",
+                                "TERMUX_EXEC__EXECVE_CALL__INTERCEPT"):
+                        if key not in environment and os.environ.get(key):
+                            environment[key] = os.environ[key]
                     kwargs["env"] = environment
                 args = routed
         return original(self, args, *positional, **kwargs)
