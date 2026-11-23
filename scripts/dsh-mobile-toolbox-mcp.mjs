@@ -14,7 +14,7 @@ import { projectBuildTools, projectBuildCall, isProjectBuildTool } from './dsh-p
 import { devPlanTools, devPlanCall, isDevPlanTool } from './dsh-dev-plan.mjs'
 import { spawn } from 'node:child_process'
 import { androidToolLaunch } from './dsh-android-tool-spawn.mjs'
-import { probeToolchain } from './dsh-toolchain-probe.mjs'
+import { probeToolchain, probePythonBuildChild } from './dsh-toolchain-probe.mjs'
 import { boundedSpawn } from './dsh-bounded-spawn.mjs'
 import { devTaskTools, devTaskCall, isDevTaskTool } from './dsh-dev-tasks.mjs'
 import { devRun } from './dsh-dev-process.mjs'
@@ -45,6 +45,7 @@ const tools=[...codeTools,...codeV3Tools,...codeV4Tools,...codeAstTools,...codeW
  {name:'plugin_inspect',description:'Inspect metadata of one installed Web-profile plugin, without executing it or reading its source.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
  {name:'modsearch_health',description:'Diagnose the original installed @liustack/modsearch read_page/x_search plugin and run its offline doctor --json command. Read-only; does not fetch pages or spend search quota.',inputSchema:{type:'object',properties:{profile:{type:'string',enum:['web','headless'],default:'web'},runDoctor:{type:'boolean',default:true}},additionalProperties:false}},
  {name:'runtime_toolchain_probe',description:'Run actual sequential Android app-UID Node/Python/Git/SSH probes (optionally Clang/QEMU) through the linker bridge. Reports measured exit status, not chmod/file existence.',inputSchema:{type:'object',properties:{extended:{type:'boolean',default:false},timeoutMs:{type:'integer',minimum:1000,maximum:8000,default:4000}},additionalProperties:false}},
+ {name:'runtime_python_build_probe',description:'Run a real Android app-UID Python subprocess using sys.executable (pip/PEP517 build pattern). Report whether the W^X adapter loaded and the child truly exited successfully. No package installation or network.',inputSchema:{type:'object',properties:{timeoutMs:{type:'integer',minimum:2000,maximum:10000,default:6000}},additionalProperties:false}},
  {name:'tool_registry_list',description:'List tools exposed by this mobile MCP server (read-only).',inputSchema:{type:'object',properties:{},additionalProperties:false}},
  {name:'tool_inspect',description:'Inspect the name, description and input schema of a mobile MCP tool.',inputSchema:{type:'object',properties:{name:{type:'string',maxLength:180}},required:['name'],additionalProperties:false}},
  {name:'plugin_source_read',description:'Read one UTF-8 source file belonging to an installed Web-profile plugin. Read-only and size bounded.',inputSchema:{type:'object',properties:{name:{type:'string'},path:{type:'string'},maxBytes:{type:'integer',minimum:1,maximum:262144,default:65536}},required:['name','path'],additionalProperties:false}},
@@ -589,6 +590,7 @@ async function call(name,a={}){
     return report;
   }
   case 'runtime_toolchain_probe': return await probeToolchain({extended:bool(a.extended,false),timeoutMs:int(a.timeoutMs,4000,1000,8000)});
+  case 'runtime_python_build_probe': return await probePythonBuildChild({timeoutMs:int(a.timeoutMs,6000,2000,10000)});
   case 'tool_registry_list': return {server:'mobile_tools',tools:tools.map(t=>({name:t.name,description:t.description})),total:tools.length};
   case 'tool_validate': {
     const t=tools.find(tool=>tool.name===String(a.name||''));
