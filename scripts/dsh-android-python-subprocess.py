@@ -38,8 +38,14 @@ def _selected(args, prefix, home, env, cwd=None):
 
     # Some build backends hardcode a Unix host's /usr/bin/python3. Android
     # has neither that GNU/Linux interpreter nor an executable app-data ELF.
-    if command in ("/usr/bin/python", "/usr/bin/python3"):
-        target = prefix + "/bin/python3"
+    legacy = {
+        "/usr/bin/python": "python3", "/usr/bin/python3": "python3",
+        "/usr/bin/cc": "clang", "/usr/bin/gcc": "clang",
+        "/usr/bin/c++": "clang++", "/usr/bin/g++": "clang++",
+        "/usr/bin/clang": "clang", "/usr/bin/clang++": "clang++",
+    }
+    if command in legacy:
+        target = prefix + "/bin/" + legacy[command]
     elif "/" not in command:
         # Resolve from the child environment, not parent global PATH. Build
         # isolation often strips app-private directories from PATH entirely.
@@ -85,6 +91,23 @@ def bridge_argv(args, *, prefix, home=None, env=None, cwd=None,
     if not os.path.isfile(script):
         return None
     return [shell, script, *selected]
+
+
+def configure_compilers(prefix, shell, bridge):
+    """Supply linker-routed compiler variables to Python build backends.
+
+    Do not override user-selected compiler flags or force build isolation off.
+    A valid command line is not proof that native headers, memory and the
+    Python extension ABI are available on the Android device.
+    """
+    for key, name, flags in (
+        ("CC", "clang", ""),
+        ("CXX", "clang++", ""),
+        ("LDSHARED", "clang", " -shared"),
+    ):
+        native = prefix + "/bin/" + name
+        if os.path.isfile(native):
+            os.environ.setdefault(key, shell + " " + bridge + " " + native + flags)
 
 
 def install(*, prefix=None, shell="/system/bin/sh", bridge=None, force=False):
@@ -133,6 +156,7 @@ def install(*, prefix=None, shell="/system/bin/sh", bridge=None, force=False):
 
     subprocess.Popen.__init__ = dsh_init
     subprocess.Popen._dsh_android_wx_bridge = True
+    configure_compilers(base, shell, bridge_script)
     _PATCHED = True
     return True
 
