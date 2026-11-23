@@ -97,6 +97,7 @@ REQUIRED = (
  'usr/libexec/dsh-mobile/android-exec.sh',
  'usr/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs',
  'usr/libexec/dsh-mobile/android-bash-env.sh',
+ 'usr/libexec/dsh-mobile/dsh-android-python-subprocess.py',
  'usr/libexec/dsh-mobile/toolbox-mcp.mjs',
  'usr/libexec/dsh-mobile/dsh-inspector-tools.mjs',
  'usr/libexec/dsh-mobile/dsh-project-language.mjs',
