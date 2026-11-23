@@ -91,14 +91,15 @@ if [ "${DSH_ANDROID_STANDALONE:-}" = "1" ]; then
     # This function list is built at shell startup (after pkg install as
     # well), not shipped as a stale hardcoded list of ~714 binaries. Do not
     # override existing Bash builtins, keywords or Android system commands.
-    # eval receives ONLY a validated bare filename; never command arguments,
-    # paths, user input or script contents.
+    # Expand aliases only after validating each literal binary filename.
+    # Alias values contain no shell expression or user-supplied arguments.
+    shopt -s expand_aliases
     for _dsh_file in "$_dsh_mobile_prefix/bin/"*; do
       [ -f "$_dsh_file" ] || continue
       _dsh_name="${_dsh_file##*/}"
       [[ "$_dsh_name" =~ ^[A-Za-z_][A-Za-z0-9_.+-]*$ ]] || continue
       if ! type -t "$_dsh_name" >/dev/null 2>&1; then
-        eval "function ${_dsh_name}() { _dsh_mobile_dispatch '${_dsh_name}' \"\$@\"; }"
+        alias "$_dsh_name=_dsh_mobile_dispatch $_dsh_name"
       fi
     done
     unset _dsh_file _dsh_name
