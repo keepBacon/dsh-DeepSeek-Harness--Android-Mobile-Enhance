@@ -96,6 +96,19 @@ class AndroidPythonNoexec(unittest.TestCase):
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                         cwd=self.home, env=self.env, timeout=5, check=True)
                     self.assertEqual(result.stdout.strip(), "PIP_BACKEND_OK")
+                # PEP517 can replace the whole env. The child must still
+                # receive the embedded native loader path without requiring
+                # the caller to pass host-global Termux variables.
+                isolated = {"PATH": "/system/bin", "HOME": str(self.home)}
+                child = subprocess.run(
+                    ["/usr/bin/python3", "-c",
+                     "import os; print(os.environ.get('LD_LIBRARY_PATH',''))"],
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=isolated, timeout=5, check=True)
+                self.assertEqual(
+                    child.stdout.strip(),
+                    os.environ.get("LD_LIBRARY_PATH")
+                    or str(self.prefix / "lib"))
                 # Explicit system commands and shell=True must stay untouched.
                 self.assertEqual(subprocess.check_output(
                     ["/bin/echo", "SYSTEM_OK"], text=True).strip(), "SYSTEM_OK")
