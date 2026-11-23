@@ -41,7 +41,7 @@ try{
       assert.match(args[1],/subprocess\.run\(\[sys\.executable/)
       return {exitCode:0,timedOut:false,cancelled:false,
         stdout:JSON.stringify({python:'3.13',childReturncode:0,
-          childOk:true,dshAdapter:true,stderr:''})+'\\n'}
+          childOk:true,dshAdapter:true,stderr:''})+'\n'}
     }
   })
   assert.equal(nested.nestedChildOk,true)
