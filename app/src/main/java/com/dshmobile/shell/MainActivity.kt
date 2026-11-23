@@ -4646,6 +4646,10 @@ class MainActivity : ComponentActivity() {
       setOnClickListener { dialog.dismiss(); showMcpEditor(McpConfigManager.STDIO, "generic") }
     })
     root.addView(Button(this).apply {
+      text = "GitHub Actions 云端工具（官方远程 MCP）"
+      setOnClickListener { dialog.dismiss(); showMcpEditor(McpConfigManager.HTTP, "github_actions") }
+    })
+    root.addView(Button(this).apply {
       text = "IDA MCP（远程）"
       setOnClickListener { dialog.dismiss(); showMcpEditor(McpConfigManager.HTTP, "ida") }
     })
@@ -4674,15 +4678,20 @@ class MainActivity : ComponentActivity() {
       text = "连接电脑端 IDA MCP 服务。相同方式也可连接 Ghidra / Binary Ninja MCP bridge。"
       textSize = 12f
     })
+    if (preset == "github_actions") root.addView(TextView(this).apply {
+      text = "连接 GitHub 官方 Actions MCP：仅将 Actions 工具和日志放到云端。需拥有 Actions 权限的 GitHub Token；令牌加密保存在 Android Keystore。JADX、Ghidra、x86 和 Windows 分析由对应 Actions 工作流执行，不能在插件安装框填显示名称。"
+      textSize = 12f
+    })
     val name = android.widget.EditText(this).apply {
       hint = "工具命名空间"
       setSingleLine(true)
-      setText(if (preset == "ida") "mobile_ida" else if (isHttp) "mobile_http" else "mobile_local")
+      setText(if (preset == "ida") "mobile_ida" else if (preset == "github_actions") "cloud_actions" else if (isHttp) "mobile_http" else "mobile_local")
     }
     root.addView(name)
     val primary = android.widget.EditText(this).apply {
       hint = if (isHttp) "http://192.168.1.100:端口/mcp" else "命令，例如 npx"
       setSingleLine(true)
+      if (preset == "github_actions") setText("https://api.githubcopilot.com/mcp/x/actions")
     }
     root.addView(primary)
     val args = android.widget.EditText(this).apply {
@@ -4710,7 +4719,8 @@ class MainActivity : ComponentActivity() {
     }
     root.addView(headers)
     val bearer = android.widget.CheckBox(this).apply {
-      text = "使用 Bearer Token"
+      text = if (preset == "github_actions") "使用 GitHub Token（Actions:write）" else "使用 Bearer Token"
+      isChecked = preset == "github_actions"
       visibility = if (isHttp) View.VISIBLE else View.GONE
     }
     root.addView(bearer)
@@ -4771,6 +4781,9 @@ class MainActivity : ComponentActivity() {
           preset = preset,
         )
         val bearerToken = token.text?.toString()?.trim().orEmpty().takeIf { it.isNotBlank() }
+        if (preset == "github_actions" && bearerToken.isNullOrBlank()) {
+          token.error = "GitHub Actions MCP 需要授权令牌"; return@setOnClickListener
+        }
         dialog.dismiss()
         runProfileMutation("正在应用 MCP 配置…") {
           engineManager.saveMcpServer(server, bearerToken, envValues, headerValues)
