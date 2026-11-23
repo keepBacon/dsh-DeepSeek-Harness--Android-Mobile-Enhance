@@ -107,6 +107,7 @@ REQUIRED = (
  'usr/libexec/dsh-mobile/dsh-project-build.mjs',
  'usr/libexec/dsh-mobile/dsh-dev-plan.mjs',
  'usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs',
+ 'usr/libexec/dsh-mobile/dsh-toolchain-probe.mjs',
  'usr/libexec/dsh-mobile/dsh-bounded-spawn.mjs',
  'usr/libexec/dsh-mobile/dsh-dev-process.mjs',
  'usr/libexec/dsh-mobile/dsh-dev-tasks.mjs',
