@@ -3822,6 +3822,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "libexec/dsh-mobile/dsh-dev-process.mjs") to "usr/libexec/dsh-mobile/dsh-dev-process.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-dev-tasks.mjs") to "usr/libexec/dsh-mobile/dsh-dev-tasks.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-android-tool-spawn.mjs") to "usr/libexec/dsh-mobile/dsh-android-tool-spawn.mjs",
+      File(usrDir, "libexec/dsh-mobile/dsh-toolchain-probe.mjs") to "usr/libexec/dsh-mobile/dsh-toolchain-probe.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-web-page-reader.mjs") to "usr/libexec/dsh-mobile/dsh-web-page-reader.mjs",
       File(usrDir, "share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js") to "usr/share/dsh-modsearch-recovery/node_modules/@liustack/modsearch/dist/main.js",
       File(usrDir, "libexec/dsh-mobile/dsh-code-engine.mjs") to "usr/libexec/dsh-mobile/dsh-code-engine.mjs",
