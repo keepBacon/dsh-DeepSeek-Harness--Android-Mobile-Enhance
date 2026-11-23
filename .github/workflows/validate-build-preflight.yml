@@ -181,6 +181,8 @@ jobs:
           node scripts/test-android-model-shell-noexec-fix.mjs
           node scripts/test-android-wx-bash-toolchain.mjs
           node scripts/test-android-toolchain-probe.mjs
+          python3 scripts/test_android_python_subprocess.py
+          python3 scripts/test_android_python_packaging.py
           python3 -m unittest discover -s scripts -p 'test_dsh_cloud_analysis.py'
           python3 scripts/ci-dsh-cloud-analysis.py analyze --root . --input-path cloud-inputs/README.md --task linux-x64 --output "$RUNNER_TEMP/dsh-cloud-smoke"
           python3 -c 'import json,os; r=json.load(open(os.path.join(os.environ["RUNNER_TEMP"],"dsh-cloud-smoke/report.json"))); assert r["analysisSucceeded"] and r["task"]=="linux-x64"'

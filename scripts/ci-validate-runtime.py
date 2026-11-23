@@ -97,6 +97,7 @@ REQUIRED = (
  'usr/libexec/dsh-mobile/android-exec.sh',
  'usr/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs',
  'usr/libexec/dsh-mobile/android-bash-env.sh',
+ 'usr/libexec/dsh-mobile/dsh-android-python-subprocess.py',
  'usr/libexec/dsh-mobile/toolbox-mcp.mjs',
  'usr/libexec/dsh-mobile/dsh-inspector-tools.mjs',
  'usr/libexec/dsh-mobile/dsh-project-language.mjs',
@@ -151,6 +152,7 @@ def validate(snapshot, lock, expected_version=None, expected_commit=None):
  verified_renderer=0
  packaged_family=None
  installed={}
+ python_shim_files={}
  compat=None
  install_lock_sha=None
  with tarfile.open(snapshot,'r:xz') as f:
@@ -161,6 +163,16 @@ def validate(snapshot, lock, expected_version=None, expected_commit=None):
    if name.startswith('/') or '\\' in name or '..' in pathlib.PurePosixPath(name).parts:
     raise ValueError('unsafe archive entry: '+name)
    if name in REQUIRED and (member.isfile() or member.issym() or member.islnk()): found.add(name)
+   match=re.fullmatch(
+    r'(usr/lib/python[0-9]+(?:\.[0-9]+)?/site-packages)/(dsh_android_noexec\.pth|dsh_android_subprocess\.py)',
+    name)
+   if match:
+    if not member.isfile() or member.size>262144:
+     raise ValueError('invalid Python subprocess noexec adapter: '+name)
+    python_shim_files.setdefault(match.group(1),set()).add(match.group(2))
+    if match.group(2)=='dsh_android_noexec.pth':
+     if f.extractfile(member).read() != b'import dsh_android_subprocess; dsh_android_subprocess.install()\n':
+      raise ValueError('Python .pth activation hook content mismatch')
    if name in (
     'usr/libexec/git-core/git-remote-https','usr/lib/git-core/git-remote-https',
     'usr/etc/tls/cert.pem','usr/etc/ssl/cert.pem','usr/etc/ssl/certs/ca-certificates.crt'
@@ -217,6 +229,9 @@ def validate(snapshot, lock, expected_version=None, expected_commit=None):
   )):
   raise ValueError('missing Git HTTPS CA trust bundle')
  if set(REQUIRED)-found: raise ValueError('missing required paths: '+', '.join(sorted(set(REQUIRED)-found)))
+ if not any({'dsh_android_noexec.pth','dsh_android_subprocess.py'} <= names
+            for names in python_shim_files.values()):
+  raise ValueError('embedded Python .pth subprocess noexec adapter not packaged')
  if not arch: raise ValueError('node is not ARM64 ELF')
  if not pnpm_entrypoint: raise ValueError('pnpm JavaScript CLI entrypoint is missing')
  if not isinstance(npm_manifest,dict) or npm_manifest.get('name')!='npm':

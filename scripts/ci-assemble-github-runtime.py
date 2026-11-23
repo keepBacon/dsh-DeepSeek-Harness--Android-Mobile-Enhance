@@ -91,6 +91,7 @@ SCRIPT_MAP = {
     "dsh-android-exec.sh": "android-exec.sh",
     "dsh-android-plugin-git-spawn.cjs": "dsh-android-plugin-git-spawn.cjs",
     "dsh-android-bash-env.sh": "android-bash-env.sh",
+    "dsh-android-python-subprocess.py": "dsh-android-python-subprocess.py",
 }
 
 def get(url):
@@ -447,6 +448,22 @@ def overlay_sources(stage, source):
     (mobile / "android-sandbox-runner.sh").chmod(0o755)
     (mobile / "android-exec.sh").chmod(0o755)
     (mobile / "android-bash-env.sh").chmod(0o644)
+    # Python .pth executes inside the embedded interpreter itself, including
+    # PEP517 build isolation subprocesses that replace PYTHONPATH/sitecustomize.
+    # Never overwrite user-installed packages; this is a DSH-owned module.
+    python_sites = sorted((stage / "usr/lib").glob("python*/site-packages"))
+    if not python_sites:
+        raise ValueError("Android Python site-packages missing: cannot install pip noexec adapter")
+    for site in python_sites:
+        if not site.is_dir():
+            raise ValueError("Invalid Android Python site-packages location")
+        shutil.copy2(mobile / "dsh-android-python-subprocess.py",
+                     site / "dsh_android_subprocess.py")
+        (site / "dsh_android_noexec.pth").write_text(
+            "import dsh_android_subprocess; dsh_android_subprocess.install()\n"
+        )
+    print("[native] embedded Python .pth W^X subprocess adapter installed in",
+          len(python_sites), "site-packages directories")
     (mobile / "toolbox-mcp.mjs").chmod(0o755)
     (mobile / "basic-toolbox-mcp.mjs").chmod(0o755)
     builder = (source / "scripts/embed-termux-tools.sh").read_text()
