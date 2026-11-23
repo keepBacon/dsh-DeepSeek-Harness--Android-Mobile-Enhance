@@ -39,8 +39,11 @@ def validate_input(root, name):
         raise ValueError("Input contains traversal segment")
     directory = Path(root).resolve()
     target = (directory / name).resolve(strict=True)
-    root_inputs = (directory / "cloud-inputs").resolve(strict=True)
-    if root_inputs not in target.parents or not target.is_file():
+    expected_inputs = directory / "cloud-inputs"
+    if expected_inputs.is_symlink():
+        raise ValueError("Input root must not be a symlink")
+    root_inputs = expected_inputs.resolve(strict=True)
+    if root_inputs != expected_inputs or root_inputs not in target.parents or not target.is_file():
         raise ValueError("Input escapes cloud-inputs/ or is not a file")
     if target.stat().st_size > MAX_INPUT:
         raise ValueError("Input is larger than the 100 MiB per-run limit")
@@ -111,13 +114,20 @@ def write_report(target, task, output):
     report = {
         "task": task, "input": str(target.name), "bytes": target.stat().st_size,
         "sha256": sha256_file(target), "platform": platform.platform(),
-        "architecture": platform.machine(), "realExecution": True,
-        "githubRun": os.getenv("GITHUB_RUN_ID"),
+        "architecture": platform.machine(), "analysisAttempted": True,
+        "analysisSucceeded": False, "githubRun": os.getenv("GITHUB_RUN_ID"),
     }
     Path(output).mkdir(parents=True, exist_ok=True)
     (Path(output) / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf8"
     )
+
+
+def mark_complete(output):
+    file = Path(output) / "report.json"
+    data = json.loads(file.read_text(encoding="utf8"))
+    data["analysisSucceeded"] = True
+    file.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf8")
 
 
 def analyze(task, target, output):
@@ -140,6 +150,7 @@ def analyze(task, target, output):
         (output / "strings.txt").write_bytes(
             b"\n".join(printable[:2000])[:256 * 1024] + b"\n"
         )
+        mark_complete(output)
         return
     with tempfile.TemporaryDirectory(prefix="dsh-cloud-tool-") as temp:
         tempdir = Path(temp)
@@ -167,6 +178,7 @@ def analyze(task, target, output):
                         "-import", str(target),
                         "-analysisTimeoutPerFile", "420",
                         "-deleteProject"], output / "execution.log", timeout=750)
+    mark_complete(output)
 
 
 def main():
