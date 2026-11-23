@@ -18,7 +18,7 @@ def _under(path, root):
     return bool(root) and (path == root or path.startswith(root + "/"))
 
 
-def _selected(args, prefix, home, env):
+def _selected(args, prefix, home, env, cwd=None):
     if isinstance(args, (str, bytes, os.PathLike)):
         try:
             command = os.fsdecode(args)
@@ -41,33 +41,44 @@ def _selected(args, prefix, home, env):
     if command in ("/usr/bin/python", "/usr/bin/python3"):
         target = prefix + "/bin/python3"
     elif "/" not in command:
-        # Resolve from the child environment, not parent global PATH. This
-        # catches pip build-isolation scripts living under HOME as well.
+        # Resolve from the child environment, not parent global PATH. Build
+        # isolation often strips app-private directories from PATH entirely.
         path = shutil.which(command, path=env.get("PATH") or os.environ.get("PATH", ""))
+        if path is None and command in {
+            "python", "python3", "pip", "pip3", "clang", "clang++",
+            "cc", "c++", "gcc", "g++", "make", "cmake", "ninja",
+            "ld.lld", "pkg-config", "ar", "ranlib", "git",
+        }:
+            path = prefix + "/bin/" + command
         if path is None:
             return None
         target = os.path.abspath(path)
+    elif os.path.isabs(command):
+        target = command
     else:
-        target = os.path.abspath(command)
+        target = os.path.abspath(os.path.join(os.fspath(cwd or os.getcwd()), command))
 
     # Do not reinterpret system or unrelated app executables. App-private
     # ELF and #! scripts go to Android's trusted system-shell bridge.
     files = os.path.dirname(prefix.rstrip("/"))
-    if not (_under(target, prefix) or _under(target, home)
-            or _under(target, files + "/tmp")):
+    real = os.path.realpath(target)
+    prefix_real = os.path.realpath(prefix)
+    home_real = os.path.realpath(home)
+    if not (_under(real, prefix_real) or _under(real, home_real)
+            or _under(real, os.path.realpath(files + "/tmp"))):
         return None
     if not os.path.isfile(target):
         return None
     return [target, *argv[1:]]
 
 
-def bridge_argv(args, *, prefix, home=None, env=None, shell="/system/bin/sh",
-                bridge=None):
+def bridge_argv(args, *, prefix, home=None, env=None, cwd=None,
+                shell="/system/bin/sh", bridge=None):
     """Return a new argv for a private child command, otherwise None."""
     prefix = os.path.normpath(os.fspath(prefix))
     home = os.path.normpath(os.fspath(home)) if home else os.path.dirname(prefix) + "/home"
     environment = env if env is not None else os.environ
-    selected = _selected(args, prefix, home, environment)
+    selected = _selected(args, prefix, home, environment, cwd=cwd)
     if selected is None:
         return None
     script = bridge or prefix + "/libexec/dsh-mobile/android-exec.sh"
@@ -106,7 +117,8 @@ def install(*, prefix=None, shell="/system/bin/sh", bridge=None, force=False):
             environment = kwargs.get("env") or os.environ
             routed = bridge_argv(
                 args, prefix=base, home=environment.get("HOME") or os.environ.get("HOME"),
-                env=environment, shell=shell, bridge=bridge_script)
+                env=environment, cwd=kwargs.get("cwd"),
+                shell=shell, bridge=bridge_script)
             if routed is not None:
                 # A PEP517 backend can replace its entire environment; keep
                 # just the minimum Android bridge variables for the new child.
