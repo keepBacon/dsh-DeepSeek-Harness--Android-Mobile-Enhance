@@ -37,7 +37,7 @@ class AndroidPythonNoexec(unittest.TestCase):
         for name in ("python3", "clang", "clang++"):
             (self.bin / name).write_text("ANDROID_NOEXEC_ELF", encoding="utf8")
         self.env = {
-            "HOME": str(self.home), "PATH": "/usr/bin:/bin",
+            "HOME": str(self.home), "PATH": "/system/bin:/system/xbin",
             "DSH_ANDROID_STANDALONE": "1", "TERMUX__PREFIX": str(self.prefix),
         }
 
