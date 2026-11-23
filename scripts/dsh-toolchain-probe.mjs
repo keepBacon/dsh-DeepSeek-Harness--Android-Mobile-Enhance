@@ -67,3 +67,45 @@ export async function probeToolchain({extended=false,timeoutMs=4000,env=process.
     note:'Only an exitCode=0 from the actual child process counts as runnable. '+ 
       'A mounted file, executable bit or command -v is not proof of Android ELF compatibility.'}
 }
+
+
+// Probe the exact broken pip/PEP517 pattern: Python invoking sys.executable
+// via subprocess.Popen. Does not install packages, use network, or compile.
+export async function probePythonBuildChild({
+  timeoutMs=6000, env=process.env, run=devRun
+}={}) {
+  const prefix=env.TERMUX__PREFIX||env.PREFIX||''
+  if (!/^\/data\/(?:data|user\/\d+)\/[^/]+\/files\/usr\/?$/.test(prefix) ||
+      env.DSH_ANDROID_STANDALONE!=='1')
+    return {supported:false,reason:'not-android-dsh-app-uid'}
+  const test=String.raw`import subprocess, sys, json
+child=subprocess.run([sys.executable,'-c','print("DSH_PIP_CHILD_OK")'],
+    text=True,capture_output=True,timeout=4)
+print(json.dumps({"python":sys.version.split()[0],
+  "childReturncode":child.returncode,
+  "childOk":child.returncode==0 and child.stdout.strip()=="DSH_PIP_CHILD_OK",
+  "dshAdapter":bool(getattr(subprocess.Popen,"_dsh_android_wx_bridge",False)),
+  "stderr":child.stderr[:800]}))
+`;
+  try {
+    const reply=await run('python3',['-c',test],{
+      env,timeoutMs:Math.max(2000,Math.min(10000,timeoutMs)),
+      maxOutputBytes:4096})
+    const clean=String(reply.stdout||'').trim()
+    let detail=null
+    try { detail=JSON.parse(clean.split(/\r?\n/).at(-1)) } catch {}
+    return {
+      supported:true,runnable:reply.exitCode===0&&!reply.timedOut&&!reply.cancelled,
+      nestedChildOk:detail?.childOk===true,
+      adapterLoaded:detail?.dshAdapter===true,
+      exitCode:reply.exitCode??null,timedOut:!!reply.timedOut,
+      ...(detail?{python:detail.python,childReturncode:detail.childReturncode,
+        childStderr:String(detail.stderr||'').slice(0,800)}:
+        {reason:String(reply.stderr||reply.stdout||'probe-failed').slice(0,800)}),
+      note:'Checks real sys.executable subprocess under Android app UID; does not prove C-extension compilation.'
+    }
+  }catch(error){
+    return {supported:true,runnable:false,nestedChildOk:false,
+      reason:String(error?.code||error?.message||'spawn-failed').slice(0,800)}
+  }
+}
