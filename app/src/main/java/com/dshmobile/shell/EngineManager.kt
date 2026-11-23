@@ -2241,6 +2241,9 @@ class EngineManager(private val context: Context, private val pickToken: String?
       // while fs-sandbox remains the workspace write-containment authority.
       "DSH_ANDROID_SANDBOX_RUNNER" to File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh").absolutePath,
       "DSH_ANDROID_EXEC_BRIDGE" to File(usrDir, "libexec/dsh-mobile/android-exec.sh").absolutePath,
+      // Non-interactive Bash invocations must load the W^X-safe shell command
+      // dispatcher. PATH itself cannot make app-data ELF executable.
+      "BASH_ENV" to File(usrDir, "libexec/dsh-mobile/android-bash-env.sh").absolutePath,
       "DSH_ANDROID_TERMUX_RUN" to File(usrDir, "libexec/dsh/termux-run").absolutePath,
       "DSH_PICK_TOKEN" to (pickToken ?: ""),
       // DSH's in-Web plugin manager launches pnpm as a child of this Host.
