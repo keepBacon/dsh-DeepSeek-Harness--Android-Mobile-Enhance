@@ -43,6 +43,12 @@ def _selected(args, prefix, home, env, cwd=None):
         "/usr/bin/cc": "clang", "/usr/bin/gcc": "clang",
         "/usr/bin/c++": "clang++", "/usr/bin/g++": "clang++",
         "/usr/bin/clang": "clang", "/usr/bin/clang++": "clang++",
+        # Termux sysconfig may preserve the original com.termux compile prefix
+        # after its Python executable has been relocated into the DSH APK.
+        "/data/data/com.termux/files/usr/bin/python": "python3",
+        "/data/data/com.termux/files/usr/bin/python3": "python3",
+        "/data/data/com.termux/files/usr/bin/clang": "clang",
+        "/data/data/com.termux/files/usr/bin/clang++": "clang++",
     }
     if command in legacy:
         target = prefix + "/bin/" + legacy[command]
