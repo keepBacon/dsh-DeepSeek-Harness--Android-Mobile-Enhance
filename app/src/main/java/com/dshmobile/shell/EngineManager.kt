@@ -3809,6 +3809,7 @@ class EngineManager(private val context: Context, private val pickToken: String?
       File(usrDir, "bin/bash") to "usr/bin/bash",
       File(usrDir, "libexec/dsh-mobile/android-sandbox-runner.sh") to "usr/libexec/dsh-mobile/android-sandbox-runner.sh",
       File(usrDir, "libexec/dsh-mobile/android-exec.sh") to "usr/libexec/dsh-mobile/android-exec.sh",
+      File(usrDir, "libexec/dsh-mobile/dsh-android-python-subprocess.py") to "usr/libexec/dsh-mobile/dsh-android-python-subprocess.py",
       File(usrDir, "libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs") to "usr/libexec/dsh-mobile/dsh-android-plugin-git-spawn.cjs",
       File(usrDir, "libexec/dsh-mobile/toolbox-mcp.mjs") to "usr/libexec/dsh-mobile/toolbox-mcp.mjs",
       File(usrDir, "libexec/dsh-mobile/dsh-inspector-tools.mjs") to "usr/libexec/dsh-mobile/dsh-inspector-tools.mjs",
